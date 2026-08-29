@@ -1,6 +1,6 @@
 \# Project Memory: Rogue-like Dungeon Crawler (Co-op 1-4)
 
-
+\- Always follow architectural guidelines defined in architecture.md.
 
 \## Tech Stack
 
