@@ -5,7 +5,6 @@
 #include "InteractionComponent.generated.h"
 
 class UPhysicsHandleComponent;
-class IInteractableInterface;
 
 /**
  * Serwis domenowy odpowiedzialny za wykrywanie, chwytanie i rzucanie obiektów fizycznych.
@@ -29,7 +28,7 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    /** Maksymalny dystans interakcji w jednostkach silnika (cm) */
+    /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
     float TraceDistance = 300.0f;
 
@@ -37,7 +36,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
     float MaxCarryMass = 35.0f;
 
-    /** Odległość przed kamerą, w której zawieszony jest trzymany obiekt */
+    /** Odległość przed postacią w osi kamery, w której zawieszony jest trzymany obiekt */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
     float HoldDistance = 180.0f;
 
@@ -59,6 +58,7 @@ private:
     TObjectPtr<UPrimitiveComponent> GrabbedComponent;
 
     // --- Metody pomocnicze ---
+    void GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const;
     bool PerformTrace(FHitResult& OutHit) const;
     void GrabProp(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
     void ReleaseProp();

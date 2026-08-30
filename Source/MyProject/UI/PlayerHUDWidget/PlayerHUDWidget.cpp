@@ -1,24 +1,30 @@
-﻿#include "PlayerHUDWidget.h"
-#include "../StatBarWidget.h"
-#include "../../Components/Health/UHealthComponent.h"
+﻿
 
-void UPlayerHUDWidget::BindHealthComponent(UHealthComponent* InHealthComponent)
+#include "PlayerHUDWidget.h"
+
+void UPlayerHUDWidget::BindHealthComponent(UDamageableComponent* InDamageableComponent)
 {
-	if (!InHealthComponent) return;
+	if (!InDamageableComponent) return;
 
-	BoundHealthComponent = InHealthComponent;
+	// Odpięcie starego nasłuchu w przypadku ponownego bindowania
+	if (BoundDamageableComponent.IsValid())
+	{
+		BoundDamageableComponent->OnHealthChanged.RemoveAll(this);
+	}
 
-	// Subskrypcja na strumień zdarzeń z serwisu zdrowia
-	InHealthComponent->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::HandleHealthChanged);
+	BoundDamageableComponent = InDamageableComponent;
 
-	// Synchronizacja stanu początkowego (Initial State Hydration)
-	HandleHealthChanged(InHealthComponent->GetCurrentValue());
+	// Subskrypcja na strumień zdarzeń (Spring ApplicationEvent Listener)
+	InDamageableComponent->OnHealthChanged.AddDynamic(this, &UPlayerHUDWidget::HandleHealthChanged);
+
+	// Initial State Hydration: pobieramy stan początkowy przez kontrakt
+	HandleHealthChanged(InDamageableComponent->GetCurrentValue());
 }
 
 void UPlayerHUDWidget::HandleHealthChanged(float NewHealth)
 {
-	if (HealthBar && BoundHealthComponent.IsValid())
+	if (HealthBar && BoundDamageableComponent.IsValid())
 	{
-		HealthBar->UpdateRatio(NewHealth, BoundHealthComponent->GetMaxValue());
+		HealthBar->UpdateRatio(NewHealth, BoundDamageableComponent->GetMaxValue());
 	}
 }
