@@ -6,6 +6,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Blueprint/UserWidget.h"
+#include "MyProject/MyProject.h"
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
 #include "MyProject/Interaction/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
@@ -13,42 +14,25 @@
 
 APlayerCharacter::APlayerCharacter()
 {
-    // 1. Główna bryła fizyczna (Root) - Całkowita wysokość 180 cm (HalfHeight = 90 cm)
     CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CollisionCylinder"));
     RootComponent = CapsuleComponent;
     CapsuleComponent->InitCapsuleSize(35.0f, 90.0f);
-    CapsuleComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+    
+    CapsuleComponent->SetCollisionObjectType(ECC_Pawn);
     CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
     CapsuleComponent->SetCollisionResponseToAllChannels(ECR_Block);
     CapsuleComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
     CapsuleComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
-    CapsuleComponent->SetSimulatePhysics(true);
-    CapsuleComponent->SetNotifyRigidBodyCollision(true);
-    CapsuleComponent->SetUseCCD(true);
-    CapsuleComponent->SetMassOverrideInKg(NAME_None, 80.0f, true);
-    
-    // Wizualizacja bryły w celach prototypowania
-    CapsuleComponent->SetHiddenInGame(false);
-    CapsuleComponent->SetVisibility(true);
+    CapsuleComponent->SetSimulatePhysics(false);
+    CapsuleComponent->SetNotifyRigidBodyCollision(false);
 
-    // Naturalny opór powietrza (Z grawitacji nie jest tłumione) i blokada przechyłów
-    CapsuleComponent->SetLinearDamping(0.01f);
-    CapsuleComponent->SetAngularDamping(100.0f);
-    CapsuleComponent->BodyInstance.bLockXRotation = true;
-    CapsuleComponent->BodyInstance.bLockYRotation = true;
-    CapsuleComponent->BodyInstance.bLockZRotation = true;
-
-    // 2. Siatka szkieletowa postaci (Ukryta podczas prototypowania bryły)
     MeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MeshComponent"));
     MeshComponent->SetupAttachment(CapsuleComponent);
     MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -90.0f));
     MeshComponent->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
     MeshComponent->SetCollisionProfileName(TEXT("NoCollision"));
     MeshComponent->SetGenerateOverlapEvents(false);
-    MeshComponent->SetHiddenInGame(true);
-    MeshComponent->SetVisibility(false);
 
-    // 3. System kamery TPP/FPP - punkt zaczepienia na poziomie oczu/głowy (+65 cm od środka)
     SpringArmComponent = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
     SpringArmComponent->SetupAttachment(CapsuleComponent);
     SpringArmComponent->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeightOffset));
@@ -60,7 +44,6 @@ APlayerCharacter::APlayerCharacter()
     CameraComponent->SetupAttachment(SpringArmComponent, USpringArmComponent::SocketName);
     CameraComponent->bUsePawnControlRotation = false;
 
-    // 4. Komponenty domenowe
     PhysicsHandleComponent = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandleComponent"));
     PhysicsHandleComponent->LinearDamping = 200.0f;
     PhysicsHandleComponent->LinearStiffness = 1500.0f;
@@ -72,9 +55,8 @@ APlayerCharacter::APlayerCharacter()
     InteractionComponent = CreateDefaultSubobject<UInteractionComponent>(TEXT("InteractionComponent"));
     DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
 
-    // Optymalizacja CPU: wyłączony stały Tick (100% Event-Driven)
     PrimaryActorTick.bCanEverTick = true;
-    SetActorTickEnabled(false);
+    PrimaryActorTick.bStartWithTickEnabled = false;
     bIsZooming = false;
 }
 
@@ -84,41 +66,20 @@ void APlayerCharacter::BeginPlay()
 
     if (CapsuleComponent)
     {
-        // Wymuszenie rozmiaru 180 cm, pełnej fizyki i zerowego tłumienia grawitacji
         CapsuleComponent->SetCapsuleSize(35.0f, 90.0f);
-        CapsuleComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+        CapsuleComponent->SetCollisionObjectType(ECC_Pawn);
         CapsuleComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
         CapsuleComponent->SetCollisionResponseToAllChannels(ECR_Block);
         CapsuleComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
         CapsuleComponent->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
-        CapsuleComponent->SetSimulatePhysics(true);
-        CapsuleComponent->SetHiddenInGame(false);
-        CapsuleComponent->SetVisibility(true);
-        CapsuleComponent->SetLinearDamping(0.01f);
-        CapsuleComponent->SetAngularDamping(100.0f);
-        CapsuleComponent->BodyInstance.bLockXRotation = true;
-        CapsuleComponent->BodyInstance.bLockYRotation = true;
-        CapsuleComponent->BodyInstance.bLockZRotation = true;
-        CapsuleComponent->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-        CapsuleComponent->RecreatePhysicsState();
-        CapsuleComponent->OnComponentHit.AddDynamic(this, &APlayerCharacter::HandleCapsuleHit);
-        CapsuleComponent->WakeRigidBody();
+        CapsuleComponent->SetSimulatePhysics(false);
     }
 
     if (SpringArmComponent)
     {
-        // Ustawienie punktu zaczepienia ramienia kamery na wysokości oczu postaci
         SpringArmComponent->SetRelativeLocation(FVector(0.0f, 0.0f, BaseEyeHeightOffset));
     }
 
-    if (MeshComponent)
-    {
-        // Ukrycie siatki zastępczej na rzecz widocznej bryły kolizyjnej
-        MeshComponent->SetHiddenInGame(true);
-        MeshComponent->SetVisibility(false);
-    }
-
-    // Inicjalizacja kontekstu Enhanced Input
     if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
     {
         if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
@@ -126,7 +87,6 @@ void APlayerCharacter::BeginPlay()
             Subsystem->AddMappingContext(DefaultMappingContext, 0);
         }
 
-        // Inicjalizacja interfejsu HUD
         if (HUDWidgetClass && PlayerController->IsLocalController())
         {
             ActiveHUDWidget = CreateWidget<UPlayerHUDWidget>(PlayerController, HUDWidgetClass);
@@ -137,6 +97,10 @@ void APlayerCharacter::BeginPlay()
             }
         }
     }
+
+    FHitResult InitialGroundHit;
+    PerformGroundCheck(InitialGroundHit);
+    UpdateTickState();
 }
 
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -179,17 +143,263 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     }
 }
 
-void APlayerCharacter::Move(const FInputActionValue& Value)
+void APlayerCharacter::UpdateTickState()
 {
-    // Blokada napędu w locie – zachowanie czystej bezwładności i pędu fizycznego
-    if (!IsGrounded())
+    const bool bNeedsMovementTick = bMovementInputActive 
+        || !bIsGrounded 
+        || !CurrentVelocity.IsNearlyZero(1.0f) 
+        || bIsKnockedBack 
+        || CurrentBaseComponent.IsValid();
+
+    const bool bNeedsTick = bNeedsMovementTick || bIsZooming;
+
+    if (IsActorTickEnabled() != bNeedsTick)
+    {
+        SetActorTickEnabled(bNeedsTick);
+    }
+}
+
+void APlayerCharacter::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    if (bIsZooming && SpringArmComponent)
+    {
+        const float CurrentLength = SpringArmComponent->TargetArmLength;
+        if (!FMath::IsNearlyEqual(CurrentLength, TargetArmLength, 0.1f))
+        {
+            SpringArmComponent->TargetArmLength = FMath::FInterpTo(CurrentLength, TargetArmLength, DeltaTime, 15.0f);
+        }
+        else
+        {
+            SpringArmComponent->TargetArmLength = TargetArmLength;
+            bIsZooming = false;
+        }
+    }
+
+    UpdateBaseTracking(DeltaTime);
+    PerformMovement(DeltaTime);
+    UpdateTickState();
+}
+
+bool APlayerCharacter::PerformGroundCheck(FHitResult& OutHitResult)
+{
+    if (!CapsuleComponent || !GetWorld())
+    {
+        bIsGrounded = false;
+        return false;
+    }
+
+    const float Radius = CapsuleComponent->GetScaledCapsuleRadius();
+    const float HalfHeight = CapsuleComponent->GetScaledCapsuleHalfHeight();
+    const FVector Start = CapsuleComponent->GetComponentLocation();
+    const FVector End = Start - FVector(0.0f, 0.0f, GroundCheckDistance + 5.0f);
+
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    // Kapsułowy sweep o pełnych wymiarach kapsuły w dół
+    const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+    const bool bHit = GetWorld()->SweepSingleByChannel(
+        OutHitResult,
+        Start,
+        End,
+        FQuat::Identity,
+        ECC_Visibility,
+        CapsuleShape,
+        QueryParams
+    );
+
+    bIsGrounded = bHit && OutHitResult.bBlockingHit && (OutHitResult.ImpactNormal.Z >= WalkableFloorZ);
+    return bIsGrounded;
+}
+
+void APlayerCharacter::UpdateBaseTracking(float DeltaTime)
+{
+    FHitResult GroundHit;
+    const bool bGrounded = PerformGroundCheck(GroundHit);
+
+    if (bGrounded && GroundHit.GetComponent())
+    {
+        UPrimitiveComponent* BaseComp = GroundHit.GetComponent();
+        if (BaseComp && BaseComp->Mobility == EComponentMobility::Movable)
+        {
+            if (CurrentBaseComponent == BaseComp)
+            {
+                const FVector DeltaLocation = BaseComp->GetComponentLocation() - PreviousBaseLocation;
+                const FRotator DeltaRotation = BaseComp->GetComponentRotation() - PreviousBaseRotation;
+
+                if (!DeltaLocation.IsNearlyZero())
+                {
+                    FHitResult PlatformMoveHit;
+                    AddActorWorldOffset(DeltaLocation, true, &PlatformMoveHit);
+                }
+
+                if (!FMath::IsNearlyZero(DeltaRotation.Yaw))
+                {
+                    AddActorWorldRotation(FRotator(0.0f, DeltaRotation.Yaw, 0.0f));
+                }
+            }
+
+            CurrentBaseComponent = BaseComp;
+            PreviousBaseLocation = BaseComp->GetComponentLocation();
+            PreviousBaseRotation = BaseComp->GetComponentRotation();
+            return;
+        }
+    }
+
+    CurrentBaseComponent = nullptr;
+}
+
+void APlayerCharacter::HandlePropSweepHit(const FHitResult& Hit, float DeltaTime)
+{
+    UPrimitiveComponent* HitComp = Hit.GetComponent();
+    if (!HitComp || !HitComp->IsSimulatingPhysics())
     {
         return;
     }
 
+    // Nie popychamy obiektu wyłącznie wtedy, gdy stabilnie stoimy na nim obiema stopami
+    if (CurrentBaseComponent.IsValid() && CurrentBaseComponent.Get() == HitComp && bIsGrounded)
+    {
+        return;
+    }
+
+    const float PropMass = HitComp->GetMass();
+    if (PropMass <= PushablePropMassThreshold)
+    {
+        FVector PushDir = -Hit.ImpactNormal;
+        PushDir.Z = 0.0f;
+        PushDir = PushDir.GetSafeNormal();
+
+        if (PushDir.IsNearlyZero())
+        {
+            PushDir = DesiredMoveDirection.IsNearlyZero() ? CapsuleComponent->GetForwardVector() : DesiredMoveDirection;
+        }
+
+        const float MassRatio = FMath::Clamp(PropMass / PushablePropMassThreshold, 0.1f, 1.0f);
+        const float PushMultiplier = FMath::Lerp(2.2f, 0.8f, MassRatio);
+        const float PushImpulse = BasePushImpulse * PushMultiplier * (DeltaTime * 60.0f);
+
+        HitComp->WakeRigidBody();
+        HitComp->AddImpulse(PushDir * PushImpulse);
+    }
+}
+
+void APlayerCharacter::PerformMovement(float DeltaTime)
+{
+    // 1. Sprawdzenie stanu podłoża przed ruchem
+    FHitResult GroundHit;
+    PerformGroundCheck(GroundHit);
+
+    // 2. Sterowanie prędkością (WASD na ziemi, balistyczna parabola w powietrzu)
+    if (bIsGrounded)
+    {
+        const FVector TargetVelocity2D = DesiredMoveDirection * MaxWalkSpeed;
+        const float InterpSpeed = bMovementInputActive ? AccelerationResponsiveness : DecelerationResponsiveness;
+
+        CurrentVelocity.X = FMath::FInterpTo(CurrentVelocity.X, TargetVelocity2D.X, DeltaTime, InterpSpeed);
+        CurrentVelocity.Y = FMath::FInterpTo(CurrentVelocity.Y, TargetVelocity2D.Y, DeltaTime, InterpSpeed);
+
+        if (!bMovementInputActive && CurrentVelocity.SizeSquared2D() < 4.0f)
+        {
+            CurrentVelocity.X = 0.0f;
+            CurrentVelocity.Y = 0.0f;
+        }
+
+        if (CurrentVelocity.Z <= 0.0f)
+        {
+            CurrentVelocity.Z = 0.0f;
+        }
+    }
+    else
+    {
+        const float GravityZ = GetWorld()->GetDefaultGravityZ() * GravityScale;
+        CurrentVelocity.Z += GravityZ * DeltaTime;
+        CurrentVelocity.Z = FMath::Clamp(CurrentVelocity.Z, -4000.0f, 2000.0f);
+    }
+
+    // 3. Wytłumianie odrzutu (Knockback)
+    if (bIsKnockedBack)
+    {
+        KnockbackVelocity = FMath::VInterpTo(KnockbackVelocity, FVector::ZeroVector, DeltaTime, KnockbackDamping);
+        if (KnockbackVelocity.SizeSquared() < 25.0f)
+        {
+            KnockbackVelocity = FVector::ZeroVector;
+            bIsKnockedBack = false;
+        }
+    }
+
+    const FVector TotalVelocity = CurrentVelocity + KnockbackVelocity;
+    FVector RemainingDelta = TotalVelocity * DeltaTime;
+
+    if (RemainingDelta.IsNearlyZero())
+    {
+        return;
+    }
+
+    // 4. Czysty, standardowy ślizg kinematyczny (Flat Iterative Slide)
+    for (int32 Iteration = 0; Iteration < 3 && !RemainingDelta.IsNearlyZero(); ++Iteration)
+    {
+        FHitResult Hit;
+        AddActorWorldOffset(RemainingDelta, true, &Hit);
+
+        if (!Hit.bBlockingHit)
+        {
+            break;
+        }
+
+        HandlePropSweepHit(Hit, DeltaTime);
+
+        // Obrażenia kinetyczne przy knockbacku
+        if (bIsKnockedBack && Hit.ImpactNormal.Z < WalkableFloorZ)
+        {
+            const float ImpactSpeed = FMath::Abs(FVector::DotProduct(TotalVelocity, Hit.ImpactNormal));
+            if (ImpactSpeed > KnockbackDamageImpactThreshold && DamageableComponent)
+            {
+                DamageableComponent->ApplyKineticImpact(ImpactSpeed);
+            }
+        }
+
+        // Uderzenie w sufit
+        if (Hit.ImpactNormal.Z <= -0.5f && CurrentVelocity.Z > 0.0f)
+        {
+            CurrentVelocity.Z = 0.0f;
+        }
+
+        // Ślizg po powierzchni geometrycznej
+        const float AppliedFraction = Hit.Time;
+        RemainingDelta = RemainingDelta * (1.0f - AppliedFraction);
+        RemainingDelta = FVector::VectorPlaneProject(RemainingDelta, Hit.ImpactNormal);
+
+        if (bIsGrounded || CurrentVelocity.Z <= 0.0f)
+        {
+            const float VelocityIntoSurface = FVector::DotProduct(CurrentVelocity, Hit.ImpactNormal);
+            if (VelocityIntoSurface < 0.0f)
+            {
+                CurrentVelocity -= Hit.ImpactNormal * VelocityIntoSurface;
+            }
+        }
+    }
+
+    // 5. Finalna weryfikacja podłoża
+    FHitResult FinalGroundHit;
+    PerformGroundCheck(FinalGroundHit);
+}
+
+void APlayerCharacter::ApplyKnockback(const FVector& Impulse)
+{
+    KnockbackVelocity += Impulse;
+    bIsKnockedBack = true;
+    bIsGrounded = false;
+    UpdateTickState();
+}
+
+void APlayerCharacter::Move(const FInputActionValue& Value)
+{
     const FVector2D MovementVector = Value.Get<FVector2D>();
 
-    if (Controller != nullptr && CapsuleComponent != nullptr)
+    if (Controller != nullptr)
     {
         const FRotator Rotation = Controller->GetControlRotation();
         const FRotator YawRotation(0, Rotation.Yaw, 0);
@@ -197,33 +407,17 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
         const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-        const FVector MoveDir = (ForwardDirection * MovementVector.Y + RightDirection * MovementVector.X).GetSafeNormal();
-
-        if (!MoveDir.IsNearlyZero())
-        {
-            // Różnicowy wektor siły przyspieszenia: F = (V_target - V_current) * K
-            const FVector TargetVelocity = MoveDir * MaxWalkSpeed;
-            const FVector CurrentVelocity = CapsuleComponent->GetPhysicsLinearVelocity();
-            const FVector CurrentVelocity2D(CurrentVelocity.X, CurrentVelocity.Y, 0.0f);
-
-            const FVector VelocityError = TargetVelocity - CurrentVelocity2D;
-            const FVector DriveForce = VelocityError * AccelerationResponsiveness;
-
-            CapsuleComponent->AddForce(DriveForce, NAME_None, true);
-        }
+        DesiredMoveDirection = (ForwardDirection * MovementVector.Y + RightDirection * MovementVector.X).GetSafeNormal();
+        bMovementInputActive = !DesiredMoveDirection.IsNearlyZero();
+        UpdateTickState();
     }
 }
 
 void APlayerCharacter::MoveCompleted()
 {
-    if (CapsuleComponent && IsGrounded())
-    {
-        // Natychmiastowe zatrzymanie ruchu poziomego (XY), oś Z i grawitacja pozostają w 100% nietknięte
-        FVector CurrentVelocity = CapsuleComponent->GetPhysicsLinearVelocity();
-        CurrentVelocity.X = 0.0f;
-        CurrentVelocity.Y = 0.0f;
-        CapsuleComponent->SetPhysicsLinearVelocity(CurrentVelocity);
-    }
+    DesiredMoveDirection = FVector::ZeroVector;
+    bMovementInputActive = false;
+    UpdateTickState();
 }
 
 void APlayerCharacter::Look(const FInputActionValue& Value)
@@ -245,71 +439,19 @@ void APlayerCharacter::Zoom(const FInputActionValue& Value)
     if (!bIsZooming)
     {
         bIsZooming = true;
-        SetActorTickEnabled(true);
-    }
-}
-
-void APlayerCharacter::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    const float CurrentLength = SpringArmComponent->TargetArmLength;
-
-    if (!FMath::IsNearlyEqual(CurrentLength, TargetArmLength, 0.1f))
-    {
-        const float NewLength = FMath::FInterpTo(CurrentLength, TargetArmLength, DeltaTime, 15.0f);
-        SpringArmComponent->TargetArmLength = NewLength;
-    }
-    else
-    {
-        SpringArmComponent->TargetArmLength = TargetArmLength;
-        bIsZooming = false;
-        SetActorTickEnabled(false);
+        UpdateTickState();
     }
 }
 
 void APlayerCharacter::Jump()
 {
-    if (CapsuleComponent && IsGrounded())
+    FHitResult GroundHit;
+    if (bIsGrounded || PerformGroundCheck(GroundHit))
     {
-        // Skok impulsowy w osi Z
-        FVector Vel = CapsuleComponent->GetPhysicsLinearVelocity();
-        Vel.Z = 0.0f;
-        CapsuleComponent->SetPhysicsLinearVelocity(Vel);
-
-        CapsuleComponent->AddImpulse(FVector(0.0f, 0.0f, JumpImpulseVelocity), NAME_None, true);
+        CurrentVelocity.Z = JumpImpulseVelocity;
+        bIsGrounded = false;
+        UpdateTickState();
     }
-}
-
-bool APlayerCharacter::IsGrounded() const
-{
-    if (!CapsuleComponent || !GetWorld()) return false;
-
-    const float Radius = CapsuleComponent->GetScaledCapsuleRadius();
-    const float HalfHeight = CapsuleComponent->GetScaledCapsuleHalfHeight();
-
-    // Start na środku dolnej półkuli kapsuły
-    const FVector Start = CapsuleComponent->GetComponentLocation() - FVector(0.0f, 0.0f, HalfHeight - Radius);
-    const FVector End = Start - FVector(0.0f, 0.0f, GroundCheckDistance + 5.0f);
-
-    FCollisionQueryParams QueryParams;
-    QueryParams.AddIgnoredActor(this);
-
-    FHitResult HitResult;
-    // Kulisty Sweep (Sphere Sweep) obejmujący pełny spód kapsuły
-    const FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius * 0.9f);
-    const bool bHit = GetWorld()->SweepSingleByChannel(
-        HitResult,
-        Start,
-        End,
-        FQuat::Identity,
-        ECC_Visibility,
-        SphereShape,
-        QueryParams
-    );
-
-    // Warunek: obiekt blokujący oraz normalna podłoża skierowana ku górze (Z > 0.5)
-    return bHit && HitResult.bBlockingHit && (HitResult.ImpactNormal.Z > 0.5f);
 }
 
 void APlayerCharacter::HandleInteract()
@@ -325,32 +467,5 @@ void APlayerCharacter::HandleThrow()
     if (InteractionComponent)
     {
         InteractionComponent->ThrowCurrentProp();
-    }
-}
-
-void APlayerCharacter::HandleCapsuleHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
-                                       UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
-                                       const FHitResult& Hit)
-{
-    if (!OtherActor || OtherActor == this || !CapsuleComponent) return;
-
-    const FVector PlayerVelocity = CapsuleComponent->GetPhysicsLinearVelocity();
-    FVector OtherVelocity = FVector::ZeroVector;
-
-    if (OtherComp && OtherComp->IsSimulatingPhysics())
-    {
-        OtherVelocity = OtherComp->GetPhysicsLinearVelocity();
-    }
-    else if (OtherActor)
-    {
-        OtherVelocity = OtherActor->GetVelocity();
-    }
-
-    const FVector RelativeVelocity = PlayerVelocity - OtherVelocity;
-    const float ImpactSpeed = FMath::Abs(FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal));
-
-    if (DamageableComponent)
-    {
-        DamageableComponent->ApplyKineticImpact(ImpactSpeed);
     }
 }

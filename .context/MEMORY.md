@@ -1,70 +1,51 @@
-# Project Memory: Rogue-like Dungeon Crawler (Co-op 1-4)
+# Plan architektoniczny & Stan Projektu: Kinematyczny Character Controller + Fizyczne Propy (Dungeon Crawler 4-player co-op)
 
-- Always follow architectural guidelines defined in `ARCHITECTURE.md`.
+## 1. Kontekst projektu
 
-## Tech Stack
-- Unreal Engine 5.x C++ (Chaos Physics, Enhanced Input, UMG, Server-Authoritative Networking)
-- JetBrains Rider
-- Pure Component-Based Architecture (Spring/Java Enterprise Style)
-
----
-
-## Zaimplementowane Moduły i Komponenty
-
-### 1. Gracz Fizyczny (`APlayerCharacter : public APawn`)
-- **Architektura Ciała Sztywnego (Rigid Body Chaos Pawn):**
-  - Pełna symulacja Chaos Physics na roocie (`CapsuleComponent->SetSimulatePhysics(true)`, `Mass = 80.0 kg`, `bUseCCD = true`).
-  - Wymiary kapsuły: całkowity wzrost **180 cm** (`CapsuleHalfHeight = 90.0 cm`, `CapsuleRadius = 35.0 cm`).
-  - Trwała blokada osi rotacji (`bLockXRotation = true`, `bLockYRotation = true`, `bLockZRotation = true` oraz `AngularDamping = 100.0f` + `RecreatePhysicsState()`) – postać zawsze stabilnie trzyma pion.
-  - **Naturalna grawitacja ($Z$):** Minimalny damping liniowy (`LinearDamping = 0.01f`), co zapewnia pełne, ciężkie i naturalne przyspieszenie grawitacyjne ($9.8\text{ m/s}^2$) przy starcie gry, skokach i spadaniu.
-- **Sterowanie Event-Driven (Zero stałego Tick CPU):**
-  - **Wektorowy napęd różnicowy prędkości (Velocity Drive):** `Move()` wyliczający wektor siły przyspieszenia na podstawie błędu prędkości: $F = (V_{\text{target}} - V_{\text{current}}) \cdot \text{Responsiveness}$.
-  - **Dedykowane hamowanie poziome:** `MoveCompleted()` zeruje wyłącznie prędkość w płaszczyźnie $XY$ przy puszczeniu klawiszy, nie wpływając na prędkość spadania w osi $Z$.
-  - **Blokada napędu w powietrzu:** W locie (`!IsGrounded()`) sterowanie WASD jest wyłączone – trajektoria lotu jest w 100% fizyczną parabolą balistyczną z zachowaniem pędu.
-  - **Wielokierunkowa detekcja podłoża (Sphere Sweep):** `IsGrounded()` wykorzystuje sferyczny sweep 3D (`SweepSingleByChannel` o promieniu podstawy kapsuły), eliminując błąd utraty kontroli na krawędziach platform oraz filtrując pionowe ściany (`ImpactNormal.Z > 0.5f`).
-- **System Kamery (FPP / TPP Orbit):**
-  - Punkt zaczepienia ramienia (`SpringArmComponent`) podniesiony na poziom oczu/głowy (`BaseEyeHeightOffset = 65.0f`).
-  - Leniwy `Tick()` do płynnego zoomu kamery (załączany wyłącznie podczas przewijania kółka myszy i wyłączany zaraz po osiągnięciu docelowej odległości).
-- **Obsługa kinetyki i zderzeń:**
-  - Dynamiczny delegat `HandleCapsuleHit` wyliczający rzeczywistą prędkość względną zderzenia (`ImpactSpeed`) i aplikujący obrażenia kinetyczne do `UDamageableComponent`.
-
-### 2. Wytrzymałość i Obrażenia (`UDamageableComponent`)
-- Reużywalny serwis domenowy HP/Durability (`bCanEverTick = false`).
-- Implementacja kontraktu `IStatProviderInterface` (dla pasków HUD).
-- Ujednolicony algorytm kinetyczny `ApplyKineticImpact(float ImpactSpeed)` oparty na prędkości zderzenia ($v > \text{Threshold}$).
-- Zdarzenia domenowe (Spring Events): `OnHealthChanged`, `OnDurabilityChanged`, `OnDestroyed`.
-
-### 3. Interakcja i Rekwizyty Fizyczne
-- `UInteractionComponent`: Raycasting w oparciu o kamerę (`GetPlayerViewPoint` / crosshair), podnoszenie i rzucanie fizycznymi aktorami za pomocą `UPhysicsHandleComponent` z buforem ignorowania kolizji rzucającego gracza (`AActor*`).
-- `IInteractableInterface`: Kontrakt biznesowy (`Interact`, `CanInteract`, `CanGrab`, `OnGrabbed`, `OnDropped`).
-- `AInteractivePropBase`: Baza obiektów fizycznych z dynamicznym obliczaniem prędkości względnej kolizji (`DotProduct(RelativeVelocity, ImpactNormal)`).
-- Zabezpieczenia geometrii Chaos: `bUseCCD = true`, `AngularDamping = 5.0f`, `LinearDamping = 0.8f`.
-
-### 4. Warstwa Prezentacji (UMG / MVC)
-- `UStatBarWidget` (`WBP_StatBar`): Generyczny presenter pojedynczego paska postępu (`StatProgressBar`).
-- `UPlayerHUDWidget` (`WBP_PlayerHUD`): Kompozyt HUD subskrybujący zdarzenia z `UDamageableComponent`.
+- **Silnik:** Unreal Engine 5.8, C++ (`MYPROJECT_API`)
+- **Gatunek:** 4-osobowy kooperacyjny dungeon crawler
+- **Filozofia fizyki:** Zamiast niekontrolowanej pełnej symulacji fizyki ciał sztywnych na postaciach, stosujemy **deterministyczny, kinematyczny model ruchu postaci** z manualnym przekazywaniem sił i impulsów do obiektów otoczenia (propy, zniszczalne elementy, odrzuty, rzuty).
+- **Stan obecny:** Zakończono etap stabilizacji i czyszczenia kinematycznego kontrolera gracza (`APlayerCharacter`) oraz interakcji z propami fizycznymi.
 
 ---
 
-## Znane Problemy i Punkty Uwagi (Active Issues)
+## 2. Zrealizowane Filary Architektoniczne
 
-1. **Globalna Fizyka Chaos:**
-    - Skonfigurowano substepping i limity w `DefaultEngine.ini` (`PhysicsSettings: MaxDepenetrationVelocity=100.0`, `MaxAngularVelocity=360.0`, `Substepping=True`).
+### Filar 1: Kinematyczny Ruch Gracza (`APlayerCharacter`)
+- **Brak symulacji fizyki na kapsule:** `CapsuleComponent->SetSimulatePhysics(false)` – brak niekontrolowanych sił depenetracji Chaosu.
+- **Ruch iteracyjny (Flat Iterative Slide):** 3-iteracyjny płaski algorytm rzutowania wektora prędkości (`VectorPlaneProject`) wzdłuż płaszczyzn kolizji wielościennych/narożników.
+- **On-Demand Tick:** Postać w spoczynku na ziemi wyłącza swój `Tick` (0ms narzutu CPU).
+- **Zintegrowany Odrzut (Unified Knockback System):** `ApplyKnockback(Impulse)` obsługuje podmuchy wiatru, ciosy wroga i rzuty. Wykrywa mocne uderzenia w ściany i aplikuje obrażenia kinetyczne przez `UDamageableComponent`.
+- **Śledzenie ruchomych platform (Base Tracking):** Postać płynnie przemieszcza się i obraca wraz z ruchomą geometrią/windami/platformami pod jej stopami.
+
+### Filar 2: Dynamiczne Pchanie Propów Fizycznych
+- Propy o masie $\le 100\text{ kg}$ otrzymują liniowy impuls w środek masy przy kontakcie z kapsułą w ruchu.
+- Siła pchania skaluje się w zależności od masy propa (płynna różnica w trudności pchania między 20 kg a 100 kg).
+- **Zabezpieczenie przed pętlą perpetuum mobile:** Zablokowano pchanie obiektu, na którym postać w danej chwili stabilnie stoi obiema stopami.
+
+### Filar 3: Geometria i Kolizja Propów (Chaos Physics)
+- Propy (`SM_Prop_Cube`) posiadają sfazowane krawędzie (Bevel 10 cm).
+- Kolizja propów wykorzystuje **`NDOP26` (26-sided chamfered collision)** w trybie `CTF_USE_DEFAULT`, co zapewnia gładkie zsuwanie się kapsuły po narożnikach przy zachowaniu pełnej symulacji fizyki ciał sztywnych w Chaosie.
 
 ---
 
-## Backlog / Kolejne Kroki
+## 3. Kolejne Kroki i Priorytety
 
-- [ ] Test fizycznego ruchu gracza, skakania i interakcji z propami o małej i dużej masie.
-- [ ] Implementacja stanów żywiołowych (`UElementalStateComponent` – Wet, Flammable, Burning, Conductive).
-- [ ] Sieciowa replikacja chwytania i rzucania propami (`ServerRpc_Grab`, `ServerRpc_Throw`).
-- [ ] Efekty zniszczenia obiektów (spawnowanie szczątków / Geometry Collection / Chaos Destruction).
+```mermaid
+graph TD
+    A[Kinematyczny PlayerCharacter - GOTOWE] --> B[Ekstrakcja ACombatCharacterBase]
+    B --> C[Implementacja ICarryableInterface dla postaci]
+    B --> D[Stworzenie bazy wrogów AOgreCharacter]
+    C --> E[Chwytanie i rzucanie wrogami/graczami]
+    D --> E
+    E --> F[Networking i replikacja rozgrywki]
+```
 
----
-
-## Decisions & Conventions Log
-
-- 2026-08-29: Replikacja sieciowa włączona od etapu 0 dla każdego bytu domenowego.
-- 2026-08-29: Brak logiki biznesowej w Blueprintach; Blueprinty wyłącznie jako prefab/widok.
-- 2026-08-30: Transformacja postaci gracza z kinematycznego `ACharacter` na w 100% symulowany fizycznie `APawn` (`APlayerCharacter`) oparty w całości na zdarzeniach (Event-Driven Enhanced Input + Chaos Physics Solver).
-- 2026-08-31: Refaktoryzacja `APlayerCharacter` – czyste forward-deklaracje, usunięcie martwych zmiennych, Sphere Sweep ground check na krawędziach, naturalna grawitacja bez dławienia $Z$ oraz pozycjonowanie kamery na wysokości oczu (180 cm humanoid).
+1. **Ekstrakcja `ACombatCharacterBase`:**
+   * Wydzielenie wspólnej kinematyki ruchu, obsługi `PerformGroundCheck`, `PerformMovement`, `ApplyKnockback`, `UDamageableComponent` i `UInteractionComponent` z `APlayerCharacter` do klasy bazowej `ACombatCharacterBase`.
+2. **Implementacja `ICarryableInterface`:**
+   * Umożliwienie podnoszenia, noszenia na barku (`AttachToComponent`) i rzucania postaciami (gracze/wrogowie) przez `UInteractionComponent` z wykorzystaniem `ApplyKnockback`.
+3. **Stworzenie sztucznej inteligencji (`AOgreCharacter`):**
+   * Oparty na `ACombatCharacterBase`, wykorzystujący spójny model obrażeń kinetycznych, odrzutu i interakcji z otoczeniem.
+4. **Networking (w dalszej kolejności):**
+   * Replikacja propów (`PredictiveInterpolation`), Server RPC dla chwytania/rzucania oraz predykcja ruchu gracza.

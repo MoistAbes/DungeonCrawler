@@ -1,5 +1,6 @@
 ﻿#include "InteractivePropBase.h"
 #include "Components/StaticMeshComponent.h"
+#include "MyProject/MyProject.h"
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
 
 AInteractivePropBase::AInteractivePropBase()
@@ -13,6 +14,9 @@ AInteractivePropBase::AInteractivePropBase()
     MeshComponent->SetSimulatePhysics(true);
     MeshComponent->SetNotifyRigidBodyCollision(true);
     MeshComponent->SetCollisionProfileName(TEXT("PhysicsActor"));
+    MeshComponent->SetCollisionObjectType(ECC_PhysicsBody);
+    MeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+    MeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
     MeshComponent->SetUseCCD(true);
 
     // 2. Kontrola wchodzenia i stania postaci na propie
@@ -45,6 +49,13 @@ void AInteractivePropBase::PostInitializeComponents()
 void AInteractivePropBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    if (MeshComponent)
+    {
+        MeshComponent->SetCollisionObjectType(ECC_PhysicsBody);
+        MeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+        MeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+    }
 }
 
 void AInteractivePropBase::Interact(AActor* Interactor)
@@ -118,15 +129,6 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
     // 3. Względna prędkość w osi zderzenia
     const FVector RelativeVelocity = PropVelocity - OtherVelocity;
     const float ImpactSpeed = FMath::Abs(FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal));
-    
-    //DEBUG STUFF
-    // const float ImpulseMag = NormalImpulse.Size();
-
-    // Szacowany moment siły (Torque): r x F
-    // const FVector EstimatedTorque = FVector::CrossProduct(LeverArm, NormalImpulse);
-
-    // UE_LOG(LogTemp, Warning, TEXT("[PHYS_DIAG|PROP_HIT] %s (Mass: %.1f kg) HIT BY %s (Mass: %.1f kg) | ImpSpeed: %.1f cm/s | NormalImpulse: %.1f (Vec: %s) | PropLinVel: %.1f | PropAngVel: %.1f deg/s | LeverArm: (%.1f, %.1f, %.1f) | TorqueMag: %.1f | ImpactNormal: %s"),
-    //     *GetName(), PropMass, *OtherName, OtherMass, ImpactSpeed, ImpulseMag, *NormalImpulse.ToString(), PropVelocity.Size(), PropAngVel.Size(), LeverArm.X, LeverArm.Y, LeverArm.Z, EstimatedTorque.Size(), *Hit.ImpactNormal.ToString());
 
     // 4. Aplikacja obrażeń kinetycznych
     if (DamageableComponent)
