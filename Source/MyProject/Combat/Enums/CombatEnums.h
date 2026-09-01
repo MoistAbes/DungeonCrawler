@@ -23,3 +23,10 @@ enum class EStatusEffectType : uint8
 	Electrified  UMETA(DisplayName = "Electrified"),
 	Oiled        UMETA(DisplayName = "Oiled")
 };
+
+UENUM(BlueprintType)
+enum class EKnockbackFalloff : uint8
+{
+	Linear   UMETA(DisplayName = "Linear"),
+	Constant UMETA(DisplayName = "Constant")
+};

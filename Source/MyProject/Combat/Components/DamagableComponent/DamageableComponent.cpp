@@ -1,5 +1,9 @@
 ﻿#include "DamageableComponent.h"
 
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+
 UDamageableComponent::UDamageableComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
@@ -9,6 +13,20 @@ void UDamageableComponent::BeginPlay()
 {
     Super::BeginPlay();
     CurrentDurability = FMath::Clamp(InitialDurability, 0.0f, MaxDurability);
+
+    if (bAutoHandleCharacterImpacts)
+    {
+        if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+        {
+            Character->LandedDelegate.AddDynamic(this, &UDamageableComponent::HandleCharacterLanded);
+
+            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+            {
+                Capsule->SetNotifyRigidBodyCollision(true);
+                Capsule->OnComponentHit.AddDynamic(this, &UDamageableComponent::HandleCharacterHit);
+            }
+        }
+    }
 }
 
 void UDamageableComponent::ApplyDamage(float Amount)
@@ -42,5 +60,56 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
             *GetOwner()->GetName(), ImpactSpeed, CalculatedDamage);
 
         ApplyDamage(CalculatedDamage);
+    }
+}
+
+void UDamageableComponent::HandleCharacterLanded(const FHitResult& Hit)
+{
+    if (!bAutoHandleCharacterImpacts)
+    {
+        return;
+    }
+
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+    {
+        if (UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+        {
+            const float FallSpeed = FMath::Abs(CMC->GetLastUpdateVelocity().Z);
+            if (FallSpeed > 0.0f)
+            {
+                ApplyKineticImpact(FallSpeed);
+            }
+        }
+    }
+}
+
+void UDamageableComponent::HandleCharacterHit(
+    UPrimitiveComponent* HitComponent,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    FVector NormalImpulse,
+    const FHitResult& Hit)
+{
+    if (!bAutoHandleCharacterImpacts)
+    {
+        return;
+    }
+
+    if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+    {
+        if (UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+        {
+            if (CMC->IsFalling())
+            {
+                const FVector IncomingVelocity = CMC->GetLastUpdateVelocity();
+                const float ImpactSpeed = -FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal);
+
+                // Reagujemy na zderzenia ze ścianami/przeszkodami (gdzie normalna nie jest płaską podłogą)
+                if (ImpactSpeed > 0.0f && FMath::Abs(Hit.ImpactNormal.Z) < 0.7f)
+                {
+                    ApplyKineticImpact(ImpactSpeed);
+                }
+            }
+        }
     }
 }

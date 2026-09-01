@@ -3,8 +3,10 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
+#include "MyProject/Combat/Enums/CombatEnums.h"
 #include "MyProject/Interaction/Interfaces/IGrabbableInterface/IGrabbableInterface.h"
 #include "MyProject/Interaction/Interfaces/InteractableInterface/IInteractableInterface.h"
+#include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "InteractivePropBase.generated.h"
 
 class UStaticMeshComponent;
@@ -12,12 +14,16 @@ class UStaticMeshComponent;
 UCLASS(Abstract)
 class MYPROJECT_API AInteractivePropBase : public AActor, 
                                           public IInteractableInterface, 
-                                          public IGrabbableInterface
+                                          public IGrabbableInterface,
+                                          public IMaterialProviderInterface
 {
     GENERATED_BODY()
 
 public:
     AInteractivePropBase();
+
+    // --- IMaterialProviderInterface ---
+    virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
 
     // --- IInteractableInterface ---
     virtual void Interact(AActor* Interactor) override;
@@ -38,6 +44,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UDamageableComponent> DamageableComponent;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Material")
+    EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Wood;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Config")
     bool bCanBeGrabbed = true;

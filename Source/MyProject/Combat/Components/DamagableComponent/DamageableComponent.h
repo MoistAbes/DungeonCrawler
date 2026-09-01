@@ -59,6 +59,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Durability", meta = (ClampMin = "0.0"))
     float InitialDurability = 100.0f;
 
+    // Automatyczne nasłuchiwanie zderzeń i upadków dla postaci
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Kinetic")
+    bool bAutoHandleCharacterImpacts = true;
+
     // Minimalna prędkość zderzenia generująca obrażenia (cm/s)
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Kinetic", meta = (ClampMin = "0.0"))
     float ImpactSpeedThreshold = 700.0f;
@@ -70,4 +74,15 @@ protected:
 private:
     UPROPERTY(VisibleInstanceOnly, Category = "State")
     float CurrentDurability = 100.0f;
+
+    UFUNCTION()
+    void HandleCharacterLanded(const FHitResult& Hit);
+
+    UFUNCTION()
+    void HandleCharacterHit(
+        UPrimitiveComponent* HitComponent,
+        AActor* OtherActor,
+        UPrimitiveComponent* OtherComp,
+        FVector NormalImpulse,
+        const FHitResult& Hit);
 };

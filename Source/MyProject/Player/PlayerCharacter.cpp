@@ -13,6 +13,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
+#include "MyProject/Combat/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Interaction/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
 
@@ -142,6 +143,10 @@ APlayerCharacter::APlayerCharacter()
     DamageableComponent =
         CreateDefaultSubobject<UDamageableComponent>(
             TEXT("DamageableComponent"));
+
+    KnockbackComponent =
+        CreateDefaultSubobject<UKnockbackComponent>(
+            TEXT("KnockbackComponent"));
 
 
     // -------------------------------------------------------------------------
