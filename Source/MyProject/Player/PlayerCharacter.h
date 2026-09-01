@@ -12,7 +12,6 @@ class USpringArmComponent;
 class UPlayerCameraComponent;
 class UInteractionComponent;
 class UDamageableComponent;
-class UPlayerHUDWidget;
 struct FInputActionValue;
 
 UCLASS(Abstract)
@@ -81,13 +80,6 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
     TObjectPtr<UInputAction> JumpAction;
 
-    // -------------------------------------------------------------------------
-    // HUD
-    // -------------------------------------------------------------------------
-
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|UI")
-    TSubclassOf<UPlayerHUDWidget> HUDWidgetClass;
-
 protected:
     virtual void BeginPlay() override;
 
@@ -105,11 +97,4 @@ private:
 
     void HandleInteract();
     void HandleThrow();
-
-    // -------------------------------------------------------------------------
-    // Runtime state
-    // -------------------------------------------------------------------------
-
-    UPROPERTY()
-    TObjectPtr<UPlayerHUDWidget> ActiveHUDWidget;
 };

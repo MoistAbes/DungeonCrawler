@@ -8,7 +8,6 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 
-#include "Blueprint/UserWidget.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
@@ -16,7 +15,6 @@
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
 #include "MyProject/Interaction/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
-#include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
 
 
 APlayerCharacter::APlayerCharacter()
@@ -197,28 +195,6 @@ void APlayerCharacter::BeginPlay()
                 Subsystem->AddMappingContext(
                     DefaultMappingContext,
                     0);
-            }
-        }
-
-
-        // ---------------------------------------------------------------------
-        // HUD
-        // ---------------------------------------------------------------------
-
-        if (HUDWidgetClass &&
-            PlayerController->IsLocalController())
-        {
-            ActiveHUDWidget =
-                CreateWidget<UPlayerHUDWidget>(
-                    PlayerController,
-                    HUDWidgetClass);
-
-            if (ActiveHUDWidget)
-            {
-                ActiveHUDWidget->AddToViewport();
-
-                ActiveHUDWidget->BindHealthComponent(
-                    DamageableComponent);
             }
         }
     }
