@@ -79,6 +79,7 @@ bool AInteractivePropBase::CanGrab(const AActor* Grabber) const
 
 void AInteractivePropBase::OnGrabbed(AActor* Grabber)
 {
+    bIsBeingCarried = true;
     if (MeshComponent)
     {
         MeshComponent->WakeRigidBody();
@@ -87,6 +88,7 @@ void AInteractivePropBase::OnGrabbed(AActor* Grabber)
 
 void AInteractivePropBase::OnDropped(AActor* Dropper)
 {
+    bIsBeingCarried = false;
     if (MeshComponent)
     {
         MeshComponent->WakeRigidBody();
@@ -102,36 +104,28 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                                              UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                              const FHitResult& Hit)
 {
-    if (!MeshComponent) return;
+    if (!MeshComponent || bIsBeingCarried) return;
 
     // 1. Parametry fizyczne propa
-    const float PropMass = MeshComponent->GetMass();
     const FVector PropVelocity = MeshComponent->GetPhysicsLinearVelocity();
-    const FVector PropAngVel = MeshComponent->GetPhysicsAngularVelocityInDegrees();
-    const FVector CenterOfMass = MeshComponent->GetCenterOfMass();
-    const FVector LeverArm = Hit.ImpactPoint - CenterOfMass;
 
     // 2. Parametry obiektu uderzającego
     FVector OtherVelocity = FVector::ZeroVector;
-    float OtherMass = 0.0f;
-    const FString OtherName = OtherActor ? OtherActor->GetName() : TEXT("World/None");
-
     if (OtherComp && OtherComp->IsSimulatingPhysics())
     {
         OtherVelocity = OtherComp->GetPhysicsLinearVelocity();
-        OtherMass = OtherComp->GetMass();
     }
     else if (OtherActor)
     {
         OtherVelocity = OtherActor->GetVelocity();
     }
 
-    // 3. Względna prędkość w osi zderzenia
+    // 3. Względna prędkość w osi normalnej zderzenia (uderzenie prostopadłe)
     const FVector RelativeVelocity = PropVelocity - OtherVelocity;
-    const float ImpactSpeed = FMath::Abs(FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal));
+    const float ImpactSpeed = -FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal);
 
-    // 4. Aplikacja obrażeń kinetycznych
-    if (DamageableComponent)
+    // 4. Aplikacja obrażeń kinetycznych (tylko gdy zbliżają się do siebie z dużą siłą)
+    if (ImpactSpeed > 0.0f && DamageableComponent)
     {
         DamageableComponent->ApplyKineticImpact(ImpactSpeed);
     }

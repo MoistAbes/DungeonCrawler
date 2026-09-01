@@ -34,6 +34,7 @@ public:
     virtual void OnGrabbed(AActor* Grabber) override;
     virtual void OnDropped(AActor* Dropper) override;
     virtual float GetMass() const override;
+    virtual bool IsGrabbed() const override { return bIsBeingCarried; }
 
 protected:
     virtual void PostInitializeComponents() override;
@@ -50,6 +51,9 @@ protected:
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Config")
     bool bCanBeGrabbed = true;
+
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Prop|State")
+    bool bIsBeingCarried = false;
 
     UFUNCTION()
     virtual void HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 

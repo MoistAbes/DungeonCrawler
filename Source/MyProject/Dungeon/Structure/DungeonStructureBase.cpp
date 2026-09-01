@@ -3,6 +3,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
+#include "MyProject/Interaction/Interfaces/IGrabbableInterface/IGrabbableInterface.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
 {
@@ -67,18 +68,32 @@ void ADungeonStructureBase::HandleComponentHit(
 		return;
 	}
 
-	// Obliczamy prędkość uderzającego obiektu (z dowolnego kierunku: góra, dół, boki)
-	float ImpactSpeed = 0.0f;
+	// 1. Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
+	if (const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(OtherActor))
+	{
+		if (Grabbable->IsGrabbed())
+		{
+			return;
+		}
+	}
+
+	// 2. Pobieramy prędkość uderzającego obiektu
+	FVector IncomingVelocity = FVector::ZeroVector;
 
 	if (OtherComp && OtherComp->IsSimulatingPhysics())
 	{
-		ImpactSpeed = OtherComp->GetPhysicsLinearVelocity().Size();
+		IncomingVelocity = OtherComp->GetPhysicsLinearVelocity();
 	}
 	else if (OtherActor)
 	{
-		ImpactSpeed = OtherActor->GetVelocity().Size();
+		IncomingVelocity = OtherActor->GetVelocity();
 	}
 
+	// 3. Sprawdzamy prędkość wnikającą prostopadle w strukturę (Dot Product z Normalną)
+	// Normalna wskazuje na zewnątrz ściany, więc wektor prędkości wnikającej ma z nią ujemny iloczyn skalarny
+	const float ImpactSpeed = -FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal);
+
+	// 4. Jeśli obiekt faktycznie uderza w strukturę prostopadle
 	if (ImpactSpeed > 0.0f)
 	{
 		DamageableComponent->ApplyKineticImpact(ImpactSpeed);

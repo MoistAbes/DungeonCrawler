@@ -30,5 +30,7 @@ public:
 
 	/** Pobiera masę obiektu w kg do walidacji udźwigu gracza */
 	virtual float GetMass() const = 0;
-	
+
+	/** Czy obiekt jest aktualnie niesiony przez postać */
+	virtual bool IsGrabbed() const { return false; }
 };
