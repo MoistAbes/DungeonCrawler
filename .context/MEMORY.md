@@ -1,51 +1,57 @@
-# Plan architektoniczny & Stan Projektu: Kinematyczny Character Controller + Fizyczne Propy (Dungeon Crawler 4-player co-op)
+# Podsumowanie Stanu Projektu: System Kinetyki, Struktury Lochu i Interakcje (Dungeon Crawler)
 
-## 1. Kontekst projektu
-
+## 1. Kontekst Projektu
 - **Silnik:** Unreal Engine 5.8, C++ (`MYPROJECT_API`)
-- **Gatunek:** 4-osobowy kooperacyjny dungeon crawler
-- **Filozofia fizyki:** Zamiast niekontrolowanej pełnej symulacji fizyki ciał sztywnych na postaciach, stosujemy **deterministyczny, kinematyczny model ruchu postaci** z manualnym przekazywaniem sił i impulsów do obiektów otoczenia (propy, zniszczalne elementy, odrzuty, rzuty).
-- **Stan obecny:** Zakończono etap stabilizacji i czyszczenia kinematycznego kontrolera gracza (`APlayerCharacter`) oraz interakcji z propami fizycznymi.
+- **Gatunek:** Kooperacyjny dungeon crawler w widoku z góry / TPP (z płynnym zoomem kamery)
+- **Filozofia Fizyki i Świata:** 
+  - Architektura oparta na kompozycji (`ActorComponents` / `@Service`-style), determinizmie oraz interfejsach biznesowych.
+  - Wyraźny podział na **statyczną geometrię lochu**, **niszczalne moduły/struktury** oraz **swobodne propy fizyczne (Chaos)**.
 
 ---
 
-## 2. Zrealizowane Filary Architektoniczne
+## 2. Zrealizowane Moduły i Filary (Stan Obecny)
 
-### Filar 1: Kinematyczny Ruch Gracza (`APlayerCharacter`)
-- **Brak symulacji fizyki na kapsule:** `CapsuleComponent->SetSimulatePhysics(false)` – brak niekontrolowanych sił depenetracji Chaosu.
-- **Ruch iteracyjny (Flat Iterative Slide):** 3-iteracyjny płaski algorytm rzutowania wektora prędkości (`VectorPlaneProject`) wzdłuż płaszczyzn kolizji wielościennych/narożników.
-- **On-Demand Tick:** Postać w spoczynku na ziemi wyłącza swój `Tick` (0ms narzutu CPU).
-- **Zintegrowany Odrzut (Unified Knockback System):** `ApplyKnockback(Impulse)` obsługuje podmuchy wiatru, ciosy wroga i rzuty. Wykrywa mocne uderzenia w ściany i aplikuje obrażenia kinetyczne przez `UDamageableComponent`.
-- **Śledzenie ruchomych platform (Base Tracking):** Postać płynnie przemieszcza się i obraca wraz z ruchomą geometrią/windami/platformami pod jej stopami.
+### Filar 1: Architektura Postaci i Kamery
+- **`APlayerCharacter`:** Kinematyczny model oparty o standardowy, stabilny `CharacterMovementComponent` (CMC).
+  - Całkowite wyłączenie niepotrzebnego `Tick()` na postaci (`PrimaryActorTick.bCanEverTick = false`).
+  - Podgląd kolizji kapsuły (`SetHiddenInGame(false)`).
+- **`UPlayerCameraComponent`:** Dedykowany komponent kamery obsługujący płynny zoom w oparciu o `Tick on-demand` (wyłącza swój tick, gdy kamera osiągnie cel).
+- **`APlayerHUD`:** Odizolowany, dedykowany aktor HUD zarządzający widgetem `WBP_PlayerHUD`. Reaguje na eventy zmiany postaci (`OnPossessedPawnChanged`) i automatycznie subskrybuje pasek życia.
 
-### Filar 2: Dynamiczne Pchanie Propów Fizycznych
-- Propy o masie $\le 100\text{ kg}$ otrzymują liniowy impuls w środek masy przy kontakcie z kapsułą w ruchu.
-- Siła pchania skaluje się w zależności od masy propa (płynna różnica w trudności pchania między 20 kg a 100 kg).
-- **Zabezpieczenie przed pętlą perpetuum mobile:** Zablokowano pchanie obiektu, na którym postać w danej chwili stabilnie stoi obiema stopami.
+### Filar 2: System Obrażeń, Odrzutów i Kinetyki
+- **`UDamageableComponent`:** 
+  - Uniwersalny komponent zdrowia i wytrzymałości (`MaxDurability`, `InitialDurability`, `CurrentDurability`).
+  - Automatyczne wiązanie zdarzeń upadku (`LandedDelegate` -> Fall Damage) oraz zderzeń ze ścianami w locie (`OnComponentHit` przy `IsFalling()`).
+  - Wykrywanie energii zderzenia na podstawie prędkości prostopadłej (`DotProduct` z normalną ściany).
+- **`UKnockbackComponent`:**
+  - Obsługa odrzutów dla postaci (przez `LaunchCharacter` z mnożnikiem `AirborneMultiplier`) oraz obiektów fizycznych (`AddImpulse`).
+  - Wsparcie dla odporności na odrzut (`KnockbackResistance`) i niewrażliwości (`bIsImmune`).
+  - Własny enum `EKnockbackFalloff` (`Linear`, `Constant`).
+- **`UCombatForceLibrary`:**
+  - `ApplyExplosion`: Obrażenia i radialny odrzut z tłumieniem liniowym.
+  - `ApplyDirectionalKnockback`: Kierunkowy odrzut z regulowanym podbiciem w górę (`VerticalLiftRatio`).
+  - `ApplyVortexPull`: Wir przyciągający jednostki i obiekty do centrum.
 
-### Filar 3: Geometria i Kolizja Propów (Chaos Physics)
-- Propy (`SM_Prop_Cube`) posiadają sfazowane krawędzie (Bevel 10 cm).
-- Kolizja propów wykorzystuje **`NDOP26` (26-sided chamfered collision)** w trybie `CTF_USE_DEFAULT`, co zapewnia gładkie zsuwanie się kapsuły po narożnikach przy zachowaniu pełnej symulacji fizyki ciał sztywnych w Chaosie.
+### Filar 3: Struktury Lochu i Tożsamość Materiałowa
+- **`IMaterialProviderInterface`:** Interfejs `GetMaterialType()` zwracający `EPhysicalMaterialType` (`Stone`, `Wood`, `Metal`, `Glass`, `Flesh`).
+- **`ADungeonStructureBase`:** 
+  - Klasa bazowa dla podłóg, ścian, sufitów i filarów.
+  - Domyślnie statyczna, stabilna kolizja `BlockAll` (brak narzutu fizyki Chaos).
+  - Konfigurowalna niszczalność (`bIsDestructible = true/false`).
+  - **Punch-Through (Przebijanie barykad):** Gdy uderzenie o ścianę przekracza jej HP i ją niszczy, wyłączana jest natychmiast kolizja, a pęd uderzającego obiektu/gracza jest przekazywany dalej za ścianę pomniejszony o opór (`PunchThroughVelocityRetention = 0.6f`).
+- **`AInteractivePropBase` & `AExplosiveBarrelProp`:**
+  - Fizyczne rekwizyty (`SimulatePhysics = true`), podnoszenie i rzucanie bezwładnościowe (`IGrabbableInterface`).
+  - Blokada zadawania obrażeń otoczeniu w trakcie trzymania w rękach (`IsGrabbed() == true`) – eliminacja glitchy przy ocieraniu o ściany.
+  - Detonacja wybuchającej beczki po osiągnięciu 0 HP.
 
 ---
 
 ## 3. Kolejne Kroki i Priorytety
 
-```mermaid
-graph TD
-    A[Kinematyczny PlayerCharacter - GOTOWE] --> B[Ekstrakcja ACombatCharacterBase]
-    B --> C[Implementacja ICarryableInterface dla postaci]
-    B --> D[Stworzenie bazy wrogów AOgreCharacter]
-    C --> E[Chwytanie i rzucanie wrogami/graczami]
-    D --> E
-    E --> F[Networking i replikacja rozgrywki]
-```
-
-1. **Ekstrakcja `ACombatCharacterBase`:**
-   * Wydzielenie wspólnej kinematyki ruchu, obsługi `PerformGroundCheck`, `PerformMovement`, `ApplyKnockback`, `UDamageableComponent` i `UInteractionComponent` z `APlayerCharacter` do klasy bazowej `ACombatCharacterBase`.
-2. **Implementacja `ICarryableInterface`:**
-   * Umożliwienie podnoszenia, noszenia na barku (`AttachToComponent`) i rzucania postaciami (gracze/wrogowie) przez `UInteractionComponent` z wykorzystaniem `ApplyKnockback`.
-3. **Stworzenie sztucznej inteligencji (`AOgreCharacter`):**
-   * Oparty na `ACombatCharacterBase`, wykorzystujący spójny model obrażeń kinetycznych, odrzutu i interakcji z otoczeniem.
-4. **Networking (w dalszej kolejności):**
-   * Replikacja propów (`PredictiveInterpolation`), Server RPC dla chwytania/rzucania oraz predykcja ruchu gracza.
+1. **System Reakcji Żywiołowych (Elements / Status Effects):**
+   - Komponent reakcji (np. `UStatusEffectComponent`): stany `Burning`, `Wet`, `Electrified`, `Oiled`.
+   - Podpalanie drewnianych ścian i wybuchających beczek, rozprzestrzenianie ognia.
+2. **Mechanika Walki i Broni Gracza:**
+   - Ataki bronią białą (ciosy mieczem/młotem rozbijające słabe punkty otoczenia i odrzucające wrogów).
+3. **Logiczne Mechanizmy Lochu:**
+   - Dźwignie (`ASimpleSwitchProp`), płyty naciskowe i kraty/drzwi otwierane sygnałem logicznym.

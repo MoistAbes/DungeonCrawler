@@ -2,6 +2,8 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
 #include "MyProject/Interaction/Interfaces/IGrabbableInterface/IGrabbableInterface.h"
 
@@ -23,6 +25,7 @@ ADungeonStructureBase::ADungeonStructureBase()
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;
+	PunchThroughVelocityRetention = 0.6f;
 }
 
 void ADungeonStructureBase::PostInitializeComponents()
@@ -77,10 +80,21 @@ void ADungeonStructureBase::HandleComponentHit(
 		}
 	}
 
-	// 2. Pobieramy prędkość uderzającego obiektu
+	// 2. Pobieramy prędkość uderzającego obiektu (ze wsparciem dla CharacterMovementComponent)
 	FVector IncomingVelocity = FVector::ZeroVector;
 
-	if (OtherComp && OtherComp->IsSimulatingPhysics())
+	if (const ACharacter* Character = Cast<ACharacter>(OtherActor))
+	{
+		if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+		{
+			IncomingVelocity = CMC->GetLastUpdateVelocity();
+		}
+		else
+		{
+			IncomingVelocity = Character->GetVelocity();
+		}
+	}
+	else if (OtherComp && OtherComp->IsSimulatingPhysics())
 	{
 		IncomingVelocity = OtherComp->GetPhysicsLinearVelocity();
 	}
@@ -89,14 +103,41 @@ void ADungeonStructureBase::HandleComponentHit(
 		IncomingVelocity = OtherActor->GetVelocity();
 	}
 
-	// 3. Sprawdzamy prędkość wnikającą prostopadle w strukturę (Dot Product z Normalną)
-	// Normalna wskazuje na zewnątrz ściany, więc wektor prędkości wnikającej ma z nią ujemny iloczyn skalarny
-	const float ImpactSpeed = -FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal);
+	// 3. Sprawdzamy prędkość prostopadłą do powierzchni zderzenia
+	const float ImpactSpeed = FMath::Abs(FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal));
 
-	// 4. Jeśli obiekt faktycznie uderza w strukturę prostopadle
+	UE_LOG(LogTemp, Log, TEXT("[DungeonStructure] %s hit by %s | IncVel: %s | ImpactSpeed: %.1f cm/s"),
+		*GetName(), OtherActor ? *OtherActor->GetName() : TEXT("None"), *IncomingVelocity.ToString(), ImpactSpeed);
+
+	// 4. Jeśli obiekt faktycznie uderza w strukturę prostopadle z prędkością powyżej progu
 	if (ImpactSpeed > 0.0f)
 	{
 		DamageableComponent->ApplyKineticImpact(ImpactSpeed);
+
+		// 5. Punch-Through: Jeśli uderzenie zniszczyło strukturę, przekazujemy pęd dalej za ścianę
+		if (DamageableComponent->IsDestroyed())
+		{
+			if (StructureMesh)
+			{
+				StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			}
+
+			if (PunchThroughVelocityRetention > 0.0f && !IncomingVelocity.IsNearlyZero())
+			{
+				const FVector ContinuedVelocity = IncomingVelocity * PunchThroughVelocityRetention;
+
+				if (ACharacter* Character = Cast<ACharacter>(OtherActor))
+				{
+					Character->LaunchCharacter(ContinuedVelocity, true, true);
+					UE_LOG(LogTemp, Warning, TEXT("[DungeonStructure] Punch-Through! %s launches past broken structure with Velocity: %s"),
+						*Character->GetName(), *ContinuedVelocity.ToString());
+				}
+				else if (OtherComp && OtherComp->IsSimulatingPhysics())
+				{
+					OtherComp->SetPhysicsLinearVelocity(ContinuedVelocity);
+				}
+			}
+		}
 	}
 }
 

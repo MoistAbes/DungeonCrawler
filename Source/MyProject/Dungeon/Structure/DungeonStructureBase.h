@@ -58,6 +58,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction")
 	bool bIsDestructible = false;
 
+	/** Współczynnik zachowania pędu przy przebiciu zniszczonej ściany (0.0 = pełne zatrzymanie, 0.6 = zachowuje 60% prędkości) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction", meta = (EditCondition = "bIsDestructible", ClampMin = "0.0", ClampMax = "1.0"))
+	float PunchThroughVelocityRetention = 0.6f;
+
 	/** Opcjonalny aktor gruzu/efektu VFX spawnujący się w momencie zniszczenia */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction", meta = (EditCondition = "bIsDestructible"))
 	TSubclassOf<AActor> DestroyedDebrisClass;
