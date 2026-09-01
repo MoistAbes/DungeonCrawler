@@ -9,6 +9,7 @@ class UInputAction;
 class UPhysicsHandleComponent;
 class UCameraComponent;
 class USpringArmComponent;
+class UPlayerCameraComponent;
 class UInteractionComponent;
 class UDamageableComponent;
 class UPlayerHUDWidget;
@@ -27,6 +28,9 @@ public:
     // -------------------------------------------------------------------------
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UPlayerCameraComponent> PlayerCameraComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UPhysicsHandleComponent> PhysicsHandleComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -42,7 +46,7 @@ public:
     TObjectPtr<UCameraComponent> CameraComponent;
 
     // -------------------------------------------------------------------------
-    // Camera
+    // Camera Settings
     // -------------------------------------------------------------------------
 
     UPROPERTY(
@@ -51,27 +55,6 @@ public:
         Category = "Player|Camera",
         meta = (ClampMin = "0.0", ClampMax = "120.0"))
     float BaseEyeHeightOffset = 65.0f;
-
-    UPROPERTY(
-        EditDefaultsOnly,
-        BlueprintReadOnly,
-        Category = "Player|Camera",
-        meta = (ClampMin = "0.0", ClampMax = "1200.0"))
-    float MaxZoomLength = 400.0f;
-
-    UPROPERTY(
-        EditDefaultsOnly,
-        BlueprintReadOnly,
-        Category = "Player|Camera",
-        meta = (ClampMin = "0.0"))
-    float ZoomStep = 50.0f;
-
-    UPROPERTY(
-        EditDefaultsOnly,
-        BlueprintReadOnly,
-        Category = "Player|Camera",
-        meta = (ClampMin = "0.0"))
-    float ZoomInterpSpeed = 15.0f;
 
     // -------------------------------------------------------------------------
     // Enhanced Input
@@ -111,11 +94,9 @@ protected:
     virtual void SetupPlayerInputComponent(
         UInputComponent* PlayerInputComponent) override;
 
-    virtual void Tick(float DeltaTime) override;
-
 private:
     // -------------------------------------------------------------------------
-    // Input
+    // Input Handlers
     // -------------------------------------------------------------------------
 
     void Move(const FInputActionValue& Value);
@@ -126,17 +107,8 @@ private:
     void HandleThrow();
 
     // -------------------------------------------------------------------------
-    // Camera
-    // -------------------------------------------------------------------------
-
-    void UpdateZoomTickState();
-
-    // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
-
-    float TargetArmLength = 400.0f;
-    bool bIsZooming = false;
 
     UPROPERTY()
     TObjectPtr<UPlayerHUDWidget> ActiveHUDWidget;

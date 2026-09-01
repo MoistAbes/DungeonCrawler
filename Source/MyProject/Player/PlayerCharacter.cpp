@@ -15,6 +15,7 @@
 
 #include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
 #include "MyProject/Interaction/Components/InteractionComponent/InteractionComponent.h"
+#include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
 #include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
 
 
@@ -22,12 +23,9 @@ APlayerCharacter::APlayerCharacter()
 {
     /*
      * ACharacter already provides:
-     *
      * - CapsuleComponent
      * - Mesh
      * - CharacterMovementComponent
-     *
-     * We intentionally do NOT recreate those components.
      */
 
     // -------------------------------------------------------------------------
@@ -71,11 +69,6 @@ APlayerCharacter::APlayerCharacter()
 
     // -------------------------------------------------------------------------
     // Character Movement Component
-    //
-    // We intentionally use the standard CMC.
-    //
-    // These values replace the corresponding values from the old custom
-    // movement implementation.
     // -------------------------------------------------------------------------
 
     UCharacterMovementComponent* MovementComponent =
@@ -83,39 +76,15 @@ APlayerCharacter::APlayerCharacter()
 
     if (MovementComponent)
     {
-        // Old MaxWalkSpeed = 600
         MovementComponent->MaxWalkSpeed = 600.0f;
-
-        // Old GravityScale = 1.8
         MovementComponent->GravityScale = 1.8f;
-
-        // Old JumpImpulseVelocity = 600
         MovementComponent->JumpZVelocity = 600.0f;
-
-        // Old WalkableFloorZ = 0.7
-        //
-        // Keep Unreal's floor detection and movement solver.
         MovementComponent->SetWalkableFloorZ(0.7f);
-
-        /*
-         * IMPORTANT:
-         *
-         * We deliberately do NOT try to translate:
-         *
-         * AccelerationResponsiveness = 18
-         * DecelerationResponsiveness = 25
-         *
-         * directly into arbitrary CMC values yet.
-         *
-         * First we want to see the standard CMC behaviour.
-         * Then we tune MaxAcceleration / BrakingDecelerationWalking /
-         * GroundFriction based on the actual feel we want.
-         */
     }
 
 
     // -------------------------------------------------------------------------
-    // Camera
+    // Camera Components
     // -------------------------------------------------------------------------
 
     SpringArmComponent =
@@ -128,11 +97,7 @@ APlayerCharacter::APlayerCharacter()
         FVector(0.0f, 0.0f, BaseEyeHeightOffset));
 
     SpringArmComponent->bUsePawnControlRotation = true;
-
-    TargetArmLength = 400.0f;
-
-    SpringArmComponent->TargetArmLength =
-        TargetArmLength;
+    SpringArmComponent->TargetArmLength = 400.0f;
 
 
     CameraComponent =
@@ -143,6 +108,11 @@ APlayerCharacter::APlayerCharacter()
         USpringArmComponent::SocketName);
 
     CameraComponent->bUsePawnControlRotation = false;
+
+
+    PlayerCameraComponent =
+        CreateDefaultSubobject<UPlayerCameraComponent>(
+            TEXT("PlayerCameraComponent"));
 
 
     // -------------------------------------------------------------------------
@@ -179,15 +149,11 @@ APlayerCharacter::APlayerCharacter()
     // -------------------------------------------------------------------------
     // Tick
     //
-    // CharacterMovementComponent has its own movement tick.
-    //
-    // The Actor tick is ONLY used here for smooth camera zoom.
+    // Character has NO actor tick now. All components manage their own on-demand ticks.
     // -------------------------------------------------------------------------
 
-    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bCanEverTick = false;
     PrimaryActorTick.bStartWithTickEnabled = false;
-
-    bIsZooming = false;
 }
 
 
@@ -204,6 +170,13 @@ void APlayerCharacter::BeginPlay()
     {
         SpringArmComponent->SetRelativeLocation(
             FVector(0.0f, 0.0f, BaseEyeHeightOffset));
+    }
+
+    if (PlayerCameraComponent && SpringArmComponent && CameraComponent)
+    {
+        PlayerCameraComponent->SetupCameraReferences(
+            SpringArmComponent,
+            CameraComponent);
     }
 
 
@@ -340,15 +313,6 @@ void APlayerCharacter::SetupPlayerInputComponent(
 
     // -------------------------------------------------------------------------
     // Jump
-    //
-    // This is now handled by ACharacter / CMC.
-    //
-    // Epic's recommended Enhanced Input setup is to call:
-    //
-    // Started   -> Jump()
-    // Completed -> StopJumping()
-    //
-    // rather than manually changing Velocity.Z.
     // -------------------------------------------------------------------------
 
     if (JumpAction)
@@ -374,42 +338,6 @@ void APlayerCharacter::SetupPlayerInputComponent(
 }
 
 
-void APlayerCharacter::Tick(float DeltaTime)
-{
-    Super::Tick(DeltaTime);
-
-    if (!bIsZooming || !SpringArmComponent)
-    {
-        return;
-    }
-
-    const float CurrentLength =
-        SpringArmComponent->TargetArmLength;
-
-    if (!FMath::IsNearlyEqual(
-            CurrentLength,
-            TargetArmLength,
-            0.1f))
-    {
-        SpringArmComponent->TargetArmLength =
-            FMath::FInterpTo(
-                CurrentLength,
-                TargetArmLength,
-                DeltaTime,
-                15.0f);
-    }
-    else
-    {
-        SpringArmComponent->TargetArmLength =
-            TargetArmLength;
-
-        bIsZooming = false;
-
-        UpdateZoomTickState();
-    }
-}
-
-
 void APlayerCharacter::Move(
     const FInputActionValue& Value)
 {
@@ -421,11 +349,6 @@ void APlayerCharacter::Move(
         return;
     }
 
-
-    // -------------------------------------------------------------------------
-    // Camera-relative movement
-    // -------------------------------------------------------------------------
-
     const FRotator ControlRotation =
         Controller->GetControlRotation();
 
@@ -433,7 +356,6 @@ void APlayerCharacter::Move(
         0.0f,
         ControlRotation.Yaw,
         0.0f);
-
 
     const FVector ForwardDirection =
         FRotationMatrix(YawRotation)
@@ -443,26 +365,6 @@ void APlayerCharacter::Move(
         FRotationMatrix(YawRotation)
             .GetUnitAxis(EAxis::Y);
 
-
-    /*
-     * IMPORTANT:
-     *
-     * We no longer calculate DesiredMoveDirection.
-     *
-     * We simply feed movement input into the CharacterMovementComponent.
-     *
-     * CMC handles:
-     *
-     * - acceleration
-     * - velocity
-     * - braking
-     * - collision
-     * - floor detection
-     * - walking
-     * - falling
-     * - networking
-     */
-    
     AddMovementInput(
         ForwardDirection,
         MovementVector.Y);
@@ -495,34 +397,10 @@ void APlayerCharacter::Look(
 void APlayerCharacter::Zoom(
     const FInputActionValue& Value)
 {
-    const float ZoomValue =
-        Value.Get<float>() * -1.0f;
-
-    TargetArmLength =
-        FMath::Clamp(
-            TargetArmLength +
-            (ZoomValue * ZoomStep),
-            0.0f,
-            MaxZoomLength);
-
-
-    if (!bIsZooming)
+    if (PlayerCameraComponent)
     {
-        bIsZooming = true;
-
-        UpdateZoomTickState();
-    }
-}
-
-
-void APlayerCharacter::UpdateZoomTickState()
-{
-    const bool bShouldTick = bIsZooming;
-
-    if (IsActorTickEnabled() != bShouldTick)
-    {
-        SetActorTickEnabled(
-            bShouldTick);
+        PlayerCameraComponent->HandleZoom(
+            Value.Get<float>());
     }
 }
 
