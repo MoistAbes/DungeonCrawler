@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/UI/StatBarWidget.h"
 #include "PlayerHUDWidget.generated.h"
 

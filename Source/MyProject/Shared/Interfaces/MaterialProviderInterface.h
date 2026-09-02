@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "MyProject/Combat/Enums/CombatEnums.h"
+#include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MaterialProviderInterface.generated.h"
 
 UINTERFACE(MinimalAPI, BlueprintType)
@@ -12,7 +12,7 @@ class UMaterialProviderInterface : public UInterface
 };
 
 /**
- * Interfejs dostarczający informację o tożsamości materiałowej obiektu (kamień, drewno, metal itp.).
+ * Interfejs dostarczający informację o tożsamości materiałowej obiektu (kamień, drewno, metal, ciało itp.).
  */
 class MYPROJECT_API IMaterialProviderInterface
 {

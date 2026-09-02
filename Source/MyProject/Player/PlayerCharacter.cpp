@@ -12,9 +12,9 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 
-#include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
-#include "MyProject/Combat/Components/KnockbackComponent/KnockbackComponent.h"
-#include "MyProject/Interaction/Components/InteractionComponent/InteractionComponent.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
 
 

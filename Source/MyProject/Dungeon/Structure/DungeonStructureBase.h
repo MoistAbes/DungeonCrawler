@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "MyProject/Combat/Enums/CombatEnums.h"
+#include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "DungeonStructureBase.generated.h"
 

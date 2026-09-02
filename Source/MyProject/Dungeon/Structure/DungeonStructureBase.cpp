@@ -4,8 +4,8 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
-#include "MyProject/Interaction/Interfaces/IGrabbableInterface/IGrabbableInterface.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
 {

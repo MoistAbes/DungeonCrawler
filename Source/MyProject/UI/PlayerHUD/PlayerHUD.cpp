@@ -2,7 +2,7 @@
 
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
-#include "MyProject/Combat/Components/DamagableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
 #include "UObject/ConstructorHelpers.h"
 
