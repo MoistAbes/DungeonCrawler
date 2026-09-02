@@ -190,6 +190,12 @@ void APlayerCharacter::BeginPlay()
 }
 
 
+EPhysicalMaterialType APlayerCharacter::GetMaterialType_Implementation() const
+{
+    return MaterialType;
+}
+
+
 void APlayerCharacter::SetupPlayerInputComponent(
     UInputComponent* PlayerInputComponent)
 {

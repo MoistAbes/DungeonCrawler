@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "PlayerCharacter.generated.h"
 
 class UInputMappingContext;
@@ -16,12 +18,15 @@ class UKnockbackComponent;
 struct FInputActionValue;
 
 UCLASS(Abstract)
-class MYPROJECT_API APlayerCharacter : public ACharacter
+class MYPROJECT_API APlayerCharacter : public ACharacter, public IMaterialProviderInterface
 {
     GENERATED_BODY()
 
 public:
     APlayerCharacter();
+
+    // --- IMaterialProviderInterface ---
+    virtual EPhysicalMaterialType GetMaterialType_Implementation() const override;
 
     // -------------------------------------------------------------------------
     // Components
@@ -89,6 +94,13 @@ protected:
 
     virtual void SetupPlayerInputComponent(
         UInputComponent* PlayerInputComponent) override;
+
+    // -------------------------------------------------------------------------
+    // Material Configuration
+    // -------------------------------------------------------------------------
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Material")
+    EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Flesh;
 
 private:
     // -------------------------------------------------------------------------
