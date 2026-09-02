@@ -32,23 +32,7 @@ APlayerCharacter::APlayerCharacter()
     // -------------------------------------------------------------------------
 
     GetCapsuleComponent()->InitCapsuleSize(35.0f, 90.0f);
-
-    GetCapsuleComponent()->SetCollisionObjectType(ECC_Pawn);
-    GetCapsuleComponent()->SetCollisionEnabled(
-        ECollisionEnabled::QueryAndPhysics);
-
-    GetCapsuleComponent()->SetCollisionResponseToAllChannels(ECR_Block);
-
-    GetCapsuleComponent()->SetCollisionResponseToChannel(
-        ECC_Camera,
-        ECR_Ignore);
-
-    GetCapsuleComponent()->SetCollisionResponseToChannel(
-        ECC_Visibility,
-        ECR_Ignore);
-
-    GetCapsuleComponent()->SetSimulatePhysics(false);
-    GetCapsuleComponent()->SetNotifyRigidBodyCollision(false);
+    GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
     GetCapsuleComponent()->SetHiddenInGame(false);
 
 
