@@ -99,16 +99,14 @@ void UDamageableComponent::HandleCharacterHit(
     {
         if (UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
         {
-            if (CMC->IsFalling())
-            {
-                const FVector IncomingVelocity = CMC->GetLastUpdateVelocity();
-                const float ImpactSpeed = -FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal);
+            const FVector IncomingVelocity = CMC->GetLastUpdateVelocity();
+            const float ImpactSpeed = -FVector::DotProduct(IncomingVelocity, Hit.ImpactNormal);
 
-                // Reagujemy na zderzenia ze ścianami/przeszkodami (gdzie normalna nie jest płaską podłogą)
-                if (ImpactSpeed > 0.0f && FMath::Abs(Hit.ImpactNormal.Z) < 0.7f)
-                {
-                    ApplyKineticImpact(ImpactSpeed);
-                }
+            // Reagujemy na zderzenia ze ścianami/przeszkodami (gdzie normalna nie jest płaską podłogą)
+            // Działa zarówno w locie, jak i przy gwałtownym odepchnięciu/ślizgu po ziemi
+            if (ImpactSpeed > 0.0f && FMath::Abs(Hit.ImpactNormal.Z) < 0.7f)
+            {
+                ApplyKineticImpact(ImpactSpeed);
             }
         }
     }
