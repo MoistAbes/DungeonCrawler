@@ -15,6 +15,7 @@
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
+#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
 
 
@@ -131,6 +132,10 @@ APlayerCharacter::APlayerCharacter()
     KnockbackComponent =
         CreateDefaultSubobject<UKnockbackComponent>(
             TEXT("KnockbackComponent"));
+
+    StatusEffectComponent =
+        CreateDefaultSubobject<UStatusEffectComponent>(
+            TEXT("StatusEffectComponent"));
 
 
     // -------------------------------------------------------------------------

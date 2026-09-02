@@ -3,6 +3,7 @@
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
 #include "UObject/ConstructorHelpers.h"
 
@@ -79,5 +80,10 @@ void APlayerHUD::BindToPawn(APawn* InPawn)
     if (UDamageableComponent* Damageable = InPawn->FindComponentByClass<UDamageableComponent>())
     {
         HUDWidget->BindHealthComponent(Damageable);
+    }
+
+    if (UStatusEffectComponent* StatusEffectComp = InPawn->FindComponentByClass<UStatusEffectComponent>())
+    {
+        HUDWidget->BindStatusEffectComponent(StatusEffectComp);
     }
 }

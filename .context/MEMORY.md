@@ -18,13 +18,15 @@ Source/MyProject/
 │   │   └── DungeonStructureBase.h/.cpp           (Modularne ściany, podłogi, niszczalne moduły)
 │   └── Props/
 │       ├── InteractivePropBase/                  (Fizyczne rekwizyty lochu, wazy, skrzynki)
-│       ├── ExplosiveBarrelProp/                  (Wybuchające beczki detonujące radialnie)
+│       ├── VolatileProp/                         (Uniwersalne niestabilne obiekty: miny, bomby, żywiołowe beczki)
+│       ├── ExplosiveBarrelProp/                  (Wybuchające beczki - specjalizacja AVolatileProp)
 │       └── SimpleSwitchProp/                     (Dźwignie, przełączniki, mechanizmy)
 │
 ├── Shared/                                       <-- Uniwersalne mechaniki, komponenty i kontrakty
 │   ├── Components/
 │   │   ├── DamageableComponent/                  (Uniwersalny komponent zdrowia/durability)
-│   │   └── InteractionComponent/                 (Wykrywanie raycastem, chwytanie fizyczne i interakcja logiczna dla gracza i AI)
+│   │   ├── InteractionComponent/                 (Wykrywanie raycastem, chwytanie fizyczne i interakcja logiczna dla gracza i AI)
+│   │   └── StatusEffectComponent/                (Zarządzanie statusami: Burning, Wet, Electrified, Oiled)
 │   ├── Interfaces/
 │   │   ├── IInteractableInterface.h              (Kontrakt na aktywację klawiszem/AI)
 │   │   ├── IGrabbableInterface.h                 (Kontrakt na chwytanie PhysicsHandle)
@@ -42,6 +44,8 @@ Source/MyProject/
 │   │   └── Enums/
 │   │       └── KineticEnums.h                    (EKnockbackFalloff)
 │   └── Elements/
+│       ├── Utilities/
+│       │   └── ElementalChemistryLibrary         (Silnik reakcji chemicznych i kompatybilności materiałowej)
 │       └── Enums/
 │           └── ElementEnums.h                    (EStatusEffectType: Burning, Wet, Electrified, Oiled)
 │
@@ -53,7 +57,8 @@ Source/MyProject/
 │
 └── UI/                                           <-- Prezentacja stanu gry
     ├── PlayerHUD/                                (Aktor HUD reagujący na eventy)
-    ├── PlayerHUDWidget/                          (Kontroler widoku łączący pasek zdrowia)
+    ├── PlayerHUDWidget/                          (Kontroler widoku łączący pasek zdrowia i kontener ikon statusów)
+    ├── StatusIconWidget/                         (Reużywalna kontrolka pojedynczej ikony statusu)
     └── StatBarWidget.h/.cpp
 ```
 
@@ -65,14 +70,15 @@ Source/MyProject/
 - **`APlayerCharacter`:** Kinematyczny model oparty o standardowy, stabilny `CharacterMovementComponent` (CMC).
   - Całkowite wyłączenie niepotrzebnego `Tick()` na postaci (`PrimaryActorTick.bCanEverTick = false`).
   - Podgląd kolizji kapsuły (`SetHiddenInGame(false)`).
-  - Korzysta z `UInteractionComponent`, `UDamageableComponent`, `UKnockbackComponent`.
+  - Posiada tożsamość materiałową `IMaterialProviderInterface` (`EPhysicalMaterialType::Flesh`).
+  - Korzysta z `UInteractionComponent`, `UDamageableComponent`, `UKnockbackComponent`, `UStatusEffectComponent`.
 - **`UPlayerCameraComponent`:** Dedykowany komponent kamery obsługujący płynny zoom w oparciu o `Tick on-demand`.
-- **`APlayerHUD`:** Odizolowany aktor HUD zarządzający widgetem `WBP_PlayerHUD`. Reaguje na eventy zmiany postaci (`OnPossessedPawnChanged`) i automatycznie subskrybuje pasek życia.
+- **`APlayerHUD`:** Odizolowany aktor HUD zarządzający widgetem `WBP_PlayerHUD`. Reaguje na eventy zmiany postaci (`OnPossessedPawnChanged`) i automatycznie subskrybuje pasek życia oraz statusy.
 
 ### Filar 2: System Obrażeń, Odrzutów i Kinetyki
 - **`UDamageableComponent`:** 
   - Uniwersalny komponent zdrowia i wytrzymałości (`MaxDurability`, `InitialDurability`, `CurrentDurability`).
-  - Automatyczne wiązanie zdarzeń upadku (`LandedDelegate` -> Fall Damage) oraz zderzeń ze ścianami w locie i przy ślizgu po ziemi (`OnComponentHit`).
+  - Automatyczne wiązanie zdarzeń upadku (`LandedDelegate` -> Fall Damage) oraz zderzeń ze ścianami w locie i przy ślizgu po ziemi oraz uderzeń w sufit (`OnComponentHit`).
   - Wykrywanie energii zderzenia na podstawie prędkości prostopadłej (`DotProduct` z normalną ściany).
 - **`UKnockbackComponent`:**
   - Obsługa odrzutów dla postaci (przez `LaunchCharacter` z mnożnikiem `AirborneMultiplier`) oraz obiektów fizycznych (`AddImpulse`).
@@ -83,10 +89,23 @@ Source/MyProject/
   - `ApplyDirectionalKnockback`: Kierunkowy odrzut z regulowanym podbiciem w górę (`VerticalLiftRatio`).
   - `ApplyVortexPull`: Wir przyciągający jednostki i obiekty do centrum.
 
-### Filar 3: Struktury Lochu, Tożsamość Materiałowa i Interakcje
+### Filar 3: Reaktywny System Statusów Żywiołowych (Elements & Status Effects)
+- **`UStatusEffectComponent` w `Shared/Components`:**
+  - Odpowiada wyłącznie za stan podmiotu: przechowywanie statusów w `TMap<EStatusEffectType, FActiveStatusEffectInstance>`, odliczanie czasu trwania, brak duplikatów i cykl życia.
+  - Obrażenia okresowe DoT (`Burning`) aplikowane przez `UDamageableComponent`.
+  - Architektura oparta na zdarzeniach (`OnStatusEffectApplied`, `OnStatusEffectRemoved`, `OnElementalReactionTriggered`).
+  - Optymalizacja `Tick on-demand`: komponent tickuje tylko wtedy, gdy na celu znajduje się przynajmniej jeden aktywny status.
+- **`UElementalChemistryLibrary` w `Environment/Elements/Utilities`:**
+  - Dedykowany silnik chemii regułowej (Chemistry Engine).
+  - Weryfikacja kompatybilności materiałowej (`CanMaterialReceiveStatus`).
+  - Ewaluacja reakcji żywiołowych zwracająca DTO `FElementalReactionResult` (`EvaluateReaction`):
+    - `Wet` + `Burning` $\rightarrow$ zgaszenie ognia, odparowanie wody (`Steam_Extinguish`).
+    - `Oiled` + `Burning` $\rightarrow$ zapłon oleju, natychmiastowe obrażenia bonusowe (`Oil_Ignition`).
+    - `Wet` + `Electrified` $\rightarrow$ szok przewodzący prąd (`Conductive_Shock`).
+
+### Filar 4: Struktury Lochu, Tożsamość Materiałowa i Interakcje
 - **`EPhysicalMaterialType` w `Shared/Enums`:**
   - Współdzielone przez cały świat: ściany, wazy, graczy i potwory (`Flesh`, `Stone`, `Wood`, `Metal`, `Glass`).
-  - Podstawa pod przyszłe reakcje żywiołowe (`Elements`).
 - **`UInteractionComponent` w `Shared/Components`:**
   - Działa zarówno dla Gracza, jak i dla AI (używa `GetActorEyesViewPoint`).
   - Obsługuje chwytanie/rzucanie obiektów (`IGrabbableInterface`) oraz aktywację logiczną (`IInteractableInterface`).
@@ -94,19 +113,16 @@ Source/MyProject/
   - Klasa bazowa dla podłóg, ścian, sufitów i filarów (`BlockAll`, brak narzutu fizyki Chaos).
   - Konfigurowalna niszczalność (`bIsDestructible = true/false`).
   - **Punch-Through (Przebijanie barykad):** Gdy uderzenie o ścianę przekracza jej HP i ją niszczy, wyłączana jest natychmiast kolizja, a pęd uderzającego obiektu/gracza jest przekazywany dalej za ścianę pomniejszony o opór (`PunchThroughVelocityRetention = 0.6f`).
-- **`AInteractivePropBase` & `AExplosiveBarrelProp`:**
-  - Fizyczne rekwizyty (`SimulatePhysics = true`), podnoszenie i rzucanie bezwładnościowe (`IGrabbableInterface`).
-  - Blokada zadawania obrażeń otoczeniu w trakcie trzymania w rękach (`IsGrabbed() == true`) – eliminacja glitchy przy ocieraniu o ściany.
-  - Detonacja wybuchającej beczki po osiągnięciu 0 HP.
+- **`AVolatileProp` & `AExplosiveBarrelProp`:**
+  - `AVolatileProp`: Niestabilne obiekty lochu (bomby, miny, bańki żywiołów, beczki). Konfigurowalny promień, obrażenia, odrzut, żywioł i czas trwania statusu.
+  - `AExplosiveBarrelProp`: Dedykowana specjalizacja `AVolatileProp` gwarantująca pełną kompatybilność z blueprintem `BP_ExplosiveBarrel`.
+  - Blokada zadawania obrażeń otoczeniu w trakcie trzymania w rękach (`IsGrabbed() == true`).
 
----
-
-## 4. Kolejne Kroki i Priorytety
-
-1. **System Reakcji Żywiołowych (Elements / Status Effects):**
-   - Komponent reakcji (np. `UStatusEffectComponent`): stany `Burning`, `Wet`, `Electrified`, `Oiled`.
-   - Podpalanie drewnianych ścian i wybuchających beczek, reakcje Flesh vs Stone.
-2. **Mechanika Walki i Broni Gracza:**
-   - Ataki bronią białą (ciosy mieczem/młotem rozbijające słabe punkty otoczenia i odrzucające wrogów).
-3. **Logiczne Mechanizmy Lochu:**
-   - Dźwignie (`ASimpleSwitchProp`), płyty naciskowe i kraty/drzwi otwierane sygnałem logicznym.
+### Filar 5: Warstwa Prezentacji i UI (HUD & Status Bar)
+- **`UStatusEffectIconWidget`:** Klasa bazowa dla ikony aktywnego statusu (`WBP_StatusIcon`).
+  - Posiada opcjonalne bindingi na `Image`, `DurationText` i `ProgressBar`.
+  - Zapewnia domyślne kolory żywiołów (`Burning`: pomarańcz/czerwony, `Wet`: błękit, `Electrified`: żółty, `Oiled`: fiolet).
+- **`UPlayerHUDWidget`:**
+  - Dynamicznie spawnuje ikonki statusów w kontenerze `StatusEffectsContainer` (np. `HorizontalBox`).
+  - Automatycznie aktualizuje czas trwania i usuwa ikonki po wygaszeniu statusu.
+  - Odpala eventy `OnStatusEffectAdded` i `OnStatusEffectRemoved` dla logiki Blueprint.

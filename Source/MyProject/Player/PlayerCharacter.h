@@ -15,6 +15,7 @@ class UPlayerCameraComponent;
 class UInteractionComponent;
 class UDamageableComponent;
 class UKnockbackComponent;
+class UStatusEffectComponent;
 struct FInputActionValue;
 
 UCLASS(Abstract)
@@ -46,6 +47,9 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UKnockbackComponent> KnockbackComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USpringArmComponent> SpringArmComponent;
