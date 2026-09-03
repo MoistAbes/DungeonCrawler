@@ -120,9 +120,16 @@ Source/MyProject/
 
 ### Filar 5: Warstwa Prezentacji i UI (HUD & Status Bar)
 - **`UStatusEffectIconWidget`:** Klasa bazowa dla ikony aktywnego statusu (`WBP_StatusIcon`).
-  - Posiada opcjonalne bindingi na `Image`, `DurationText` i `ProgressBar`.
-  - Zapewnia domyślne kolory żywiołów (`Burning`: pomarańcz/czerwony, `Wet`: błękit, `Electrified`: żółty, `Oiled`: fiolet).
+  - Posiada opcjonalne bindingi na `IconImage`, `DurationText` i `ProgressBar`.
+  - Posiada mapę tekstur `StatusTextures` (`TMap<EStatusEffectType, TObjectPtr<UTexture2D>>`) – gdy ikona ma dedykowaną teksturę graficzną, zachowuje oryginalne kolory (`FLinearColor::White`), a w przypadku braku tekstury barwi się domyślnym kolorem żywiołu (`GetDefaultStatusColor`).
 - **`UPlayerHUDWidget`:**
-  - Dynamicznie spawnuje ikonki statusów w kontenerze `StatusEffectsContainer` (np. `HorizontalBox`).
+  - Dynamicznie spawnuje ikonki statusów w kontenerze `StatusEffectsContainer` (`HorizontalBox`).
+  - Kontener ma ustawione `Auto Size = True`, dzięki czemu automatycznie dopasowuje szerokość i wysokość do dowolnej liczby ikonek o dowolnym rozmiarze bez ich deformowania (brak spłaszczania elipsy).
   - Automatycznie aktualizuje czas trwania i usuwa ikonki po wygaszeniu statusu.
   - Odpala eventy `OnStatusEffectAdded` i `OnStatusEffectRemoved` dla logiki Blueprint.
+
+---
+
+## 6. Powiązane Procedury i Dokumentacje (SOP)
+- **Pipeline Graficzny i Konfiguracja Ikon Statusu:** Pełna procedura przygotowania grafik PNG 512x512, skryptu usuwania białej poświaty (Alpha Bleed / Fringing), parametrów kompresji w UE i rejestracji w UI znajduje się w dedykowanym dokumencie:  
+  👉 [`.context/UI_STATUS_ICONS_PIPELINE.md`](file:///E:/UE_PROJECTS/MyProject/.context/UI_STATUS_ICONS_PIPELINE.md)

@@ -50,13 +50,14 @@ void UStatusEffectIconWidget::SetupStatusIcon(EStatusEffectType InType, float In
     // 2. Kolorowanie i reset parametru materiału obwódki
     if (DynamicCooldownMaterial)
     {
-        DynamicCooldownMaterial->SetVectorParameterValue(TEXT("Color"), StatusColor);
+        // Domyślnie używamy jasnego białego (zgodnie z preferencją czytelnego paska timera)
+        DynamicCooldownMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor::White);
         DynamicCooldownMaterial->SetScalarParameterValue(TEXT("Percent"), 1.0f);
     }
 
     if (BorderCooldownImage && !DynamicCooldownMaterial)
     {
-        BorderCooldownImage->SetColorAndOpacity(StatusColor);
+        BorderCooldownImage->SetColorAndOpacity(FLinearColor::White);
     }
 
     // 3. Tekst
