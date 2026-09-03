@@ -2,9 +2,18 @@
 
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
-#include "Components/ProgressBar.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/Texture2D.h"
+
+UStatusEffectIconWidget::UStatusEffectIconWidget(const FObjectInitializer& ObjectInitializer)
+    : Super(ObjectInitializer)
+{
+    // Domyślna estetyczna paleta kolorów dla żywiołów
+    StatusColors.Add(EStatusEffectType::Burning, FLinearColor(1.0f, 0.35f, 0.05f, 1.0f));     // Ognisty pomarańcz
+    StatusColors.Add(EStatusEffectType::Wet, FLinearColor(0.15f, 0.7f, 1.0f, 1.0f));          // Wodny błękit
+    StatusColors.Add(EStatusEffectType::Electrified, FLinearColor(1.0f, 0.85f, 0.1f, 1.0f));  // Piorunowy żółty
+    StatusColors.Add(EStatusEffectType::Oiled, FLinearColor(0.7f, 0.25f, 0.95f, 1.0f));       // Oleisty fiolet
+}
 
 void UStatusEffectIconWidget::NativeConstruct()
 {
@@ -27,7 +36,7 @@ void UStatusEffectIconWidget::SetupStatusIcon(EStatusEffectType InType, float In
     StatusType = InType;
     EnsureDynamicMaterial();
 
-    const FLinearColor StatusColor = GetDefaultStatusColor(InType);
+    const FLinearColor StatusColor = GetStatusColor(InType);
 
     // 1. Podpięcie dedykowanej tekstury z mapy
     bool bHasCustomTexture = false;
@@ -41,16 +50,15 @@ void UStatusEffectIconWidget::SetupStatusIcon(EStatusEffectType InType, float In
     }
 
     // Jeśli mamy dedykowaną teksturę graficzną, zachowujemy jej oryginalne barwy (White).
-    // Jeśli brak dedykowanej grafiki (np. generyczna maska), barwimy domyślnym kolorem żywiołu.
+    // Jeśli brak dedykowanej grafiki (np. generyczna maska), barwimy kolorem żywiołu.
     if (IconImage)
     {
         IconImage->SetColorAndOpacity(bHasCustomTexture ? FLinearColor::White : StatusColor);
     }
 
-    // 2. Kolorowanie i reset parametru materiału obwódki
+    // 2. Kolorowanie i reset parametru materiału obwódki (zegara)
     if (DynamicCooldownMaterial)
     {
-        // Domyślnie używamy jasnego białego (zgodnie z preferencją czytelnego paska timera)
         DynamicCooldownMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor::White);
         DynamicCooldownMaterial->SetScalarParameterValue(TEXT("Percent"), 1.0f);
     }
@@ -60,17 +68,10 @@ void UStatusEffectIconWidget::SetupStatusIcon(EStatusEffectType InType, float In
         BorderCooldownImage->SetColorAndOpacity(FLinearColor::White);
     }
 
-    // 3. Tekst
+    // 3. Opcjonalny tekst sekund (jeśli istnieje w widżecie)
     if (DurationText)
     {
         DurationText->SetText(FText::FromString(FString::Printf(TEXT("%.0fs"), InDuration)));
-    }
-
-    // 4. Ewentualny progress bar
-    if (DurationProgressBar)
-    {
-        DurationProgressBar->SetPercent(1.0f);
-        DurationProgressBar->SetFillColorAndOpacity(StatusColor);
     }
 
     OnStatusInitialized(InType, InDuration, StatusColor);
@@ -90,26 +91,14 @@ void UStatusEffectIconWidget::UpdateDuration(float RemainingTime, float TotalTim
     {
         DurationText->SetText(FText::FromString(FString::Printf(TEXT("%.0fs"), FMath::Max(0.0f, RemainingTime))));
     }
-
-    if (DurationProgressBar)
-    {
-        DurationProgressBar->SetPercent(Ratio);
-    }
 }
 
-FLinearColor UStatusEffectIconWidget::GetDefaultStatusColor(EStatusEffectType InType)
+FLinearColor UStatusEffectIconWidget::GetStatusColor(EStatusEffectType InType) const
 {
-    switch (InType)
+    if (const FLinearColor* FoundColor = StatusColors.Find(InType))
     {
-    case EStatusEffectType::Burning:
-        return FLinearColor(1.0f, 0.35f, 0.05f, 1.0f); // Ognisty pomarańcz/czerwień
-    case EStatusEffectType::Wet:
-        return FLinearColor(0.15f, 0.7f, 1.0f, 1.0f);  // Wodny wyrazisty błękit
-    case EStatusEffectType::Electrified:
-        return FLinearColor(1.0f, 0.85f, 0.1f, 1.0f);  // Piorunowy wyrazisty żółty
-    case EStatusEffectType::Oiled:
-        return FLinearColor(0.7f, 0.25f, 0.95f, 1.0f); // Oleisty fiolet
-    default:
-        return FLinearColor::White;
+        return *FoundColor;
     }
+
+    return FLinearColor::White;
 }
