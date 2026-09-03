@@ -30,18 +30,21 @@ void UStatusEffectIconWidget::SetupStatusIcon(EStatusEffectType InType, float In
     const FLinearColor StatusColor = GetDefaultStatusColor(InType);
 
     // 1. Podpięcie dedykowanej tekstury z mapy
+    bool bHasCustomTexture = false;
     if (TObjectPtr<UTexture2D>* FoundTex = StatusTextures.Find(InType))
     {
         if (FoundTex && FoundTex->Get() && IconImage)
         {
             IconImage->SetBrushFromTexture(FoundTex->Get());
+            bHasCustomTexture = true;
         }
     }
 
-    // Zawsze barwimy symbol (IconImage) kolorem danego żywiołu
+    // Jeśli mamy dedykowaną teksturę graficzną, zachowujemy jej oryginalne barwy (White).
+    // Jeśli brak dedykowanej grafiki (np. generyczna maska), barwimy domyślnym kolorem żywiołu.
     if (IconImage)
     {
-        IconImage->SetColorAndOpacity(StatusColor);
+        IconImage->SetColorAndOpacity(bHasCustomTexture ? FLinearColor::White : StatusColor);
     }
 
     // 2. Kolorowanie i reset parametru materiału obwódki
