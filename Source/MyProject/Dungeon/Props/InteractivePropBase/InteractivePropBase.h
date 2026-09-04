@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/IInteractableInterface.h"
@@ -74,6 +73,20 @@ protected:
 
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Prop|State")
     bool bIsBeingCarried = false;
+
+    // --- Konfiguracja kinetyczna uderzeń (Kinetic Impact Transfer) ---
+
+    /** Czy ten prop przekazuje odrzut i obrażenia kinetyczne uderzanym postaciom */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Kinetic")
+    bool bTransferKineticKnockback = true;
+
+    /** Minimalna prędkość propa w stronę celu, aby wywołać odrzut postaci (cm/s) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Kinetic", meta = (ClampMin = "50.0"))
+    float MinImpactSpeedForKnockback = 300.0f;
+
+    /** Mnożnik siły odrzutu przekazywanego celowi */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Kinetic", meta = (ClampMin = "0.1"))
+    float KnockbackStrengthMultiplier = 1.0f;
 
     UFUNCTION()
     virtual void HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 

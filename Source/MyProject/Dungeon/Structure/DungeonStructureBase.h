@@ -24,7 +24,7 @@ public:
 	ADungeonStructureBase();
 
 	// --- IMaterialProviderInterface ---
-	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override;
+	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
 
 	// --- Gettery ---
 	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")

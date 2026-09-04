@@ -24,6 +24,8 @@ void ASimpleSwitchProp::Interact(AActor* Interactor)
 	UE_LOG(LogTemp, Warning, TEXT("[SwitchEntity] Toggled state: %s by Interactor: %s"), 
 		bIsActive ? TEXT("ON") : TEXT("OFF"), 
 		Interactor ? *Interactor->GetName() : TEXT("Unknown"));
+
+	OnSwitchToggled.Broadcast(bIsActive, Interactor);
 }
 
 bool ASimpleSwitchProp::CanInteract(const AActor* Interactor) const

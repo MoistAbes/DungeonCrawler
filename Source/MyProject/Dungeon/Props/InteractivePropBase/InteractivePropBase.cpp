@@ -1,5 +1,8 @@
 ﻿#include "InteractivePropBase.h"
+
 #include "Components/StaticMeshComponent.h"
+#include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
@@ -36,13 +39,11 @@ void AInteractivePropBase::PostInitializeComponents()
 
     if (MeshComponent)
     {
-        MeshComponent->OnComponentHit.RemoveAll(this);
         MeshComponent->OnComponentHit.AddDynamic(this, &AInteractivePropBase::HandleImpactDamage);
     }
 
     if (DamageableComponent)
     {
-        DamageableComponent->OnDestroyed.RemoveAll(this);
         DamageableComponent->OnDestroyed.AddDynamic(this, &AInteractivePropBase::HandleOnDestroyed);
     }
 }
@@ -50,13 +51,6 @@ void AInteractivePropBase::PostInitializeComponents()
 void AInteractivePropBase::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (MeshComponent)
-    {
-        MeshComponent->SetCollisionObjectType(ECC_PhysicsBody);
-        MeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
-        MeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-    }
 }
 
 void AInteractivePropBase::Interact(AActor* Interactor)
@@ -105,30 +99,75 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                                              UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                              const FHitResult& Hit)
 {
-    if (!MeshComponent || bIsBeingCarried) return;
-
-    // 1. Parametry fizyczne propa
-    const FVector PropVelocity = MeshComponent->GetPhysicsLinearVelocity();
-
-    // 2. Parametry obiektu uderzającego
-    FVector OtherVelocity = FVector::ZeroVector;
-    if (OtherComp && OtherComp->IsSimulatingPhysics())
+    if (!MeshComponent || bIsBeingCarried || !OtherActor || OtherActor == this)
     {
-        OtherVelocity = OtherComp->GetPhysicsLinearVelocity();
-    }
-    else if (OtherActor)
-    {
-        OtherVelocity = OtherActor->GetVelocity();
+        return;
     }
 
-    // 3. Względna prędkość w osi normalnej zderzenia (uderzenie prostopadłe)
-    const FVector RelativeVelocity = PropVelocity - OtherVelocity;
-    const float ImpactSpeed = -FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal);
+    // 1. Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
+    if (const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(OtherActor))
+    {
+        if (Grabbable->IsGrabbed())
+        {
+            return;
+        }
+    }
 
-    // 4. Aplikacja obrażeń kinetycznych (tylko gdy zbliżają się do siebie z dużą siłą)
+    // 2. Obliczamy prostopadłą prędkość zderzenia przez zunifikowaną bibliotekę kinetyczną
+    const float ImpactSpeed = UKineticForceLibrary::CalculateImpactSpeed(MeshComponent, OtherActor, OtherComp, Hit.ImpactNormal);
+
+    // 3. Aplikacja obrażeń kinetycznych na samego siebie
     if (ImpactSpeed > 0.0f && DamageableComponent)
     {
         DamageableComponent->ApplyKineticImpact(ImpactSpeed);
+    }
+
+    // 4. Przekazywanie pędu i odrzutu uderzanemu celowi (np. gracz lub potwory z KnockbackComponent)
+    if (bTransferKineticKnockback && OtherActor)
+    {
+        const FVector PropVelocity = MeshComponent->GetPhysicsLinearVelocity();
+        const float PropSpeed = PropVelocity.Size();
+
+        if (PropSpeed >= MinImpactSpeedForKnockback)
+        {
+            // Sprawdzamy prędkość, z jaką prop nadlatywał w stronę celu
+            const FVector ToTarget = (OtherActor->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+            const float ClosingSpeedByNormal = -FVector::DotProduct(PropVelocity, Hit.ImpactNormal);
+            const float ClosingSpeedByDirection = FVector::DotProduct(PropVelocity, ToTarget);
+            const float EffectivePropSpeed = FMath::Max(ClosingSpeedByNormal, ClosingSpeedByDirection);
+
+            if (EffectivePropSpeed >= MinImpactSpeedForKnockback)
+            {
+                // Skalowanie masą (np. 170kg uderza mocniej niż lekki stołek 25kg)
+                const float Mass = GetMass();
+                const float MassFactor = FMath::Clamp(Mass > 0.0f ? (Mass / 50.0f) : 1.0f, 0.5f, 3.5f);
+                const float KnockbackForce = EffectivePropSpeed * MassFactor * KnockbackStrengthMultiplier;
+
+                // Kierunek odrzutu zgodny z wektorem lotu propa, z lekkim uniesieniem w górę (Upward Bias)
+                FVector KnockbackDir = PropVelocity.GetSafeNormal();
+                if (KnockbackDir.IsNearlyZero())
+                {
+                    KnockbackDir = ToTarget;
+                }
+                KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.25f, 0.1f, 1.0f);
+                KnockbackDir.Normalize();
+
+                // Aplikujemy odrzut na cel
+                if (UKnockbackComponent* TargetKnockback = OtherActor->FindComponentByClass<UKnockbackComponent>())
+                {
+                    TargetKnockback->ApplyImpulseForce(KnockbackDir, KnockbackForce, this);
+                }
+
+                // Zadajemy obrażenia uderzonemu celowi
+                if (UDamageableComponent* TargetDamageable = OtherActor->FindComponentByClass<UDamageableComponent>())
+                {
+                    TargetDamageable->ApplyKineticImpact(EffectivePropSpeed * MassFactor);
+                }
+
+                UE_LOG(LogTemp, Warning, TEXT("[PropKineticTransfer] %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
+                    *GetName(), *OtherActor->GetName(), EffectivePropSpeed, KnockbackForce, Mass);
+            }
+        }
     }
 }
 

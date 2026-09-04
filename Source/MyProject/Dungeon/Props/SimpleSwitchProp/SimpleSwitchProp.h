@@ -9,6 +9,8 @@
 
 class UStaticMeshComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSwitchToggledSignature, bool, bNewState, AActor*, Interactor);
+
 /**
  * Domenowa encja przełącznika/dźwigni w lochu.
  * Implementuje kontrakt logiczny (IInteractableInterface) oraz tożsamość materiałową.
@@ -28,6 +30,20 @@ public:
 	virtual void Interact(AActor* Interactor) override;
 	virtual bool CanInteract(const AActor* Interactor) const override;
 	virtual FText GetInteractionPrompt(const AActor* Interactor) const override;
+
+	// --- Gettery / Settery ---
+	UFUNCTION(BlueprintPure, Category = "Switch|State")
+	bool IsActive() const { return bIsActive; }
+
+	UFUNCTION(BlueprintPure, Category = "Switch|State")
+	bool CanBeUsed() const { return bCanBeUsed; }
+
+	UFUNCTION(BlueprintCallable, Category = "Switch|State")
+	void SetCanBeUsed(bool bInCanBeUsed) { bCanBeUsed = bInCanBeUsed; }
+
+	// --- Eventy ---
+	UPROPERTY(BlueprintAssignable, Category = "Switch|Events")
+	FOnSwitchToggledSignature OnSwitchToggled;
 
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

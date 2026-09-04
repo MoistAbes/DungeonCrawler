@@ -1,13 +1,85 @@
 ﻿#include "KineticForceLibrary.h"
 
+#include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+
+namespace KineticHelpers
+{
+    static FVector GetEntityVelocity(const AActor* Actor, const UPrimitiveComponent* Comp)
+    {
+        if (Comp && Comp->IsSimulatingPhysics())
+        {
+            return Comp->GetPhysicsLinearVelocity();
+        }
+        if (const ACharacter* Character = Cast<ACharacter>(Actor))
+        {
+            if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+            {
+                return CMC->GetLastUpdateVelocity();
+            }
+            return Character->GetVelocity();
+        }
+        if (Actor)
+        {
+            return Actor->GetVelocity();
+        }
+        return FVector::ZeroVector;
+    }
+
+    static UPrimitiveComponent* GetSimulatingPrimitive(const AActor* Actor)
+    {
+        if (!Actor)
+        {
+            return nullptr;
+        }
+
+        if (UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+        {
+            if (RootPrim->IsSimulatingPhysics())
+            {
+                return RootPrim;
+            }
+        }
+
+        TArray<UPrimitiveComponent*> Primitives;
+        Actor->GetComponents<UPrimitiveComponent>(Primitives);
+        for (UPrimitiveComponent* Prim : Primitives)
+        {
+            if (Prim && Prim->IsSimulatingPhysics())
+            {
+                return Prim;
+            }
+        }
+
+        return nullptr;
+    }
+}
+
+float UKineticForceLibrary::CalculateImpactSpeed(
+    const UPrimitiveComponent* SelfComp,
+    const AActor* OtherActor,
+    const UPrimitiveComponent* OtherComp,
+    const FVector& HitNormal)
+{
+    const AActor* SelfActor = SelfComp ? SelfComp->GetOwner() : nullptr;
+    const FVector SelfVelocity = KineticHelpers::GetEntityVelocity(SelfActor, SelfComp);
+    const FVector OtherVelocity = KineticHelpers::GetEntityVelocity(OtherActor, OtherComp);
+
+    // Względna prędkość w osi normalnej zderzenia (prędkość zbliżania się obiektów)
+    const FVector RelativeVelocity = SelfVelocity - OtherVelocity;
+    const float ClosingSpeed = -FVector::DotProduct(RelativeVelocity, HitNormal);
+
+    return FMath::Max(0.0f, ClosingSpeed);
+}
 
 void UKineticForceLibrary::ApplyExplosion(
     const UObject* WorldContextObject,
@@ -44,7 +116,7 @@ void UKineticForceLibrary::ApplyExplosion(
         QueryParams.AddIgnoredActor(InstigatorActor);
     }
 
-    // Wykrywamy obiekty fizyczne oraz postacie
+    // Wykrywamy postacie oraz obiekty fizyczne i dynamiczne
     FCollisionObjectQueryParams ObjectParams;
     ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
     ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
@@ -63,30 +135,29 @@ void UKineticForceLibrary::ApplyExplosion(
         return;
     }
 
-    TSet<AActor*> ProcessedActors;
+    TSet<AActor*> DamagedActors;
 
     for (const FOverlapResult& Overlap : Overlaps)
     {
         AActor* HitActor = Overlap.GetActor();
-        if (!HitActor || ProcessedActors.Contains(HitActor))
+        if (!HitActor || DamagedActors.Contains(HitActor))
         {
             continue;
         }
-        ProcessedActors.Add(HitActor);
+        DamagedActors.Add(HitActor);
 
+        // Obliczamy odległość od epicentrum do krawędzi obiektu
         const FVector TargetLocation = HitActor->GetActorLocation();
-        const FVector Delta = TargetLocation - Origin;
-        const float Distance = Delta.Size();
-
+        const float Distance = FVector::Dist(Origin, TargetLocation);
         if (Distance > Radius)
         {
             continue;
         }
 
-        // Liniowy spadek siły i obrażeń wraz z odległością od centrum wybuchu
-        const float FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.1f, 1.0f);
+        // Współczynnik spadku siły z odległością (liniowy falloff, min. 25% na skraju)
+        const float FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.25f, 1.0f);
 
-        // 1. Obrażenia przez DamageableComponent (jeśli aktor posiada komponent)
+        // 1. Zadawanie obrażeń przez DamageableComponent
         if (BaseDamage > 0.0f)
         {
             if (UDamageableComponent* Damageable = HitActor->FindComponentByClass<UDamageableComponent>())
@@ -94,35 +165,31 @@ void UKineticForceLibrary::ApplyExplosion(
                 const float ScaledDamage = BaseDamage * FalloffFactor;
                 Damageable->ApplyDamage(ScaledDamage);
             }
-            else
-            {
-                // Fallback na standardowy system obrażeń Unreal Engine
-                UGameplayStatics::ApplyDamage(
-                    HitActor,
-                    BaseDamage * FalloffFactor,
-                    InstigatorActor ? InstigatorActor->GetInstigatorController() : nullptr,
-                    InstigatorActor,
-                    DamageTypeClass);
-            }
         }
 
-        // 2. Odrzut przez KnockbackComponent
+        // 2. Aplikowanie odrzutu przez KnockbackComponent lub bezpośrednio na bryłę fizyczną Chaos
         if (BaseKnockbackForce > 0.0f)
         {
+            FVector KnockbackDir = (TargetLocation - Origin).GetSafeNormal();
+            if (KnockbackDir.IsNearlyZero())
+            {
+                KnockbackDir = FVector::UpVector;
+            }
+
+            // Dodajemy lekkie podbicie w górę (Upward Bias), by eksplozje ładnie podrywały cele z ziemi
+            KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.35f, 0.1f, 1.0f);
+            KnockbackDir.Normalize();
+
+            const float ScaledForce = BaseKnockbackForce * FalloffFactor;
+
             if (UKnockbackComponent* Knockback = HitActor->FindComponentByClass<UKnockbackComponent>())
             {
-                FVector KnockbackDir = Delta.GetSafeNormal();
-                if (KnockbackDir.IsNearlyZero())
-                {
-                    KnockbackDir = FVector::UpVector;
-                }
-
-                // Dodajemy lekkie podbicie w górę (Upward Bias), by eksplozje ładnie podrywały cele z ziemi
-                KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.35f, 0.1f, 1.0f);
-                KnockbackDir.Normalize();
-
-                const float ScaledForce = BaseKnockbackForce * FalloffFactor;
                 Knockback->ApplyImpulseForce(KnockbackDir, ScaledForce, InstigatorActor, false);
+            }
+            else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(HitActor))
+            {
+                // bVelChange = true zapewnia spójną prędkość odrzutu niezależnie od różnicy mas
+                PhysComp->AddImpulse(KnockbackDir * ScaledForce, NAME_None, true);
             }
         }
     }
@@ -140,19 +207,23 @@ void UKineticForceLibrary::ApplyDirectionalKnockback(
         return;
     }
 
+    FVector AdjustedDirection = Direction.GetSafeNormal2D();
+    if (AdjustedDirection.IsNearlyZero())
+    {
+        AdjustedDirection = TargetActor->GetActorForwardVector();
+    }
+
+    // Dodajemy pionowe uniesienie (Vertical Lift)
+    AdjustedDirection.Z = FMath::Clamp(VerticalLiftRatio, 0.0f, 1.0f);
+    AdjustedDirection.Normalize();
+
     if (UKnockbackComponent* Knockback = TargetActor->FindComponentByClass<UKnockbackComponent>())
     {
-        FVector AdjustedDirection = Direction.GetSafeNormal2D();
-        if (AdjustedDirection.IsNearlyZero())
-        {
-            AdjustedDirection = TargetActor->GetActorForwardVector();
-        }
-
-        // Dodajemy pionowe uniesienie (Vertical Lift)
-        AdjustedDirection.Z = FMath::Clamp(VerticalLiftRatio, 0.0f, 1.0f);
-        AdjustedDirection.Normalize();
-
         Knockback->ApplyImpulseForce(AdjustedDirection, Force, InstigatorActor, false);
+    }
+    else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(TargetActor))
+    {
+        PhysComp->AddImpulse(AdjustedDirection * Force, NAME_None, true);
     }
 }
 
@@ -192,6 +263,7 @@ void UKineticForceLibrary::ApplyVortexPull(
     FCollisionObjectQueryParams ObjectParams;
     ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
     ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+    ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 
     const bool bHit = World->OverlapMultiByObjectType(
         Overlaps,
@@ -217,21 +289,26 @@ void UKineticForceLibrary::ApplyVortexPull(
         }
         ProcessedActors.Add(HitActor);
 
+        const FVector TargetLocation = HitActor->GetActorLocation();
+        const FVector Delta = Center - TargetLocation; // Wektor skierowany DO środka wiru
+        const float Distance = Delta.Size();
+
+        if (Distance > Radius || Distance < 50.0f)
+        {
+            continue;
+        }
+
+        const float FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.2f, 1.0f);
+        const FVector PullDirection = Delta.GetSafeNormal();
+        const float ScaledPull = PullStrength * FalloffFactor;
+
         if (UKnockbackComponent* Knockback = HitActor->FindComponentByClass<UKnockbackComponent>())
         {
-            const FVector TargetLocation = HitActor->GetActorLocation();
-            const FVector Delta = Center - TargetLocation; // Wektor skierowany DO środka wiru
-            const float Distance = Delta.Size();
-
-            if (Distance > Radius || Distance < 50.0f)
-            {
-                continue;
-            }
-
-            const float FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.2f, 1.0f);
-            const FVector PullDirection = Delta.GetSafeNormal();
-
-            Knockback->ApplyImpulseForce(PullDirection, PullStrength * FalloffFactor, InstigatorActor, false);
+            Knockback->ApplyImpulseForce(PullDirection, ScaledPull, InstigatorActor, false);
+        }
+        else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(HitActor))
+        {
+            PhysComp->AddImpulse(PullDirection * ScaledPull, NAME_None, true);
         }
     }
 }

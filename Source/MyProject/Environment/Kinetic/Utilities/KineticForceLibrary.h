@@ -5,6 +5,7 @@
 #include "KineticForceLibrary.generated.h"
 
 class UDamageType;
+class UPrimitiveComponent;
 
 /**
  * Biblioteka funkcji pomocniczych do aplikowania sił kinetycznych, wybuchów i odrzutów środowiskowych.
@@ -15,6 +16,18 @@ class MYPROJECT_API UKineticForceLibrary : public UBlueprintFunctionLibrary
     GENERATED_BODY()
 
 public:
+    /**
+     * Oblicza prędkość uderzenia prostopadłego (Closing Speed) pomiędzy dwoma obiektami przy zderzeniu.
+     * Uwzględnia fizykę Chaos, ruch postaci (CharacterMovementComponent) oraz geometrię normalnej zderzenia.
+     * Zwraca wartość >= 0.0f (0.0f jeśli obiekty oddalają się od siebie).
+     */
+    UFUNCTION(BlueprintPure, Category = "Environment|Kinetic")
+    static float CalculateImpactSpeed(
+        const UPrimitiveComponent* SelfComp,
+        const AActor* OtherActor,
+        const UPrimitiveComponent* OtherComp,
+        const FVector& HitNormal);
+
     /**
      * Aplikuje wybuch radialny: zadaje obrażenia przez DamageableComponent i odrzuca przez KnockbackComponent.
      */
