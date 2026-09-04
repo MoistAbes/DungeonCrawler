@@ -118,6 +118,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "StatusEffect|Burning", meta = (ClampMin = "0.1"))
     float BurnTickInterval = 1.0f;
 
+    /** Flaga włączająca wyświetlanie kolorowych etykiet 3D nad obiektem w świecie gry */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "StatusEffect|Debug")
+    bool bShowDebugInWorld = true;
+
 private:
     /** Aktywne statusy indeksowane typem (gwarancja braku duplikatów) */
     UPROPERTY(VisibleInstanceOnly, Category = "StatusEffect|State")

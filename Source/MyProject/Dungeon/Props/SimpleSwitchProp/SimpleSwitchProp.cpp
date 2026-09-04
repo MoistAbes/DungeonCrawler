@@ -1,6 +1,5 @@
 ﻿#include "SimpleSwitchProp.h"
 #include "Components/StaticMeshComponent.h"
-#include "MyProject/MyProject.h"
 
 ASimpleSwitchProp::ASimpleSwitchProp()
 {

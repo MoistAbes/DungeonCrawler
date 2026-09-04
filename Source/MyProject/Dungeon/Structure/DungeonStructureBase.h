@@ -8,10 +8,12 @@
 
 class UStaticMeshComponent;
 class UDamageableComponent;
+class UStatusEffectComponent;
 
 /**
  * Bazowy aktor dla modularnych elementów architektury lochu (ściany, podłogi, sufity, filary).
  * Domyślnie jest stabilnym elementem statycznym (bez fizyki), ale może być zniszczalny.
+ * Posiada UDamageableComponent oraz UStatusEffectComponent do reakcji na żywioły i DoT.
  */
 UCLASS(Abstract)
 class MYPROJECT_API ADungeonStructureBase : public AActor, public IMaterialProviderInterface
@@ -34,6 +36,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
+	UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
+
 protected:
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
@@ -47,6 +52,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja

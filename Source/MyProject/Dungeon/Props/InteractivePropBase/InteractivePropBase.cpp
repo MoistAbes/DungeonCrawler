@@ -1,7 +1,7 @@
 ﻿#include "InteractivePropBase.h"
 #include "Components/StaticMeshComponent.h"
-#include "MyProject/MyProject.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
 AInteractivePropBase::AInteractivePropBase()
 {
@@ -27,6 +27,7 @@ AInteractivePropBase::AInteractivePropBase()
     MeshComponent->SetAngularDamping(5.0f);
 
     DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
+    StatusEffectComponent = CreateDefaultSubobject<UStatusEffectComponent>(TEXT("StatusEffectComponent"));
 }
 
 void AInteractivePropBase::PostInitializeComponents()

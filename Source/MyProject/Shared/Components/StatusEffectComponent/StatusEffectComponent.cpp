@@ -1,5 +1,7 @@
 ﻿#include "StatusEffectComponent.h"
 
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
 #include "GameFramework/Actor.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
@@ -59,6 +61,57 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         }
     }
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    // Dynamiczny podgląd 3D nad obiektem w świecie gry
+    if (bShowDebugInWorld && GetWorld())
+    {
+        if (const AActor* Owner = GetOwner())
+        {
+            FVector Origin, BoxExtent;
+            Owner->GetActorBounds(true, Origin, BoxExtent);
+            const FVector BaseLocation = Origin + FVector(0.0f, 0.0f, BoxExtent.Z + 15.0f);
+
+            int32 StackIndex = 0;
+            for (const auto& Pair : ActiveEffects)
+            {
+                const EStatusEffectType Status = Pair.Key;
+                const FActiveStatusEffectInstance& Inst = Pair.Value;
+
+                FColor StatusColor = FColor::White;
+                FString StatusName = TEXT("Status");
+
+                switch (Status)
+                {
+                case EStatusEffectType::Burning:
+                    StatusColor = FColor(255, 60, 0);
+                    StatusName = TEXT("🔥 BURNING");
+                    break;
+                case EStatusEffectType::Wet:
+                    StatusColor = FColor(0, 180, 255);
+                    StatusName = TEXT("💧 WET");
+                    break;
+                case EStatusEffectType::Electrified:
+                    StatusColor = FColor(255, 230, 0);
+                    StatusName = TEXT("⚡ ELECTRIFIED");
+                    break;
+                case EStatusEffectType::Oiled:
+                    StatusColor = FColor(180, 110, 40);
+                    StatusName = TEXT("🛢️ OILED");
+                    break;
+                default:
+                    break;
+                }
+
+                const FString DebugStr = FString::Printf(TEXT("%s (%.1fs)"), *StatusName, Inst.RemainingDuration);
+                const FVector DrawPos = BaseLocation + FVector(0.0f, 0.0f, StackIndex * 22.0f);
+
+                DrawDebugString(GetWorld(), DrawPos, DebugStr, nullptr, StatusColor, 0.0f, true, 1.2f);
+                StackIndex++;
+            }
+        }
+    }
+#endif
+
     for (EStatusEffectType Expired : ExpiredEffects)
     {
         RemoveStatus(Expired);
@@ -102,6 +155,19 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         UE_LOG(LogTemp, Warning, TEXT("[StatusReaction] %s: Triggered '%s'!"),
             *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+        if (bShowDebugInWorld && GetWorld() && GetOwner())
+        {
+            const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+            DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *Reaction.ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
+        }
+        if (GEngine && GetOwner())
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
+                FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString()));
+        }
+#endif
+
         OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
 
         // Jeśli reakcja zneutralizowała przychodzący żywioł (np. woda zgasiła ogień)
@@ -125,6 +191,14 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         UE_LOG(LogTemp, Log, TEXT("[StatusEffect] %s refreshed status %s (Remaining: %.1fs)"),
             *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Existing->RemainingDuration);
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+        if (GEngine && GetOwner())
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
+                FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Existing->RemainingDuration));
+        }
+#endif
+
         OnStatusEffectApplied.Broadcast(NewStatus, Existing->RemainingDuration);
         return true;
     }
@@ -146,6 +220,14 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     UE_LOG(LogTemp, Warning, TEXT("[StatusEffect] %s GAINED status: %s (Duration: %.1fs)"),
         *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration);
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    if (GEngine && GetOwner())
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+            FString::Printf(TEXT("[%s] GAINED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration));
+    }
+#endif
+
     OnStatusEffectApplied.Broadcast(NewStatus, Duration);
     return true;
 }
@@ -162,6 +244,14 @@ bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
 
     UE_LOG(LogTemp, Log, TEXT("[StatusEffect] %s LOST status: %s"),
         *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove));
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    if (GEngine && GetOwner())
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange,
+            FString::Printf(TEXT("[%s] LOST: %s"), *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove)));
+    }
+#endif
 
     OnStatusEffectRemoved.Broadcast(StatusToRemove);
     return true;
@@ -185,7 +275,7 @@ bool UStatusEffectComponent::HasStatus(EStatusEffectType Status) const
 
 float UStatusEffectComponent::GetRemainingDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))\
+    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))
     {
         return Found->RemainingDuration;
     }
@@ -203,28 +293,29 @@ float UStatusEffectComponent::GetTotalDuration(EStatusEffectType Status) const
 
 TArray<EStatusEffectType> UStatusEffectComponent::GetActiveStatuses() const
 {
-    TArray<EStatusEffectType> Keys;
-    ActiveEffects.GetKeys(Keys);
-    return Keys;
+    TArray<EStatusEffectType> Result;
+    ActiveEffects.GetKeys(Result);
+    return Result;
 }
 
 EPhysicalMaterialType UStatusEffectComponent::GetOwnerMaterialType() const
 {
-    if (const AActor* Owner = GetOwner())
+    AActor* Owner = GetOwner();
+    if (!Owner)
     {
-        if (Owner->Implements<UMaterialProviderInterface>())
-        {
-            return IMaterialProviderInterface::Execute_GetMaterialType(Owner);
-        }
+        return EPhysicalMaterialType::Flesh;
     }
-    return EPhysicalMaterialType::Default;
+
+    if (Owner->Implements<UMaterialProviderInterface>())
+    {
+        return IMaterialProviderInterface::Execute_GetMaterialType(Owner);
+    }
+
+    return EPhysicalMaterialType::Flesh;
 }
 
 void UStatusEffectComponent::UpdateTickState()
 {
     const bool bShouldTick = (ActiveEffects.Num() > 0);
-    if (IsComponentTickEnabled() != bShouldTick)
-    {
-        SetComponentTickEnabled(bShouldTick);
-    }
+    SetComponentTickEnabled(bShouldTick);
 }

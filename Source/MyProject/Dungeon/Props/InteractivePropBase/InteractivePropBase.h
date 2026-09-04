@@ -10,11 +10,13 @@
 #include "InteractivePropBase.generated.h"
 
 class UStaticMeshComponent;
+class UDamageableComponent;
+class UStatusEffectComponent;
 
 /**
  * Bazowa klasa dla interaktywnych elementów wyposażenia lochu (skrzynie, wazy, beczki).
- * Symuluje fizykę Chaos, wspiera chwytanie (IGrabbable), interakcję (IInteractable)
- * oraz tożsamość materiałową (IMaterialProviderInterface).
+ * Symuluje fizykę Chaos, wspiera chwytanie (IGrabbable), interakcję (IInteractable),
+ * tożsamość materiałową (IMaterialProviderInterface) oraz statusy żywiołowe (UStatusEffectComponent).
  */
 UCLASS(Abstract)
 class MYPROJECT_API AInteractivePropBase : public AActor, 
@@ -29,6 +31,16 @@ public:
 
     // --- IMaterialProviderInterface ---
     virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
+
+    // --- Gettery Komponentów ---
+    UFUNCTION(BlueprintPure, Category = "Dungeon|Prop")
+    UStaticMeshComponent* GetMeshComponent() const { return MeshComponent; }
+
+    UFUNCTION(BlueprintPure, Category = "Dungeon|Prop")
+    UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
+
+    UFUNCTION(BlueprintPure, Category = "Dungeon|Prop")
+    UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
 
     // --- IInteractableInterface ---
     virtual void Interact(AActor* Interactor) override;
@@ -50,6 +62,9 @@ protected:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<UDamageableComponent> DamageableComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Prop|Material")
     EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Wood;

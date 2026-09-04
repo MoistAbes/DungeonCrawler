@@ -1,10 +1,12 @@
 ﻿#include "DungeonStructureBase.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
@@ -22,6 +24,7 @@ ADungeonStructureBase::ADungeonStructureBase()
 	StructureMesh->CanCharacterStepUpOn = ECB_Yes;
 
 	DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
+	StatusEffectComponent = CreateDefaultSubobject<UStatusEffectComponent>(TEXT("StatusEffectComponent"));
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;
@@ -113,47 +116,57 @@ void ADungeonStructureBase::HandleComponentHit(
 	if (ImpactSpeed > 0.0f)
 	{
 		DamageableComponent->ApplyKineticImpact(ImpactSpeed);
-
-		// 5. Punch-Through: Jeśli uderzenie zniszczyło strukturę, przekazujemy pęd dalej za ścianę
-		if (DamageableComponent->IsDestroyed())
-		{
-			if (StructureMesh)
-			{
-				StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			}
-
-			if (PunchThroughVelocityRetention > 0.0f && !IncomingVelocity.IsNearlyZero())
-			{
-				const FVector ContinuedVelocity = IncomingVelocity * PunchThroughVelocityRetention;
-
-				if (ACharacter* Character = Cast<ACharacter>(OtherActor))
-				{
-					Character->LaunchCharacter(ContinuedVelocity, true, true);
-					UE_LOG(LogTemp, Warning, TEXT("[DungeonStructure] Punch-Through! %s launches past broken structure with Velocity: %s"),
-						*Character->GetName(), *ContinuedVelocity.ToString());
-				}
-				else if (OtherComp && OtherComp->IsSimulatingPhysics())
-				{
-					OtherComp->SetPhysicsLinearVelocity(ContinuedVelocity);
-				}
-			}
-		}
 	}
 }
 
 void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 {
-	// Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
-	if (DestroyedDebrisClass && GetWorld())
+	if (!bIsDestructible)
 	{
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		GetWorld()->SpawnActor<AActor>(
-			DestroyedDebrisClass,
-			GetActorTransform(),
-			SpawnParams);
+		return;
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("[DungeonStructure] %s destroyed!"), *GetName());
-	Destroy();
+
+	// 1. Opcjonalny spawn gruzu / VFX
+	if (DestroyedDebrisClass && GetWorld())
+	{
+		GetWorld()->SpawnActor<AActor>(DestroyedDebrisClass, GetActorTransform());
+	}
+
+	// 2. Wyłączamy natychmiast kolizję, aby gracze i pociski przelatywali przez otwór
+	if (StructureMesh)
+	{
+		StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		StructureMesh->SetVisibility(false);
+	}
+
+	// 3. Punch-Through: jeśli w pobliżu znajduje się aktor o dużym pędzie (np. rzucony gracz),
+	// pozwalamy mu przelecieć dalej z zachowaniem części pędu
+	if (GetWorld() && PunchThroughVelocityRetention > 0.0f)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionShape Sphere = FCollisionShape::MakeSphere(200.0f);
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StructurePunchThrough), false, this);
+
+		GetWorld()->OverlapMultiByChannel(Overlaps, GetActorLocation(), FQuat::Identity, ECC_Pawn, Sphere, QueryParams);
+
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			if (ACharacter* Character = Cast<ACharacter>(Overlap.GetActor()))
+			{
+				const FVector PrevVelocity = Character->GetCharacterMovement() ? Character->GetCharacterMovement()->Velocity : Character->GetVelocity();
+				if (PrevVelocity.SizeSquared() > 10000.0f)
+				{
+					const FVector RetainedVelocity = PrevVelocity * PunchThroughVelocityRetention;
+					Character->LaunchCharacter(RetainedVelocity, true, true);
+					UE_LOG(LogTemp, Warning, TEXT("[DungeonStructure] Punch-Through! %s launches past broken structure with Velocity: %s"),
+						*Character->GetName(), *RetainedVelocity.ToString());
+				}
+			}
+		}
+	}
+
+	// 4. Usunięcie aktora
+	SetLifeSpan(0.1f);
 }

@@ -17,7 +17,7 @@ Source/MyProject/
 │   ├── Structure/
 │   │   └── DungeonStructureBase.h/.cpp           (Modularne ściany, podłogi, niszczalne moduły)
 │   └── Props/
-│       ├── InteractivePropBase/                  (Fizyczne rekwizyty lochu, wazy, skrzynki)
+│       ├── InteractivePropBase/                  (Fizyczne rekwizyty lochu, wazy, skrzynki, StatusEffectComponent)
 │       ├── VolatileProp/                         (Uniwersalne niestabilne obiekty: miny, bomby, żywiołowe beczki)
 │       ├── ExplosiveBarrelProp/                  (Wybuchające beczki - specjalizacja AVolatileProp)
 │       └── SimpleSwitchProp/                     (Dźwignie, przełączniki, mechanizmy)
@@ -114,9 +114,13 @@ Source/MyProject/
     - **Faza 2 (Reguła Powłok Płynnych - Liquid Displacement):**
       - Każdy przychodzący płyn (`IncomingDef.bIsLiquid`) wypiera poprzednio nałożony płyn (`ExistingStatusToRemove = PoprzedniPłyn`, `ReactionTag = Liquid_Displaced`), wykluczając jednoczesne posiadanie np. `Wet` i `Oiled`.
 
-### Filar 4: Struktury Lochu, Tożsamość Materiałowa i Interakcje
+### Filar 4: Struktury Lochu, Tożsamość Materiałowa i Rekwizyty (Props)
 - **`EPhysicalMaterialType` w `Shared/Enums`:**
   - Współdzielone przez cały świat: ściany, wazy, graczy i potwory (`Flesh`, `Stone`, `Wood`, `Metal`, `Glass`).
+- **`AInteractivePropBase` w `Dungeon/Props/InteractivePropBase`:**
+  - Klasa bazowa dla fizycznych elementów wyposażenia (skrzynki, wazy, beczki).
+  - Posiada `UStaticMeshComponent` (Chaos Physics, CCD), `UDamageableComponent` oraz **`UStatusEffectComponent`** z publicznym getterem `GetStatusEffectComponent()`.
+  - Dzięki temu wszystkie pochodne blueprinty (`BP_Prop_Wood`, `BP_Prop_Stone`, `BP_OilBarrel`, `BP_WaterBarrel`, `BP_ExplosiveBarrel`) natywnie przyjmują statusy i uczestniczą w reakcjach żywiołowych.
 - **`UInteractionComponent` w `Shared/Components`:**
   - Działa zarówno dla Gracza, jak i dla AI (używa `GetActorEyesViewPoint`).
   - Obsługuje chwytanie/rzucanie obiektów (`IGrabbableInterface`) oraz aktywację logiczną (`IInteractableInterface`).

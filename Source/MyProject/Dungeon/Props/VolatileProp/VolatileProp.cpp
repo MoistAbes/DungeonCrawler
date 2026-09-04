@@ -1,8 +1,8 @@
 ﻿#include "VolatileProp.h"
 
+#include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
-#include "DrawDebugHelpers.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
@@ -59,6 +59,14 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
         TArray<FOverlapResult> DynamicOverlaps;
         World->OverlapMultiByChannel(DynamicOverlaps, DetonationCenter, FQuat::Identity, ECC_WorldDynamic, SphereShape, QueryParams);
         Overlaps.Append(DynamicOverlaps);
+
+        TArray<FOverlapResult> PhysicsOverlaps;
+        World->OverlapMultiByChannel(PhysicsOverlaps, DetonationCenter, FQuat::Identity, ECC_PhysicsBody, SphereShape, QueryParams);
+        Overlaps.Append(PhysicsOverlaps);
+
+        TArray<FOverlapResult> StaticOverlaps;
+        World->OverlapMultiByChannel(StaticOverlaps, DetonationCenter, FQuat::Identity, ECC_WorldStatic, SphereShape, QueryParams);
+        Overlaps.Append(StaticOverlaps);
 
         TSet<AActor*> AffectedActors;
         for (const FOverlapResult& Overlap : Overlaps)
