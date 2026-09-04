@@ -48,11 +48,19 @@ ICON_MAPPINGS = {
     }
 }
 
-def convert_svg_to_lanczos_png(svg_path: str, output_png_path: str, target_size: int = 128):
+def convert_svg_to_lanczos_png(
+    svg_path: str,
+    output_png_path: str,
+    target_size: int = 128,
+    supersample_factor: int = 8
+) -> bool:
     """
-    Renderuje wektor SVG za pomocą silnika resvg do bufora 512x512,
-    a następnie przeprowadza supersampling Lanczos do docelowego rozmiaru potęgi dwójki (128x128).
-    Gwarantuje to perfekcyjne, gładkie subpikselowe krawędzie bez utraty ostrości i bez aliasingu.
+    Renderuje wektor SVG za pomocą silnika resvg do bufora o rozmiarze
+    (target_size * supersample_factor), a następnie przeprowadza
+    supersampling Lanczos do docelowego rozmiaru (target_size).
+
+    Rozmiar viewBox źródłowego SVG jest niezależny od tego procesu —
+    resvg zawsze skaluje wektor do zadanej rozdzielczości renderowania.
     """
     if not os.path.exists(svg_path):
         print(f"[BŁĄD] Nie odnaleziono pliku SVG: {svg_path}")
@@ -61,17 +69,19 @@ def convert_svg_to_lanczos_png(svg_path: str, output_png_path: str, target_size:
     with open(svg_path, "r", encoding="utf-8") as f:
         svg_content = f.read()
 
-    # 1. Renderowanie wektora do 512x512
-    png_bytes = resvg_py.svg_to_bytes(svg_content, width=512, height=512)
-    im_512 = Image.open(io.BytesIO(png_bytes))
+    # 1. Renderowanie wektora z wysokim współczynnikiem supersamplingu
+    render_size = target_size * supersample_factor
+    png_bytes = resvg_py.svg_to_bytes(svg_content, width=render_size, height=render_size)
+    im_render = Image.open(io.BytesIO(png_bytes))
 
-    # 2. Studyjny downsampling Lanczos do 128x128
-    im_target = im_512.resize((target_size, target_size), Image.Resampling.LANCZOS)
+    # 2. Studyjny downsampling Lanczos do docelowego rozmiaru
+    im_target = im_render.resize((target_size, target_size), Image.Resampling.LANCZOS)
 
     # 3. Zapis pliku PNG
     os.makedirs(os.path.dirname(output_png_path), exist_ok=True)
     im_target.save(output_png_path)
-    print(f"[SUKCES] Wygenerowano ostry PNG ({target_size}x{target_size}): {output_png_path}")
+    print(f"[SUKCES] Wygenerowano ostry PNG ({target_size}x{target_size}) "
+          f"z renderu {render_size}x{render_size}: {output_png_path}")
     return True
 
 if __name__ == "__main__":
