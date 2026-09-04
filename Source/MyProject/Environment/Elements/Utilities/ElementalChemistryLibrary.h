@@ -39,9 +39,8 @@ struct FElementalReactionResult
 /**
  * Domenowy silnik praw chemii świata gry (Chemistry Engine).
  * Odpowiedzialny za:
- * - Klasyfikację i taksonomię typów statusów (np. płyny / powłoki)
- * - Weryfikację kompatybilności tożsamości materiałowej ze statusem
- * - Ewaluację interakcji, neutralizacji i reakcji łańcuchowych między żywiołami
+ * - Weryfikację kompatybilności tożsamości materiałowej ze statusem na podstawie rejestru definicji
+ * - Ewaluację interakcji i reakcji łańcuchowych między żywiołami
  */
 UCLASS()
 class MYPROJECT_API UElementalChemistryLibrary : public UBlueprintFunctionLibrary
@@ -68,7 +67,7 @@ public:
 
     /**
      * Dokonuje ewaluacji reakcji chemicznej na podstawie listy obecnych statusów celu
-     * oraz przychodzącego nowego żywiołu.
+     * oraz przychodzącego nowego żywiołu w oparciu o centralny rejestr definicji.
      */
     UFUNCTION(BlueprintPure, Category = "Environment|Elements|Chemistry")
     static FElementalReactionResult EvaluateReaction(

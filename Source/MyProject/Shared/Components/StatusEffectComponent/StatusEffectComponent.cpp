@@ -1,6 +1,7 @@
 ﻿#include "StatusEffectComponent.h"
 
 #include "GameFramework/Actor.h"
+#include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
@@ -38,15 +39,16 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         FActiveStatusEffectInstance& Instance = Pair.Value;
         Instance.RemainingDuration -= DeltaTime;
 
-        // Okresowe tyknięcie (np. DoT od ognia)
+        // Okresowe tyknięcie (np. DoT pobierany z rejestru definicji)
         Instance.TimeUntilNextTick -= DeltaTime;
         if (Instance.TimeUntilNextTick <= 0.0f)
         {
             Instance.TimeUntilNextTick += Instance.TickInterval;
 
-            if (Instance.EffectType == EStatusEffectType::Burning && DamageableComponent)
+            const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(Instance.EffectType);
+            if (Def.DamagePerSecond > 0.0f && DamageableComponent)
             {
-                const float TickDamage = BurnDamagePerSecond * Instance.TickInterval;
+                const float TickDamage = Def.DamagePerSecond * Instance.TickInterval;
                 DamageableComponent->ApplyDamage(TickDamage);
             }
         }
@@ -85,7 +87,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(NewStatus, ActiveStatusList);
     if (Reaction.bReactionOccurred)
     {
-        // Usunięcie skonsumowanego statusu
+        // Usunięcie skonsumowanego/wypartego statusu
         if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
         {
             RemoveStatus(Reaction.ExistingStatusToRemove);
@@ -127,12 +129,14 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         return true;
     }
 
-    // 4. Nałożenie nowej instancji statusu
+    // 4. Nałożenie nowej instancji statusu na podstawie rejestru definicji
+    const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(NewStatus);
+
     FActiveStatusEffectInstance NewInstance;
     NewInstance.EffectType = NewStatus;
     NewInstance.RemainingDuration = Duration;
     NewInstance.TotalDuration = Duration;
-    NewInstance.TickInterval = (NewStatus == EStatusEffectType::Burning) ? BurnTickInterval : 1.0f;
+    NewInstance.TickInterval = (Def.TickInterval > 0.0f) ? Def.TickInterval : 1.0f;
     NewInstance.TimeUntilNextTick = NewInstance.TickInterval;
     NewInstance.InstigatorActor = InstigatorActor;
 
@@ -181,7 +185,7 @@ bool UStatusEffectComponent::HasStatus(EStatusEffectType Status) const
 
 float UStatusEffectComponent::GetRemainingDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))
+    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))\
     {
         return Found->RemainingDuration;
     }

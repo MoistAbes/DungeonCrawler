@@ -26,7 +26,7 @@ Source/MyProject/
 │   ├── Components/
 │   │   ├── DamageableComponent/                  (Uniwersalny komponent zdrowia/durability)
 │   │   ├── InteractionComponent/                 (Wykrywanie raycastem, chwytanie fizyczne i interakcja logiczna dla gracza i AI)
-│   │   └── StatusEffectComponent/                (Zarządzanie statusami: Burning, Wet, Electrified, Oiled)
+│   │   └── StatusEffectComponent/                (Zarządzanie czasem trwania i cyklem życia instancji statusów)
 │   ├── Interfaces/
 │   │   ├── IInteractableInterface.h              (Kontrakt na aktywację klawiszem/AI)
 │   │   ├── IGrabbableInterface.h                 (Kontrakt na chwytanie PhysicsHandle)
@@ -44,6 +44,8 @@ Source/MyProject/
 │   │   └── Enums/
 │   │       └── KineticEnums.h                    (EKnockbackFalloff)
 │   └── Elements/
+│       ├── Data/
+│       │   └── StatusEffectDefinitions.h         (Centralny rejestr FStatusEffectRegistry, definicje właściwości i reguł reakcji)
 │       ├── Utilities/
 │       │   └── ElementalChemistryLibrary         (Silnik reakcji chemicznych i kompatybilności materiałowej)
 │       └── Enums/
@@ -90,22 +92,27 @@ Source/MyProject/
   - `ApplyVortexPull`: Wir przyciągający jednostki i obiekty do centrum.
 
 ### Filar 3: Reaktywny System Statusów Żywiołowych (Elements & Status Effects)
+- **`StatusEffectDefinitions.h` w `Environment/Elements/Data` (Centralny Rejestr Danych):**
+  - Wszystkie definicje cech statusów oraz reguł kombinacji żywiołów zebrane w jednym pliku konfiguracyjnym w strukturach C++:
+    - `FStatusReactionRule`: `bConsumeIncomingStatus`, `bRemoveExistingStatus`, `BonusInstantDamage`, `ReactionTag`.
+    - `FStatusEffectDefinition`: `EffectType`, `bIsLiquid`, `NaturallyAllowedMaterials`, `BypassMaterialIfActive`, `DamagePerSecond`, `TickInterval`, `Reactions` map.
+    - `FStatusEffectRegistry::GetDefinition(EStatusEffectType)`: Zwraca kartę definicji dla danego statusu w czasie $O(1)$.
 - **`UStatusEffectComponent` w `Shared/Components`:**
   - Odpowiada wyłącznie za stan podmiotu: przechowywanie statusów w `TMap<EStatusEffectType, FActiveStatusEffectInstance>`, odliczanie czasu trwania, brak duplikatów i cykl życia.
-  - Obrażenia okresowe DoT (`Burning`) aplikowane przez `UDamageableComponent`.
+  - Obrażenia okresowe DoT oraz interwał tyknięcia pobierane w sposób dynamiczny z `FStatusEffectRegistry::GetDefinition()`.
   - Architektura oparta na zdarzeniach (`OnStatusEffectApplied`, `OnStatusEffectRemoved`, `OnElementalReactionTriggered`).
   - Optymalizacja `Tick on-demand`: komponent tickuje tylko wtedy, gdy na celu znajduje się przynajmniej jeden aktywny status.
 - **`UElementalChemistryLibrary` w `Environment/Elements/Utilities`:**
   - Dedykowany silnik chemii regułowej (Chemistry Engine).
-  - Klasyfikacja i taksonomia powłok: `IsLiquidStatus` (`Wet`, `Oiled`).
-  - Weryfikacja kompatybilności materiałowej (`CanMaterialReceiveStatus`).
-  - Dwuetapowa ewaluacja reakcji żywiołowych zwracająca DTO `FElementalReactionResult` (`EvaluateReaction`):
-    - **Faza 1 (Gwałtowne reakcje o wysokim priorytecie):**
+  - Klasyfikacja i taksonomia powłok: `IsLiquidStatus` odpytuje rejestr (`bIsLiquid`).
+  - Weryfikacja kompatybilności materiałowej (`CanMaterialReceiveStatus`) bazująca na `NaturallyAllowedMaterials` i `BypassMaterialIfActive`.
+  - Ewaluacja reakcji żywiołowych zwracająca DTO `FElementalReactionResult` (`EvaluateReaction`):
+    - **Faza 1 (Reguły zdefiniowane w karcie żywiołu):**
       - `Wet` + `Burning` $\rightarrow$ zgaszenie ognia, odparowanie wody (`Steam_Extinguish` / `Fire_Extinguished`).
       - `Oiled` + `Burning` $\rightarrow$ natychmiastowy zapłon oleju, obrażenia bonusowe (`Oil_Ignition`).
       - `Wet` + `Electrified` $\rightarrow$ szok przewodzący prąd (`Conductive_Shock`).
     - **Faza 2 (Reguła Powłok Płynnych - Liquid Displacement):**
-      - Każdy przychodzący płyn (`IsLiquidStatus`) wypiera poprzednio nałożony płyn (`ExistingStatusToRemove = PoprzedniPłyn`, `ReactionTag = Liquid_Displaced`), wykluczając jednoczesne posiadanie np. `Wet` i `Oiled`.
+      - Każdy przychodzący płyn (`IncomingDef.bIsLiquid`) wypiera poprzednio nałożony płyn (`ExistingStatusToRemove = PoprzedniPłyn`, `ReactionTag = Liquid_Displaced`), wykluczając jednoczesne posiadanie np. `Wet` i `Oiled`.
 
 ### Filar 4: Struktury Lochu, Tożsamość Materiałowa i Interakcje
 - **`EPhysicalMaterialType` w `Shared/Enums`:**

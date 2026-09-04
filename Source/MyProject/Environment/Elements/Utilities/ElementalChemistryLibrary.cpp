@@ -1,28 +1,9 @@
 ﻿#include "ElementalChemistryLibrary.h"
-
-namespace ElementalChemistryRules
-{
-    // Naturalna palność materiałów fizycznych
-    static bool IsNaturallyFlammable(EPhysicalMaterialType Material)
-    {
-        return (Material == EPhysicalMaterialType::Wood || 
-                Material == EPhysicalMaterialType::Flesh || 
-                Material == EPhysicalMaterialType::Default);
-    }
-
-    // Naturalna przewodność elektryczna materiałów fizycznych
-    static bool IsNaturallyConductive(EPhysicalMaterialType Material)
-    {
-        return (Material == EPhysicalMaterialType::Metal || 
-                Material == EPhysicalMaterialType::Flesh || 
-                Material == EPhysicalMaterialType::Default);
-    }
-}
+#include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 
 bool UElementalChemistryLibrary::IsLiquidStatus(EStatusEffectType Status)
 {
-    return (Status == EStatusEffectType::Wet || 
-            Status == EStatusEffectType::Oiled);
+    return FStatusEffectRegistry::GetDefinition(Status).bIsLiquid;
 }
 
 bool UElementalChemistryLibrary::CanMaterialReceiveStatus(
@@ -30,32 +11,25 @@ bool UElementalChemistryLibrary::CanMaterialReceiveStatus(
     EStatusEffectType IncomingStatus, 
     const TArray<EStatusEffectType>& ActiveStatuses)
 {
-    switch (IncomingStatus)
+    const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(IncomingStatus);
+
+    // 1. Płyny i statusy bez ograniczeń materiałowych mogą oblać dowolną powierzchnię
+    if (Def.bIsLiquid || Def.NaturallyAllowedMaterials.Num() == 0)
     {
-    case EStatusEffectType::Burning:
-        // Naoliwiony cel zawsze może stanąć w ogniu (nawet kamień czy metal)
-        if (ActiveStatuses.Contains(EStatusEffectType::Oiled))
-        {
-            return true;
-        }
-        return ElementalChemistryRules::IsNaturallyFlammable(Material);
-
-    case EStatusEffectType::Electrified:
-        // Mokry cel zawsze przewodzi prąd na dowolnej powierzchni
-        if (ActiveStatuses.Contains(EStatusEffectType::Wet))
-        {
-            return true;
-        }
-        return ElementalChemistryRules::IsNaturallyConductive(Material);
-
-    default:
-        // Płyny mogą oblać dowolną powierzchnię fizyczną
-        if (IsLiquidStatus(IncomingStatus))
-        {
-            return true;
-        }
         return true;
     }
+
+    // 2. Statusy na celu omijające restrykcję materiału (np. Oiled pozwala podpalić kamień/metal)
+    for (EStatusEffectType BypassStatus : Def.BypassMaterialIfActive)
+    {
+        if (ActiveStatuses.Contains(BypassStatus))
+        {
+            return true;
+        }
+    }
+
+    // 3. Naturalna kompatybilność materiałowa
+    return Def.NaturallyAllowedMaterials.Contains(Material);
 }
 
 FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
@@ -63,78 +37,20 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
     const TArray<EStatusEffectType>& ActiveStatuses)
 {
     FElementalReactionResult Result;
+    const FStatusEffectDefinition& IncomingDef = FStatusEffectRegistry::GetDefinition(IncomingStatus);
 
     // =========================================================================
-    // FAZA 1: Gwałtowne Reakcje i Przeciwieństwa Żywiołów (High Priority)
+    // FAZA 1: Dedykowane reguły reakcji zdefiniowane w karcie przychodzącego żywiołu
     // =========================================================================
-
-    // --- Przychodzący Ogień (Burning) ---
-    if (IncomingStatus == EStatusEffectType::Burning)
+    for (EStatusEffectType ActiveStatus : ActiveStatuses)
     {
-        // Reakcja: Ogień uderza w Mokry cel (Steam / Extinguish)
-        if (ActiveStatuses.Contains(EStatusEffectType::Wet))
+        if (const FStatusReactionRule* Rule = IncomingDef.Reactions.Find(ActiveStatus))
         {
             Result.bReactionOccurred = true;
-            Result.bConsumeIncomingStatus = true; // Ogień wyparował
-            Result.ExistingStatusToRemove = EStatusEffectType::Wet;
-            Result.BonusInstantDamage = 0.0f;
-            Result.ReactionTag = FName(TEXT("Steam_Extinguish"));
-            return Result;
-        }
-
-        // Reakcja: Ogień uderza w Naoliwiony cel (Oil Ignition / Explode)
-        if (ActiveStatuses.Contains(EStatusEffectType::Oiled))
-        {
-            Result.bReactionOccurred = true;
-            Result.bConsumeIncomingStatus = false; // Ogień nadal podpala cel!
-            Result.ExistingStatusToRemove = EStatusEffectType::Oiled;
-            Result.BonusInstantDamage = 25.0f;
-            Result.ReactionTag = FName(TEXT("Oil_Ignition"));
-            return Result;
-        }
-    }
-
-    // --- Przychodząca Woda (Wet) ---
-    if (IncomingStatus == EStatusEffectType::Wet)
-    {
-        // Reakcja: Woda uderza w Płonący cel (Fire Extinguished)
-        if (ActiveStatuses.Contains(EStatusEffectType::Burning))
-        {
-            Result.bReactionOccurred = true;
-            Result.bConsumeIncomingStatus = true; // Woda ugasiła pożar
-            Result.ExistingStatusToRemove = EStatusEffectType::Burning;
-            Result.BonusInstantDamage = 0.0f;
-            Result.ReactionTag = FName(TEXT("Fire_Extinguished"));
-            return Result;
-        }
-    }
-
-    // --- Przychodzący Olej (Oiled) ---
-    if (IncomingStatus == EStatusEffectType::Oiled)
-    {
-        // Reakcja: Olej uderza w Płonący cel (Natychmiastowy zapłon oleju)
-        if (ActiveStatuses.Contains(EStatusEffectType::Burning))
-        {
-            Result.bReactionOccurred = true;
-            Result.bConsumeIncomingStatus = true; // Olej natychmiast ulega spaleniu
-            Result.ExistingStatusToRemove = EStatusEffectType::None; // Ogień nadal trwa
-            Result.BonusInstantDamage = 25.0f;
-            Result.ReactionTag = FName(TEXT("Oil_Ignition"));
-            return Result;
-        }
-    }
-
-    // --- Przychodzący Prąd (Electrified) ---
-    if (IncomingStatus == EStatusEffectType::Electrified)
-    {
-        // Reakcja: Prąd uderza w Mokry cel (Conductive Shock)
-        if (ActiveStatuses.Contains(EStatusEffectType::Wet))
-        {
-            Result.bReactionOccurred = true;
-            Result.bConsumeIncomingStatus = false; // Cel nadal zostaje naelektryzowany
-            Result.ExistingStatusToRemove = EStatusEffectType::None; // Woda nie znika od razu
-            Result.BonusInstantDamage = 15.0f;
-            Result.ReactionTag = FName(TEXT("Conductive_Shock"));
+            Result.bConsumeIncomingStatus = Rule->bConsumeIncomingStatus;
+            Result.ExistingStatusToRemove = Rule->bRemoveExistingStatus ? ActiveStatus : EStatusEffectType::None;
+            Result.BonusInstantDamage = Rule->BonusInstantDamage;
+            Result.ReactionTag = Rule->ReactionTag;
             return Result;
         }
     }
@@ -143,7 +59,7 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
     // FAZA 2: Reguła Powłok Płynnych (Liquid Displacement / Mutual Exclusivity)
     // Każdy nowy płyn wypiera poprzednio nałożony płyn (np. Wet wypiera Oiled, Oiled wypiera Wet).
     // =========================================================================
-    if (IsLiquidStatus(IncomingStatus))
+    if (IncomingDef.bIsLiquid)
     {
         for (EStatusEffectType ActiveStatus : ActiveStatuses)
         {
