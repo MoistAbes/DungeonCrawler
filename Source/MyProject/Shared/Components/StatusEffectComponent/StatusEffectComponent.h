@@ -4,7 +4,6 @@
 #include "Components/ActorComponent.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
-#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "StatusEffectComponent.generated.h"
 
 class UDamageableComponent;

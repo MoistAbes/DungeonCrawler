@@ -19,6 +19,12 @@ namespace ElementalChemistryRules
     }
 }
 
+bool UElementalChemistryLibrary::IsLiquidStatus(EStatusEffectType Status)
+{
+    return (Status == EStatusEffectType::Wet || 
+            Status == EStatusEffectType::Oiled);
+}
+
 bool UElementalChemistryLibrary::CanMaterialReceiveStatus(
     EPhysicalMaterialType Material, 
     EStatusEffectType IncomingStatus, 
@@ -42,12 +48,12 @@ bool UElementalChemistryLibrary::CanMaterialReceiveStatus(
         }
         return ElementalChemistryRules::IsNaturallyConductive(Material);
 
-    case EStatusEffectType::Wet:
-    case EStatusEffectType::Oiled:
-        // Każda powierzchnia fizyczna może zostać oblana cieczą
-        return true;
-
     default:
+        // Płyny mogą oblać dowolną powierzchnię fizyczną
+        if (IsLiquidStatus(IncomingStatus))
+        {
+            return true;
+        }
         return true;
     }
 }
@@ -58,7 +64,11 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
 {
     FElementalReactionResult Result;
 
-    // --- Grupa 1: Przychodzący Ogień (Burning) ---
+    // =========================================================================
+    // FAZA 1: Gwałtowne Reakcje i Przeciwieństwa Żywiołów (High Priority)
+    // =========================================================================
+
+    // --- Przychodzący Ogień (Burning) ---
     if (IncomingStatus == EStatusEffectType::Burning)
     {
         // Reakcja: Ogień uderza w Mokry cel (Steam / Extinguish)
@@ -84,7 +94,7 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
         }
     }
 
-    // --- Grupa 2: Przychodząca Woda (Wet) ---
+    // --- Przychodząca Woda (Wet) ---
     if (IncomingStatus == EStatusEffectType::Wet)
     {
         // Reakcja: Woda uderza w Płonący cel (Fire Extinguished)
@@ -99,7 +109,22 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
         }
     }
 
-    // --- Grupa 3: Przychodzący Prąd (Electrified) ---
+    // --- Przychodzący Olej (Oiled) ---
+    if (IncomingStatus == EStatusEffectType::Oiled)
+    {
+        // Reakcja: Olej uderza w Płonący cel (Natychmiastowy zapłon oleju)
+        if (ActiveStatuses.Contains(EStatusEffectType::Burning))
+        {
+            Result.bReactionOccurred = true;
+            Result.bConsumeIncomingStatus = true; // Olej natychmiast ulega spaleniu
+            Result.ExistingStatusToRemove = EStatusEffectType::None; // Ogień nadal trwa
+            Result.BonusInstantDamage = 25.0f;
+            Result.ReactionTag = FName(TEXT("Oil_Ignition"));
+            return Result;
+        }
+    }
+
+    // --- Przychodzący Prąd (Electrified) ---
     if (IncomingStatus == EStatusEffectType::Electrified)
     {
         // Reakcja: Prąd uderza w Mokry cel (Conductive Shock)
@@ -111,6 +136,26 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
             Result.BonusInstantDamage = 15.0f;
             Result.ReactionTag = FName(TEXT("Conductive_Shock"));
             return Result;
+        }
+    }
+
+    // =========================================================================
+    // FAZA 2: Reguła Powłok Płynnych (Liquid Displacement / Mutual Exclusivity)
+    // Każdy nowy płyn wypiera poprzednio nałożony płyn (np. Wet wypiera Oiled, Oiled wypiera Wet).
+    // =========================================================================
+    if (IsLiquidStatus(IncomingStatus))
+    {
+        for (EStatusEffectType ActiveStatus : ActiveStatuses)
+        {
+            if (ActiveStatus != IncomingStatus && IsLiquidStatus(ActiveStatus))
+            {
+                Result.bReactionOccurred = true;
+                Result.bConsumeIncomingStatus = false; // Nowy płyn nakłada się na cel
+                Result.ExistingStatusToRemove = ActiveStatus; // Poprzedni płyn zostaje wyparty/zmyty
+                Result.BonusInstantDamage = 0.0f;
+                Result.ReactionTag = FName(TEXT("Liquid_Displaced"));
+                return Result;
+            }
         }
     }
 

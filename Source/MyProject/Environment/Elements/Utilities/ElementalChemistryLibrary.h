@@ -39,8 +39,9 @@ struct FElementalReactionResult
 /**
  * Domenowy silnik praw chemii świata gry (Chemistry Engine).
  * Odpowiedzialny za:
+ * - Klasyfikację i taksonomię typów statusów (np. płyny / powłoki)
  * - Weryfikację kompatybilności tożsamości materiałowej ze statusem
- * - Ewaluację interakcji i reakcji łańcuchowych między żywiołami
+ * - Ewaluację interakcji, neutralizacji i reakcji łańcuchowych między żywiołami
  */
 UCLASS()
 class MYPROJECT_API UElementalChemistryLibrary : public UBlueprintFunctionLibrary
@@ -48,6 +49,13 @@ class MYPROJECT_API UElementalChemistryLibrary : public UBlueprintFunctionLibrar
     GENERATED_BODY()
 
 public:
+    /**
+     * Sprawdza, czy dany status należy do kategorii powłok płynnych (np. Wet, Oiled).
+     * Płyny wzajemnie się wykluczają (nowy płyn wypiera poprzedni).
+     */
+    UFUNCTION(BlueprintPure, Category = "Environment|Elements|Chemistry")
+    static bool IsLiquidStatus(EStatusEffectType Status);
+
     /**
      * Sprawdza, czy obiekt o danym materiale fizycznym może przyjąć przychodzący status,
      * uwzględniając jego obecne stany (np. kamień nie pali się, chyba że jest oblany olejem).

@@ -1,6 +1,7 @@
 ﻿#include "StatusEffectComponent.h"
 
 #include "GameFramework/Actor.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 

@@ -97,11 +97,15 @@ Source/MyProject/
   - Optymalizacja `Tick on-demand`: komponent tickuje tylko wtedy, gdy na celu znajduje się przynajmniej jeden aktywny status.
 - **`UElementalChemistryLibrary` w `Environment/Elements/Utilities`:**
   - Dedykowany silnik chemii regułowej (Chemistry Engine).
+  - Klasyfikacja i taksonomia powłok: `IsLiquidStatus` (`Wet`, `Oiled`).
   - Weryfikacja kompatybilności materiałowej (`CanMaterialReceiveStatus`).
-  - Ewaluacja reakcji żywiołowych zwracająca DTO `FElementalReactionResult` (`EvaluateReaction`):
-    - `Wet` + `Burning` $\rightarrow$ zgaszenie ognia, odparowanie wody (`Steam_Extinguish`).
-    - `Oiled` + `Burning` $\rightarrow$ zapłon oleju, natychmiastowe obrażenia bonusowe (`Oil_Ignition`).
-    - `Wet` + `Electrified` $\rightarrow$ szok przewodzący prąd (`Conductive_Shock`).
+  - Dwuetapowa ewaluacja reakcji żywiołowych zwracająca DTO `FElementalReactionResult` (`EvaluateReaction`):
+    - **Faza 1 (Gwałtowne reakcje o wysokim priorytecie):**
+      - `Wet` + `Burning` $\rightarrow$ zgaszenie ognia, odparowanie wody (`Steam_Extinguish` / `Fire_Extinguished`).
+      - `Oiled` + `Burning` $\rightarrow$ natychmiastowy zapłon oleju, obrażenia bonusowe (`Oil_Ignition`).
+      - `Wet` + `Electrified` $\rightarrow$ szok przewodzący prąd (`Conductive_Shock`).
+    - **Faza 2 (Reguła Powłok Płynnych - Liquid Displacement):**
+      - Każdy przychodzący płyn (`IsLiquidStatus`) wypiera poprzednio nałożony płyn (`ExistingStatusToRemove = PoprzedniPłyn`, `ReactionTag = Liquid_Displaced`), wykluczając jednoczesne posiadanie np. `Wet` i `Oiled`.
 
 ### Filar 4: Struktury Lochu, Tożsamość Materiałowa i Interakcje
 - **`EPhysicalMaterialType` w `Shared/Enums`:**
@@ -120,7 +124,7 @@ Source/MyProject/
 
 ### Filar 5: Warstwa Prezentacji i UI (HUD & Status Bar)
 - **`UStatusEffectIconWidget`:** Klasa bazowa dla ikony aktywnego statusu (`WBP_StatusIcon`).
-  - Posiada opcjonalne bindingi na `IconImage`, `DurationText` i `ProgressBar`.
+  - Posiada opcjonalne bindingi na `IconImage`, `DurationText` i `ProgressBar` roll.
   - Posiada mapę tekstur `StatusTextures` (`TMap<EStatusEffectType, TObjectPtr<UTexture2D>>`) – gdy ikona ma dedykowaną teksturę graficzną, zachowuje oryginalne kolory (`FLinearColor::White`), a w przypadku braku tekstury barwi się domyślnym kolorem żywiołu (`GetDefaultStatusColor`).
 - **`UPlayerHUDWidget`:**
   - Dynamicznie spawnuje ikonki statusów w kontenerze `StatusEffectsContainer` (`HorizontalBox`).
