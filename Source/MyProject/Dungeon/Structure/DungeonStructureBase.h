@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -27,16 +27,21 @@ public:
 	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
 
 	// --- Gettery ---
-	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
+
+	/** Czy ta struktura może ulec zniszczeniu pod wpływem obrażeń kinetycznych lub żywiołowych */
+	UFUNCTION(BlueprintPure, Category = "Custom|Structure")
 	bool IsDestructible() const { return bIsDestructible; }
 
-	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
+	/** Zwraca komponent siatki architektonicznej struktury */
+	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UStaticMeshComponent* GetMeshComponent() const { return StructureMesh; }
 
-	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
+	/** Zwraca komponent punktów wytrzymałości struktury */
+	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
-	UFUNCTION(BlueprintPure, Category = "Dungeon|Structure")
+	/** Zwraca komponent obsługujący statusy żywiołowe na strukturze */
+	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
 
 protected:
@@ -47,31 +52,36 @@ protected:
 	// Komponenty
 	// -------------------------------------------------------------------------
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	/** Główna siatka statyczna elementu lochu (ściana, podłoga, filar) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UStaticMeshComponent> StructureMesh;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	/** Komponent wytrzymałości fizycznej ściany */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	/** Komponent obsługujący stany żywiołowe struktury (np. podpalenie drewnianej ściany) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja
 	// -------------------------------------------------------------------------
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Material")
+	/** Tożsamość materiałowa struktury (np. Wood, Stone, Metal) determinująca podatność na żywioły */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Material")
 	EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Stone;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction")
+	/** Flaga określająca, czy ściana/struktura może zostać zniszczona */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Destruction")
 	bool bIsDestructible = false;
 
 	/** Współczynnik zachowania pędu przy przebiciu zniszczonej ściany (0.0 = pełne zatrzymanie, 0.6 = zachowuje 60% prędkości) */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction", meta = (EditCondition = "bIsDestructible", ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Destruction", meta = (EditCondition = "bIsDestructible", ClampMin = "0.0", ClampMax = "1.0"))
 	float PunchThroughVelocityRetention = 0.6f;
 
 	/** Opcjonalny aktor gruzu/efektu VFX spawnujący się w momencie zniszczenia */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Structure|Destruction", meta = (EditCondition = "bIsDestructible"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Destruction", meta = (EditCondition = "bIsDestructible"))
 	TSubclassOf<AActor> DestroyedDebrisClass;
 
 	// -------------------------------------------------------------------------

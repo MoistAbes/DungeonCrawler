@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -31,19 +31,19 @@ protected:
     virtual void BeginPlay() override;
 
     /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float TraceDistance = 300.0f;
 
-    /** Maksymalna masa obiektu, jaką postać może unieść (kg) */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
+    /** Maksymalna masa obiektu, jaką postać może unieść (kg). Cięższe obiekty nie mogą być podniesione */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float MaxCarryMass = 35.0f;
 
     /** Odległość przed postacią w osi wzroku/kamery, w której zawieszony jest trzymany obiekt */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float HoldDistance = 180.0f;
 
-    /** Siła pędu przy rzuceniu trzymanego obiektu */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Interaction|Config")
+    /** Siła pędu nadawanego obiektowi przy rzuceniu */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float ThrowImpulseStrength = 1200.0f;
 
 private:

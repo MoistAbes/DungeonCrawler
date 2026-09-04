@@ -33,38 +33,47 @@ public:
     // Components
     // -------------------------------------------------------------------------
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Komponent sterujący płynnym zoomem i zachowaniem kamery */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UPlayerCameraComponent> PlayerCameraComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Fizyczny uchwyt umożliwiający chwytanie i niesienie obiektów przed postacią */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UPhysicsHandleComponent> PhysicsHandleComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Komponent odpowiedzialny za detekcję i logikę interakcji z propami i przełącznikami */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UInteractionComponent> InteractionComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Komponent zarządzający punktami zdrowia i uszkodzeniami fizycznymi gracza */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UDamageableComponent> DamageableComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Komponent odbierający siły kinetyczne i odrzuty postaci */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UKnockbackComponent> KnockbackComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Komponent obsługujący stany żywiołowe gracza (np. podpalenie) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Ramię kamery stabilizujące perspektywę trzecioosobową */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<USpringArmComponent> SpringArmComponent;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    /** Główna kamera widoku gracza */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UCameraComponent> CameraComponent;
 
     // -------------------------------------------------------------------------
     // Camera Settings
     // -------------------------------------------------------------------------
 
+    /** Bazowa wysokość punktu widzenia oczu postaci względem kapsuły */
     UPROPERTY(
         EditDefaultsOnly,
         BlueprintReadOnly,
-        Category = "Player|Camera",
+        Category = "Custom|Camera",
         meta = (ClampMin = "0.0", ClampMax = "120.0"))
     float BaseEyeHeightOffset = 65.0f;
 
@@ -72,25 +81,32 @@ public:
     // Enhanced Input
     // -------------------------------------------------------------------------
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Domyślny kontekst mapowania klawiszy wejściowych dla gracza */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja poruszania się (WASD / gałka analogowa) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> MoveAction;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja rozglądania się (Mysz / gałka analogowa) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> LookAction;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja przybliżania i oddalania kamery (Kółko myszy) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> ZoomAction;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja wejścia w interakcję lub podniesienia/upuszczenia przedmiotu (Klawisz E) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> InteractAction;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja rzutu aktualnie trzymanym przedmiotem (LPM) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> ThrowAction;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Input")
+    /** Akcja skoku postaci (Spacja) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> JumpAction;
 
 protected:
@@ -103,7 +119,8 @@ protected:
     // Material Configuration
     // -------------------------------------------------------------------------
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Player|Material")
+    /** Tożsamość materiałowa postaci (Flesh) determinująca reakcje chemiczne i obrażenia */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Material")
     EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Flesh;
 
 private:

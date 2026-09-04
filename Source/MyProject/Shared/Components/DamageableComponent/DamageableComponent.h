@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -27,56 +27,69 @@ public:
     virtual float GetValueRatio() const override { return MaxDurability > 0.0f ? (CurrentDurability / MaxDurability) : 0.0f; }
 
     // --- Domena ---
-    UFUNCTION(BlueprintCallable, Category = "Durability|Damage")
+
+    /** Aplikuje bezpośrednie obrażenia redukujące aktualną wytrzymałość/punkty życia */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Durability")
     void ApplyDamage(float Amount);
     
-    // Ujednolicone API: przyjmuje wyłącznie prędkość uderzenia w cm/s
-    UFUNCTION(BlueprintCallable, Category = "Durability|Kinetic")
+    /** Aplikuje obrażenia kinetyczne na podstawie prędkości uderzenia (cm/s), uwzględniając próg i mnożnik */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyKineticImpact(float ImpactSpeed);
 
     // --- Stan ---
-    UFUNCTION(BlueprintPure, Category = "Durability|State")
+
+    /** Zwraca aktualny stan punktów wytrzymałości/życia */
+    UFUNCTION(BlueprintPure, Category = "Custom|Durability")
     float GetCurrentDurability() const { return CurrentDurability; }
 
-    UFUNCTION(BlueprintPure, Category = "Durability|State")
+    /** Zwraca maksymalny stan punktów wytrzymałości/życia */
+    UFUNCTION(BlueprintPure, Category = "Custom|Durability")
     float GetMaxDurability() const { return MaxDurability; }
 
-    UFUNCTION(BlueprintPure, Category = "Durability|State")
+    /** Sprawdza, czy obiekt został całkowicie zniszczony (CurrentDurability <= 0) */
+    UFUNCTION(BlueprintPure, Category = "Custom|Durability")
     bool IsDestroyed() const { return CurrentDurability <= 0.0f; }
 
     // --- Zdarzenia ---
-    UPROPERTY(BlueprintAssignable, Category = "Durability|Events")
+
+    /** Wywoływane przy każdej zmianie aktualnego zdrowia/wytrzymałości */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnHealthChangedSignature OnHealthChanged;
 
-    UPROPERTY(BlueprintAssignable, Category = "Durability|Events")
+    /** Wywoływane przy zmianie stanu (zwraca aktualne i maksymalne punkty) */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnDurabilityChangedSignature OnDurabilityChanged;
 
-    UPROPERTY(BlueprintAssignable, Category = "Durability|Events")
+    /** Wywoływane w momencie, gdy punkty wytrzymałości spadną do zera */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnDestroyedSignature OnDestroyed;
 
 protected:
     virtual void BeginPlay() override;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Durability", meta = (ClampMin = "1.0"))
+    /** Maksymalna liczba punktów wytrzymałości / zdrowia */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Durability", meta = (ClampMin = "1.0"))
     float MaxDurability = 100.0f;
 
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Durability", meta = (ClampMin = "0.0"))
+    /** Początkowa liczba punktów wytrzymałości przy spawnie obiektu */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Durability", meta = (ClampMin = "0.0"))
     float InitialDurability = 100.0f;
 
-    // Automatyczne nasłuchiwanie zderzeń i upadków dla postaci
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Kinetic")
+    /** Automatyczne nasłuchiwanie zderzeń ze ścianami oraz upadków z wysokości dla postaci gracza/AI */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic")
     bool bAutoHandleCharacterImpacts = true;
 
-    // Minimalna prędkość zderzenia generująca obrażenia (cm/s)
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Kinetic", meta = (ClampMin = "0.0"))
+    /** Minimalna prędkość zderzenia lub upadku generująca obrażenia kinetyczne (cm/s). Wszystko poniżej tej prędkości jest ignorowane */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.0"))
     float ImpactSpeedThreshold = 700.0f;
 
-    // Przelicznik nadmiarowej prędkości na obrażenia
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Config|Kinetic", meta = (ClampMin = "0.0"))
+    /** Przelicznik nadmiarowej prędkości zderzenia na punkty obrażeń: Obrażenia = (Prędkość - Próg) * Mnożnik */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.0"))
     float ImpactDamageMultiplier = 0.05f;
 
 private:
-    UPROPERTY(VisibleInstanceOnly, Category = "State")
+    /** Aktualna wartość punktów wytrzymałości w czasie rzeczywistym */
+    UPROPERTY(VisibleInstanceOnly, Category = "Custom|Durability")
     float CurrentDurability = 100.0f;
 
     UFUNCTION()

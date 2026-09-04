@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -20,22 +20,28 @@ struct FActiveStatusEffectInstance
 {
     GENERATED_BODY()
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Typ nałożonego statusu elementarnego */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     EStatusEffectType EffectType = EStatusEffectType::None;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Czas pozostały do samoczynnego wygaśnięcia statusu (w sekundach) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float RemainingDuration = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Całkowity czas, na jaki został zaaplikowany ten status */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TotalDuration = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Interwał (w sekundach), z jaką częstotliwością status wywołuje swój efekt okresowy (DoT) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TickInterval = 1.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Czas do najbliższego uderzenia efektu okresowego */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TimeUntilNextTick = 0.0f;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    /** Aktor, który zainicjował nałożenie tego statusu */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     TWeakObjectPtr<AActor> InstigatorActor = nullptr;
 };
 
@@ -63,44 +69,47 @@ public:
     // -------------------------------------------------------------------------
 
     /** Aplikuje status elementarny z podanym czasem trwania i sprawdzaniem reakcji */
-    UFUNCTION(BlueprintCallable, Category = "StatusEffect")
+    UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     bool ApplyStatus(EStatusEffectType NewStatus, float Duration = 5.0f, AActor* InstigatorActor = nullptr);
 
-    /** Usuwa aktywny status */
-    UFUNCTION(BlueprintCallable, Category = "StatusEffect")
+    /** Usuwa aktywny status z obiektu */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     bool RemoveStatus(EStatusEffectType StatusToRemove);
 
     /** Usuwa wszystkie aktywne statusy */
-    UFUNCTION(BlueprintCallable, Category = "StatusEffect")
+    UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     void ClearAllStatuses();
 
-    /** Czy dany status jest aktywny */
-    UFUNCTION(BlueprintPure, Category = "StatusEffect")
+    /** Czy dany status żywiołowy jest obecnie aktywny na tym obiekcie */
+    UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     bool HasStatus(EStatusEffectType Status) const;
 
     /** Zwraca pozostały czas trwania danego statusu (0.0 jeśli brak) */
-    UFUNCTION(BlueprintPure, Category = "StatusEffect")
+    UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     float GetRemainingDuration(EStatusEffectType Status) const;
 
     /** Zwraca całkowity czas trwania dla aktywnego statusu (0.0 jeśli brak) */
-    UFUNCTION(BlueprintPure, Category = "StatusEffect")
+    UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     float GetTotalDuration(EStatusEffectType Status) const;
 
     /** Zwraca listę wszystkich aktualnie nałożonych statusów */
-    UFUNCTION(BlueprintPure, Category = "StatusEffect")
+    UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     TArray<EStatusEffectType> GetActiveStatuses() const;
 
     // -------------------------------------------------------------------------
     // Delegaty Zdarzeń (Event-Driven Architecture)
     // -------------------------------------------------------------------------
 
-    UPROPERTY(BlueprintAssignable, Category = "StatusEffect|Events")
+    /** Wywoływane natychmiast po nałożeniu nowego statusu elementarnego */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnStatusEffectApplied OnStatusEffectApplied;
 
-    UPROPERTY(BlueprintAssignable, Category = "StatusEffect|Events")
+    /** Wywoływane po wygaśnięciu lub usunięciu statusu */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnStatusEffectRemoved OnStatusEffectRemoved;
 
-    UPROPERTY(BlueprintAssignable, Category = "StatusEffect|Events")
+    /** Wywoływane, gdy nałożenie statusu wywołało chemiczną reakcję żywiołów (np. Vaporize, Extinguish) */
+    UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
     FOnElementalReactionTriggered OnElementalReactionTriggered;
 
 protected:
@@ -110,21 +119,21 @@ protected:
     // Konfiguracja DoT (Data-Driven Defaults)
     // -------------------------------------------------------------------------
 
-    /** Obrażenia na sekundę przy statusie Burning */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "StatusEffect|Burning", meta = (ClampMin = "0.0"))
+    /** Punkty obrażeń zadawane co sekundę w trakcie trwania statusu Burning (Podpalenie) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Status Effects|Burning", meta = (ClampMin = "0.0"))
     float BurnDamagePerSecond = 5.0f;
 
-    /** Co ile sekund status Burning aplikuje obrażenia */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "StatusEffect|Burning", meta = (ClampMin = "0.1"))
+    /** Częstotliwość zadawania obrażeń przez status Burning (np. co 1.0 sekundy) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Status Effects|Burning", meta = (ClampMin = "0.1"))
     float BurnTickInterval = 1.0f;
 
-    /** Flaga włączająca wyświetlanie kolorowych etykiet 3D nad obiektem w świecie gry */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "StatusEffect|Debug")
+    /** Czy renderować kolorowe etykiety debugowe 3D nad obiektem w świecie gry (nazwa statusu i czas) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Status Effects|Debug")
     bool bShowDebugInWorld = true;
 
 private:
     /** Aktywne statusy indeksowane typem (gwarancja braku duplikatów) */
-    UPROPERTY(VisibleInstanceOnly, Category = "StatusEffect|State")
+    UPROPERTY(VisibleInstanceOnly, Category = "Custom|Status Effects|State")
     TMap<EStatusEffectType, FActiveStatusEffectInstance> ActiveEffects;
 
     /** Buforowana referencja do komponentu obrażeń */

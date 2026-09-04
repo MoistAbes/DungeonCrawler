@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -32,31 +32,39 @@ public:
 	virtual FText GetInteractionPrompt(const AActor* Interactor) const override;
 
 	// --- Gettery / Settery ---
-	UFUNCTION(BlueprintPure, Category = "Switch|State")
+
+	/** Zwraca bieżący stan logiczny przełącznika (true = włączony / aktywny, false = wyłączony) */
+	UFUNCTION(BlueprintPure, Category = "Custom|Switch")
 	bool IsActive() const { return bIsActive; }
 
-	UFUNCTION(BlueprintPure, Category = "Switch|State")
+	/** Sprawdza, czy gracz może wejść w interakcję z tym przełącznikiem */
+	UFUNCTION(BlueprintPure, Category = "Custom|Switch")
 	bool CanBeUsed() const { return bCanBeUsed; }
 
-	UFUNCTION(BlueprintCallable, Category = "Switch|State")
+	/** Zmienia możliwość użycia przełącznika (np. odblokowanie po znalezieniu klucza lub włączeniu zasilania) */
+	UFUNCTION(BlueprintCallable, Category = "Custom|Switch")
 	void SetCanBeUsed(bool bInCanBeUsed) { bCanBeUsed = bInCanBeUsed; }
 
 	// --- Eventy ---
-	UPROPERTY(BlueprintAssignable, Category = "Switch|Events")
+
+	/** Wywoływane za każdym razem, gdy stan przełącznika ulegnie zmianie (zwraca nowy stan oraz aktora przełączającego) */
+	UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
 	FOnSwitchToggledSignature OnSwitchToggled;
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	/** Siatka statyczna reprezentująca przełącznik lub dźwignię */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UStaticMeshComponent> MeshComponent;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Switch|Material")
+	/** Tożsamość materiałowa przełącznika (np. Metal) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Material")
 	EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Metal;
 
-	/** Stan logiczny przełącznika (np. ON/OFF) */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Switch|State")
+	/** Stan logiczny przełącznika (np. ON/OFF, otwarty/zamknięty) */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "Custom|Switch")
 	bool bIsActive = false;
 
-	/** Flaga blokady biznesowej (np. brak zasilania) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Switch|State")
+	/** Flaga blokady biznesowej (np. brak zasilania, zablokowany zamek). Gdy false, gracz nie może przełączyć dźwigni */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Custom|Switch")
 	bool bCanBeUsed = true;
 };
