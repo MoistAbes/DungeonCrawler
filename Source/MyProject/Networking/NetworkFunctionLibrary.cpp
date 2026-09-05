@@ -8,6 +8,8 @@
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "MyProject/Player/PlayerCharacter.h"
+#include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
 
 bool UNetworkFunctionLibrary::HasAuthority(const UObject* Context)
 {
@@ -125,12 +127,23 @@ void UNetworkFunctionLibrary::AttachCarriedProp(AActor* PropActor, UPrimitiveCom
         PropMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
     }
 
-    // 2. Pozycjonujemy obiekt bezpośrednio przed kapsułą postaci (X = +100 cm przed brzuchem, Z = +15 cm wysokość klatki)
-    const FVector OffsetLocation(100.0f, 0.0f, 15.0f);
-    const FRotator OffsetRotation(0.0f, 0.0f, 0.0f);
-
+    // 2. Pozycjonujemy obiekt: jeśli postać posiada HoldAnchorComponent, przypinamy do dynamicznej kotwicy
     USceneComponent* AttachParent = CarrierActor->GetRootComponent();
-    if (const ACharacter* Character = Cast<ACharacter>(CarrierActor))
+    FVector OffsetLocation(100.0f, 0.0f, 15.0f);
+
+    if (const APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CarrierActor))
+    {
+        if (PlayerChar->HoldAnchorComponent)
+        {
+            AttachParent = PlayerChar->HoldAnchorComponent;
+            OffsetLocation = FVector::ZeroVector;
+        }
+        else if (PlayerChar->GetCapsuleComponent())
+        {
+            AttachParent = PlayerChar->GetCapsuleComponent();
+        }
+    }
+    else if (const ACharacter* Character = Cast<ACharacter>(CarrierActor))
     {
         if (Character->GetCapsuleComponent())
         {
@@ -143,7 +156,13 @@ void UNetworkFunctionLibrary::AttachCarriedProp(AActor* PropActor, UPrimitiveCom
         FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
         PropActor->AttachToComponent(AttachParent, AttachRules);
         PropActor->SetActorRelativeLocation(OffsetLocation);
-        PropActor->SetActorRelativeRotation(OffsetRotation);
+        PropActor->SetActorRelativeRotation(FRotator::ZeroRotator);
+    }
+
+    // 3. Włączamy On-Demand Tick komponentu interakcji na postaci niosącej propa
+    if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
+    {
+        InterComp->NotifyCarriedPropAttached(PropActor);
     }
 }
 
@@ -176,7 +195,16 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         }
     }
 
-    // 5. Wymuszamy natychmiastowe rozesłanie paczki fizyki z serwera do wszystkich klientów
+    // 5. Powiadamiamy InteractionComponent postaci o zakończeniu niesienia
+    if (CarrierActor)
+    {
+        if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
+        {
+            InterComp->NotifyCarriedPropDetached();
+        }
+    }
+
+    // 6. Wymuszamy natychmiastowe rozesłanie paczki fizyki z serwera do wszystkich klientów
     if (PropActor->HasAuthority())
     {
         PropActor->ForceNetUpdate();

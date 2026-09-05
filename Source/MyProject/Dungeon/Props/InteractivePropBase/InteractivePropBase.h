@@ -115,4 +115,9 @@ protected:
 
     UFUNCTION()
     virtual void HandleOnDestroyed(AActor* DestroyedActor);
+
+private:
+    /** Poprzedni trzymający aktor (wykorzystywany lokalnie przez OnRep_CarryingActor do czystego odpięcia) */
+    UPROPERTY()
+    TObjectPtr<AActor> LastCarryingActor = nullptr;
 };

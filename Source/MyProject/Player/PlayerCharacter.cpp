@@ -103,7 +103,7 @@ APlayerCharacter::APlayerCharacter()
 
 
     // -------------------------------------------------------------------------
-    // Physics Handle
+    // Physics Handle & Hold Anchor
     // -------------------------------------------------------------------------
 
     PhysicsHandleComponent =
@@ -118,6 +118,16 @@ APlayerCharacter::APlayerCharacter()
 
     PhysicsHandleComponent->InterpolationSpeed = 50.0f;
     PhysicsHandleComponent->bInterpolateTarget = true;
+
+    HoldAnchorComponent =
+        CreateDefaultSubobject<USceneComponent>(
+            TEXT("HoldAnchorComponent"));
+
+    HoldAnchorComponent->SetupAttachment(
+        GetCapsuleComponent());
+
+    HoldAnchorComponent->SetRelativeLocation(
+        FVector(100.0f, 0.0f, BaseEyeHeightOffset - 15.0f));
 
 
     // -------------------------------------------------------------------------

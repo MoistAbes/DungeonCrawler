@@ -104,7 +104,7 @@ void AInteractivePropBase::OnDropped(AActor* Dropper, const FVector& LaunchVeloc
     CarryingActor = nullptr;
     RepLaunchVelocity = LaunchVelocity;
 
-    NetUtils::DetachCarriedProp(this, MeshComponent, nullptr, LaunchVelocity);
+    NetUtils::DetachCarriedProp(this, MeshComponent, Dropper, LaunchVelocity);
 }
 
 void AInteractivePropBase::OnRep_CarryingActor()
@@ -112,12 +112,14 @@ void AInteractivePropBase::OnRep_CarryingActor()
     // Klient aktualizuje lokalny stan podpięcia na bazie autorytatywnego stanu serwera
     if (CarryingActor)
     {
+        LastCarryingActor = CarryingActor;
         NetUtils::AttachCarriedProp(this, MeshComponent, CarryingActor);
     }
     else
     {
         // Klient odłącza propa i natychmiast aplikuje zreplikowany wektor lotu (eliminacja opadania pionowo w dół)
-        NetUtils::DetachCarriedProp(this, MeshComponent, nullptr, RepLaunchVelocity);
+        NetUtils::DetachCarriedProp(this, MeshComponent, LastCarryingActor, RepLaunchVelocity);
+        LastCarryingActor = nullptr;
     }
 }
 

@@ -5,18 +5,99 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
+#include "MyProject/Player/PlayerCharacter.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/IInteractableInterface.h"
 
 UInteractionComponent::UInteractionComponent()
 {
-    PrimaryComponentTick.bCanEverTick = false;
+    PrimaryComponentTick.bCanEverTick = true;
+    PrimaryComponentTick.bStartWithTickEnabled = false;
     SetIsReplicatedByDefault(true);
 }
 
 void UInteractionComponent::BeginPlay()
 {
     Super::BeginPlay();
+}
+
+void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+    if (!GrabbedActor)
+    {
+        SetComponentTickEnabled(false);
+        return;
+    }
+
+    UpdateHoldAnchorTransform(DeltaTime);
+}
+
+void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
+{
+    GrabbedActor = InProp;
+    SetComponentTickEnabled(true);
+}
+
+void UInteractionComponent::NotifyCarriedPropDetached()
+{
+    GrabbedActor = nullptr;
+    GrabbedComponent = nullptr;
+    SetComponentTickEnabled(false);
+}
+
+void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
+{
+    APawn* PawnOwner = Cast<APawn>(GetOwner());
+    if (!PawnOwner) return;
+
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(PawnOwner);
+    if (!PlayerChar || !PlayerChar->HoldAnchorComponent) return;
+
+    // 1. Pobieramy kąt patrzenia (Aim Pitch)
+    float AimPitch = 0.0f;
+    if (PawnOwner->IsLocallyControlled())
+    {
+        if (const APlayerController* PC = Cast<APlayerController>(PawnOwner->GetController()))
+        {
+            if (PC->PlayerCameraManager)
+            {
+                AimPitch = PC->PlayerCameraManager->GetCameraRotation().Pitch;
+            }
+            else
+            {
+                AimPitch = PC->GetControlRotation().Pitch;
+            }
+        }
+        else
+        {
+            AimPitch = PawnOwner->GetControlRotation().Pitch;
+        }
+    }
+    else
+    {
+        AimPitch = PawnOwner->GetBaseAimRotation().Pitch;
+    }
+    AimPitch = FRotator::NormalizeAxis(AimPitch);
+
+    // Ograniczamy kąt w pionie (od -50 st w dół do +50 st w górę)
+    const float ClampedPitch = FMath::Clamp(AimPitch, -50.0f, 50.0f);
+    const float PitchRad = FMath::DegreesToRadians(ClampedPitch);
+
+    // 2. Pozycja relatywna kotwicy względem kapsuły postaci
+    const float BaseZ = PlayerChar->BaseEyeHeightOffset - 15.0f;
+    const float HoldDistance = 110.0f;
+
+    const float TargetX = HoldDistance * FMath::Cos(PitchRad);
+    const float TargetZ = BaseZ + (HoldDistance * FMath::Sin(PitchRad));
+
+    // 3. Płynna interpolacja dla naturalnego wrażenia przenoszenia
+    const FVector CurrentRelLoc = PlayerChar->HoldAnchorComponent->GetRelativeLocation();
+    const FVector TargetRelLoc(TargetX, 0.0f, TargetZ);
+    const FVector NewRelLoc = FMath::VInterpTo(CurrentRelLoc, TargetRelLoc, DeltaTime, 20.0f);
+
+    PlayerChar->HoldAnchorComponent->SetRelativeLocation(NewRelLoc);
 }
 
 void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const
@@ -56,6 +137,7 @@ void UInteractionComponent::PrimaryInteract()
             Server_RequestReleaseOrThrow(false, FVector_NetQuantize::ZeroVector);
             GrabbedActor = nullptr;
             GrabbedComponent = nullptr;
+            SetComponentTickEnabled(false);
         }
         return;
     }
@@ -89,6 +171,7 @@ void UInteractionComponent::PrimaryInteract()
             {
                 GrabbedActor = HitActor;
                 GrabbedComponent = HitResult.GetComponent();
+                SetComponentTickEnabled(true);
                 Server_RequestGrab(HitActor, HitResult.GetComponent());
             }
             return;
@@ -134,6 +217,7 @@ void UInteractionComponent::ThrowCurrentProp()
         Server_RequestReleaseOrThrow(true, FVector_NetQuantize(LaunchVelocity));
         GrabbedActor = nullptr;
         GrabbedComponent = nullptr;
+        SetComponentTickEnabled(false);
     }
 }
 
@@ -187,25 +271,30 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
         Grabbable->OnGrabbed(GetOwner());
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
+    SetComponentTickEnabled(true);
+
+    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GetNameSafe(GrabbedActor));
 }
 
 void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity)
 {
     if (!GrabbedActor) return;
 
+    AActor* ReleasedActor = GrabbedActor;
     const FVector AppliedVelocity = bIsThrow ? LaunchVelocity : FVector::ZeroVector;
 
-    if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))
+    // Reset stanu lokalnego komponentu
+    GrabbedActor = nullptr;
+    GrabbedComponent = nullptr;
+    SetComponentTickEnabled(false);
+
+    if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(ReleasedActor))
     {
         Grabbable->OnDropped(GetOwner(), AppliedVelocity);
     }
 
     UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Released/Thrown: %s (Velocity: %s)"), 
-        *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName(), *AppliedVelocity.ToString());
-
-    GrabbedActor = nullptr;
-    GrabbedComponent = nullptr;
+        *NetUtils::GetNetRolePrefix(this), *GetNameSafe(ReleasedActor), *AppliedVelocity.ToString());
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -226,7 +315,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
         const float Dist = FVector::Dist(Owner->GetActorLocation(), TargetActor->GetActorLocation());
         if (Dist > (TraceDistance + 150.0f))
         {
-            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);\
+            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);
             return;
         }
     }

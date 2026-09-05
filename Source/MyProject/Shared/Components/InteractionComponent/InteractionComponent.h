@@ -18,11 +18,17 @@ class MYPROJECT_API UInteractionComponent : public UActorComponent
 public:
     UInteractionComponent();
 
+    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
     /** Główna akcja: podnieś lub upuść obiekt pod celownikiem / wektorem wzroku */
     void PrimaryInteract();
 
     /** Opcjonalna akcja rzutu trzymanym obiektem */
     void ThrowCurrentProp();
+
+    /** Powiadamia komponent o podpięciu lub odpięciu niesionego propa (dla włączenia/wyłączenia On-Demand Tick) */
+    void NotifyCarriedPropAttached(AActor* InProp);
+    void NotifyCarriedPropDetached();
 
 protected:
     virtual void BeginPlay() override;
@@ -67,4 +73,5 @@ private:
     bool PerformTrace(FHitResult& OutHit) const;
     void ExecuteGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
     void ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity);
+    void UpdateHoldAnchorTransform(float DeltaTime);
 };

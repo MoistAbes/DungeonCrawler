@@ -41,6 +41,10 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UPhysicsHandleComponent> PhysicsHandleComponent;
 
+    /** Kotwica pozycjonowania niesionego propa, płynnie podążająca za kątem patrzenia kamery */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
+    TObjectPtr<USceneComponent> HoldAnchorComponent;
+
     /** Komponent odpowiedzialny za detekcję i logikę interakcji z propami i przełącznikami */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UInteractionComponent> InteractionComponent;
