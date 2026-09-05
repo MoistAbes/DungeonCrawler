@@ -25,13 +25,16 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (!GrabbedActor)
+    if (!IsValid(GrabbedActor))
     {
+        GrabbedActor = nullptr;
+        GrabbedComponent = nullptr;
         SetComponentTickEnabled(false);
         return;
     }
 
     UpdateHoldAnchorTransform(DeltaTime);
+    UpdateCarriedPropTransform(DeltaTime);
 }
 
 void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
@@ -42,6 +45,10 @@ void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
 
 void UInteractionComponent::NotifyCarriedPropDetached()
 {
+    if (IsValid(GrabbedActor))
+    {
+        GrabbedActor->SetReplicateMovement(true);
+    }
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
     SetComponentTickEnabled(false);
@@ -92,12 +99,108 @@ void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
     const float TargetX = HoldDistance * FMath::Cos(PitchRad);
     const float TargetZ = BaseZ + (HoldDistance * FMath::Sin(PitchRad));
 
-    // 3. Płynna interpolacja dla naturalnego wrażenia przenoszenia
+    // 3. Płynna interpolacja pozycji kotwicy
     const FVector CurrentRelLoc = PlayerChar->HoldAnchorComponent->GetRelativeLocation();
     const FVector TargetRelLoc(TargetX, 0.0f, TargetZ);
     const FVector NewRelLoc = FMath::VInterpTo(CurrentRelLoc, TargetRelLoc, DeltaTime, 20.0f);
 
     PlayerChar->HoldAnchorComponent->SetRelativeLocation(NewRelLoc);
+}
+
+void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
+{
+    if (!IsValid(GrabbedActor)) return;
+
+    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
+    if (!PlayerChar || !PlayerChar->HoldAnchorComponent) return;
+
+    const FVector TargetLocation = PlayerChar->HoldAnchorComponent->GetComponentLocation();
+    const FRotator TargetRotation = PlayerChar->HoldAnchorComponent->GetComponentRotation();
+
+    // Płynna interpolacja do punktu docelowego (daje naturalne wrażenie masy i płynność ruchu)
+    const FVector CurrentLocation = GrabbedActor->GetActorLocation();
+    const FRotator CurrentRotation = GrabbedActor->GetActorRotation();
+
+    const FVector DesiredLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, 25.0f);
+    const FRotator DesiredRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, 25.0f);
+
+    // 1. Kinematyczny Sweep z testem kolizji
+    FHitResult SweepHit;
+    GrabbedActor->SetActorLocationAndRotation(DesiredLocation, DesiredRotation, true, &SweepHit, ETeleportType::None);
+
+    // 2. Inteligentna reakcja na napotkane przeszkody fizyczne
+    if (SweepHit.bBlockingHit)
+    {
+        if (UPrimitiveComponent* HitComp = SweepHit.GetComponent())
+        {
+            if (HitComp->IsSimulatingPhysics())
+            {
+                const float HitMass = HitComp->GetMass();
+                const float PreHitSpeed = HitComp->GetPhysicsLinearVelocity().Size();
+
+                if (HitMass <= PlayerChar->MaxPushableMass)
+                {
+                    // Obiekt mieści się w limicie udźwigu gracza (np. skrzynia 60 kg) - przekazujemy fizyczną siłę pchania
+                    FVector PushDir = -SweepHit.ImpactNormal;
+                    PushDir.Z = 0.0f;
+                    PushDir = PushDir.GetSafeNormal();
+
+                    if (PushDir.IsNearlyZero())
+                    {
+                        PushDir = PlayerChar->GetActorForwardVector();
+                    }
+
+                    HitComp->WakeRigidBody();
+                    HitComp->AddForceAtLocation(PushDir * PlayerChar->PlayerPushForce, SweepHit.ImpactPoint, SweepHit.BoneName);
+                }
+                else
+                {
+                    // Obiekt jest zbyt ciężki dla gracza (np. beczka 177-200 kg).
+                    // Jeśli był w spoczynku / powolnym ruchu, uniemożliwiamy szturnięcia i spychacz,
+                    // zerując wszelkie sztuczne impulsy kontaktowe solvera Chaos.
+                    if (PreHitSpeed < 60.0f)
+                    {
+                        HitComp->SetPhysicsLinearVelocity(FVector::ZeroVector);
+                        HitComp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Zabezpieczenie przed rotacją kamery i szturnięciami od boku:
+    // Sprawdzamy komponenty nakładające się na trzymany prop. Jeśli któryś jest zbyt ciężki i w spoczynku - blokujemy pchnięcie.
+    if (UPrimitiveComponent* PropPrim = GrabbedComponent ? GrabbedComponent.Get() : Cast<UPrimitiveComponent>(GrabbedActor->GetRootComponent()))
+    {
+        TArray<UPrimitiveComponent*> Overlaps;
+        PropPrim->GetOverlappingComponents(Overlaps);
+        for (UPrimitiveComponent* OverlapComp : Overlaps)
+        {
+            if (OverlapComp && OverlapComp->IsSimulatingPhysics())
+            {
+                if (OverlapComp->GetMass() > PlayerChar->MaxPushableMass)
+                {
+                    if (OverlapComp->GetPhysicsLinearVelocity().Size() < 60.0f)
+                    {
+                        OverlapComp->SetPhysicsLinearVelocity(FVector::ZeroVector);
+                        OverlapComp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
+    const float DistanceFromHands = FVector::Dist(GrabbedActor->GetActorLocation(), TargetLocation);
+
+    if (DistanceFromHands > CarryBreakDistance)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s Carry grip broken! Distance (%.1f cm) exceeded limit (%.1f cm)."),
+            *NetUtils::GetNetRolePrefix(this), DistanceFromHands, CarryBreakDistance);
+
+        // Zerwanie chwytu – upuszczenie przedmiotu
+        PrimaryInteract();
+    }
 }
 
 void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const

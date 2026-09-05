@@ -120,46 +120,40 @@ void UNetworkFunctionLibrary::AttachCarriedProp(AActor* PropActor, UPrimitiveCom
         return;
     }
 
-    // 1. Wyłączamy symulację fizyki i kolizję z postacią
+    // 1. Odpinamy od wszelkich rodziców w świecie.
+    // Prop nie jest przyczepiany "na sztywno" (AttachToComponent), lecz prowadzony kinematycznie
+    // ze sweepem w InteractionComponent. Zapobiega to efektowi nieskończenie silnego spychacza.
+    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+    PropActor->DetachFromActor(DetachRules);
+
+    // 2. Wyłączamy symulację fizyki dynamicznej
     if (PropMesh)
     {
         PropMesh->SetSimulatePhysics(false);
-        PropMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+
+        // Ignorujemy kolizję z niosącym graczem, aby nie blokować własnej kapsuły
+        PropMesh->IgnoreActorWhenMoving(CarrierActor, true);
+
+        // Zachowujemy pełną blokadę pocisków, magii i świata zewnętrznego (funkcja tarczy)
+        PropMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+        PropMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+        PropMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+        PropMesh->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
     }
 
-    // 2. Pozycjonujemy obiekt: jeśli postać posiada HoldAnchorComponent, przypinamy do dynamicznej kotwicy
-    USceneComponent* AttachParent = CarrierActor->GetRootComponent();
-    FVector OffsetLocation(100.0f, 0.0f, 15.0f);
-
-    if (const APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(CarrierActor))
+    // 3. Zarządzanie siecią: lokalny klient wyłącza przychodzącą replikację ruchu na czas chwytu,
+    // aby pakiety z serwera nie walczyły z lokalną, 140+ FPS predykcją sweepa
+    if (UNetworkFunctionLibrary::IsLocallyControlled(CarrierActor) && !CarrierActor->HasAuthority())
     {
-        if (PlayerChar->HoldAnchorComponent)
-        {
-            AttachParent = PlayerChar->HoldAnchorComponent;
-            OffsetLocation = FVector::ZeroVector;
-        }
-        else if (PlayerChar->GetCapsuleComponent())
-        {
-            AttachParent = PlayerChar->GetCapsuleComponent();
-        }
+        PropActor->SetReplicateMovement(false);
     }
-    else if (const ACharacter* Character = Cast<ACharacter>(CarrierActor))
+    else
     {
-        if (Character->GetCapsuleComponent())
-        {
-            AttachParent = Character->GetCapsuleComponent();
-        }
+        PropActor->SetReplicateMovement(true);
+        PropActor->SetNetUpdateFrequency(60.0f);
     }
 
-    if (AttachParent)
-    {
-        FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld, false);
-        PropActor->AttachToComponent(AttachParent, AttachRules);
-        PropActor->SetActorRelativeLocation(OffsetLocation);
-        PropActor->SetActorRelativeRotation(FRotator::ZeroRotator);
-    }
-
-    // 3. Włączamy On-Demand Tick komponentu interakcji na postaci niosącej propa
+    // 4. Włączamy On-Demand Tick komponentu interakcji na postaci niosącej propa
     if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
     {
         InterComp->NotifyCarriedPropAttached(PropActor);
@@ -173,14 +167,21 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         return;
     }
 
-    // 1. Odpinamy od postaci w świecie
+    // 1. Upewniamy się, że obiekt nie ma żadnych podpięć
     FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
     PropActor->DetachFromActor(DetachRules);
 
-    // 2. Jawnie przywracamy replikację ruchu
+    // 2. Przywracamy kolizję z postacią niosącą
+    if (PropMesh && CarrierActor)
+    {
+        PropMesh->IgnoreActorWhenMoving(CarrierActor, false);
+    }
+
+    // 3. Przywracamy domyślną częstotliwość replikacji i replikację ruchu na wszystkich maszynach
+    PropActor->SetNetUpdateFrequency(30.0f);
     PropActor->SetReplicateMovement(true);
 
-    // 3. Przywracamy symulację fizyki Chaos
+    // 4. Przywracamy symulację fizyki Chaos
     if (PropMesh)
     {
         PropMesh->SetSimulatePhysics(true);
@@ -188,14 +189,14 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         PropMesh->SetNotifyRigidBodyCollision(true);
         PropMesh->WakeRigidBody();
 
-        // 4. Aplikujemy ewentualny impuls rzutu (na Serwerze)
+        // 5. Aplikujemy ewentualny impuls rzutu (na Serwerze)
         if (!LaunchVelocity.IsNearlyZero())
         {
             PropMesh->AddImpulse(LaunchVelocity, NAME_None, true);
         }
     }
 
-    // 5. Powiadamiamy InteractionComponent postaci o zakończeniu niesienia
+    // 6. Powiadamiamy InteractionComponent postaci o zakończeniu niesienia
     if (CarrierActor)
     {
         if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
@@ -204,7 +205,7 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         }
     }
 
-    // 6. Wymuszamy natychmiastowe rozesłanie paczki fizyki z serwera do wszystkich klientów
+    // 7. Wymuszamy natychmiastowe rozesłanie paczki fizyki z serwera do wszystkich klientów
     if (PropActor->HasAuthority())
     {
         PropActor->ForceNetUpdate();

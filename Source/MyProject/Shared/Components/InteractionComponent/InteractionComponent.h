@@ -8,7 +8,7 @@
  * Serwis domenowy odpowiedzialny za wykrywanie, chwytanie i rzucanie obiektów fizycznych
  * oraz interakcję logiczną (przełączniki, dźwignie, mechanizmy).
  * W pełni zsynchronizowany w sieci: Client-Request -> Server-Authoritative Execution.
- * Wykorzystuje stabilny, bezlagowy wzorzec Attach-on-Grab.
+ * Wykorzystuje dynamiczny, kinematyczny ruch ze sweepem zapobiegający efektowi spychacza (bulldozer).
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYPROJECT_API UInteractionComponent : public UActorComponent
@@ -45,6 +45,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float ThrowImpulseStrength = 1400.0f;
 
+    /** Maksymalny dopuszczalny dystans rozciągnięcia rąk od zablokowanego propa (cm). Przekroczenie powoduje upuszczenie */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "30.0", ClampMax = "150.0"))
+    float CarryBreakDistance = 70.0f;
+
     // --- RPCs Sieciowe (Zarządzane przez Serwer) ---
 
     /** Żądanie klienta do serwera o podniesienie wskazanego propa */
@@ -74,4 +78,5 @@ private:
     void ExecuteGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
     void ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity);
     void UpdateHoldAnchorTransform(float DeltaTime);
+    void UpdateCarriedPropTransform(float DeltaTime);
 };
