@@ -50,12 +50,20 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
     1. Zwarte tablice struktur (`TArray<FReplicatedItem>`) z dedykowanym `OnRep`, lub
     2. Struktury `FFastArraySerializer` (dla zaawansowanych, często zmieniających się list ze wsparciem delta-serializacji).
 
-### Zasada 3: Wzorzec "Attach-on-Grab" dla Fizyki w Sieci
-* **Problem:** Narzędzie `UPhysicsHandleComponent` nie replikuje się przez sieć. Ciągła symulacja i replikacja pozycji fizycznej trzymanej beczki w rękach poruszającego się gracza generuje jitter, desynchronizację i ogromny narzut pakietów.
-* **Reguła Projektu:**
-  * **W momencie podniesienia:** Serwer wyłącza symulację fizyki na propie (`MeshComponent->SetSimulatePhysics(false)`) i przyczepia go hierarchicznie do postaci lub gniazda rąk (`AttachToComponent`).
-  * **W trakcie noszenia:** Prop nie wykonuje żadnych obliczeń fizyki Chaos. Jego pozycja replikowana jest za darmo wraz z ruchem postaci gracza.
-  * **W momencie rzutu / upuszczenia:** Serwer odczepia obiekt (`DetachFromComponent`), włącza ponownie `SetSimulatePhysics(true)` i nadaje impuls startowy (`AddImpulse`).
+### Zasada 3: Wzorzec Kinematycznego Prowadzenia ze Sweepem (Kinematic Sweep & Anti-Bulldozer Shield Pattern)
+* **Problem Sztywnego `AttachToComponent`:** Tradycyjny `AttachToComponent(SnapToTarget)` tworzy sztywną hierarchię transformów. Gdy gracz idzie w ścianę lub beczkę 200 kg, podpięty obiekt staje się niewzruszonym "spychaczem" (bulldozer) o nieskończonej masie, przepychającym lub miażdżącym przeszkody w solverze Chaos. Z kolei `PhysicsHandle` drży i nie replikuje się w sieci.
+* **Rozwiązanie Projektu (Kinematic Follow with Sweep):**
+  * **Odpięcie w przestrzeni świata:** Obiekt nie jest podpinany hierarchicznie do postaci (`DetachFromActor(KeepWorld)`).
+  * **Kinematyczny Sweep w On-Demand Tick:** Pozycja trzymanego obiektu jest płynnie interpolowana (`VInterpTo`/`RInterpTo`) w stronę punktu kotwicy rąk (`HoldAnchorComponent`) z włączonym testem kolizji (`bSweep = true`).
+  * **Funkcja Tarczy (Blocking Shield):** Trzymany prop ma wyłączone ignorowanie innych obiektów, zachowując pełną blokadę pocisków (`ECC_WorldDynamic`), magii i uderzeń.
+  * **Inteligentna kontrola masy (Anti-Bulldozer):**
+    * Jeśli prop dotknie obiektu $\le \text{MaxPushableMass}$ (100 kg, np. skrzynia 60 kg) $\rightarrow$ aplikowana jest rzeczywista siła pchania gracza (`AddForceAtLocation`), pozwalająca na przesuwanie przeszkód tarczą.
+    * Jeśli prop dotknie lub nałoży się na obiekt $> \text{MaxPushableMass}$ (np. głaz 200 kg) $\rightarrow$ solver Chaosu jest tłumiony (`SetPhysicsLinearVelocity(ZeroVector)`), całkowicie eliminując efekt spychacza i szturnięcia od boku przy obrocie kamery.
+  * **Zerwanie chwytu (Break Distance):** Jeśli gracz napiera na nieustępliwą ścianę i odległość rąk od zablokowanego propa przekroczy próg (`CarryBreakDistance = 70.0f`), chwyt natychmiast pęka, a obiekt upada pod stopy.
+  * **Fizyka Upuszczenia i Rzutu Zamachem:**
+    * Przy zwykłym marszu naciśnięcie `E` upuszcza obiekt pod nogi z prędkością zero (grawitacja ściąga obiekt na dół).
+    * Przy dynamicznym obrocie kamerą (zamach myszką) wyliczana jest prędkość kątowa zamachu na promieniu trzymania, nadając propowi pęd rzutu po łuku.
+    * Dedykowany rzut w przód (LPM) nadaje pełny impuls wystrzału na wprost.
 
 ### Zasada 4: Separacja Logiki Domenowej od Kosmetyki (Logic vs FX)
 * **Logika Biznesowa (Tylko Serwer / OnRep):**
@@ -70,7 +78,7 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
 * Każde żądanie akcji wysyłane z klienta (`Server_Request...`) musi posiadać implementację `_Validate`:
   * Weryfikacja odległości interakcji (czy gracz nie próbuje podnieść przedmiotu z odległości 20 metrów).
   * Weryfikacja stanu gracza (czy gracz nie jest ogłuszony, powalony lub martwy).
-  * Zabezpieczenie przed manipulacją pakietami i błędami skrajnymi.
+  * Zabezpieczenie przed manipulacją pakietami i błędami skrajnymi (np. clamp maksymalnej prędkości rzutu `MaxSwingThrowSpeed = 2200.0f`).
 
 ### Zasada 6: Kompresja Różnicowa i Kwantyzacja (Delta Compression & Quantization)
 * **Problem:** Wysyłanie pełnych wektorów transformu (`FVector` = 12/24 bajty) w każdej klatce zużywa ogromne pasmo.
@@ -92,10 +100,11 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
 ### 1. `APlayerCharacter` & Kontrola Ruchu
 * Model oparty na `ACharacter` i `CharacterMovementComponent` (CMC).
 * **Ruch:** Wykorzystuje natywną predykcję klienta i korektę serwera.
+* **Fizyczne Pchanie Ciałem:** Realizowane przez przeciążenie `MoveBlockedBy` z limitem masy $100\text{ kg}$ i siłą $150\,000\text{ N}$.
 * **Odrzuty (Knockback):** Wykonywane przez `Character->LaunchCharacter()`. Serwer wywołuje funkcję, a CMC replikuje zmianę prędkości i trajektorię na klientów w ramach protokołu ruchu postaci.
 
 ### 2. `UDamageableComponent`
-* `bReplicates = true`, zarejestrowany przez `SetIsReplicatedByDefault(true)`.
+* `bReplicates = true`, zarejestrowany przez `SetIsReplicatedByDefault(true)`.\
 * `CurrentDurability` oznaczone jako `UPROPERTY(ReplicatedUsing = OnRep_CurrentDurability)`.
 * `ApplyDamage` oraz `ApplyKineticImpact` posiadają deklaratywnego strażnika:
   ```cpp
@@ -103,15 +112,17 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
   ```
 * Funkcja `OnRep_CurrentDurability` rozgłasza lokalne delegaty `OnHealthChanged` / `OnDurabilityChanged`, zasilając pasek zdrowia UI u każdego klienta.
 
-### 3. `UStatusEffectComponent`
+### 3. `UStatusEffectComponent` & `UElementalChemistryLibrary`
 * `bReplicates = true`.
+* **Hierarchia Ewaluacji Chemii Żywiołów (Elemental Priority Pipeline):**
+  1. **Faza 1 (Żywioł vs Powłoka):** Sprawdzenie czy przychodzący żywioł reaguje z aktywnym statusem na powierzchni (np. Ogień uderza w Mokry cel $\rightarrow$ `Steam_Extinguish`). Jeśli reakcja neutralizuje żywioł (`bConsumeIncomingStatus = true`), następuje odparowanie/ugaszanie i wczesne zakończenie.
+  2. **Faza 2 (Żywioł vs Materiał pod spodem):** Jeśli żywioł nie został skonsumowany przez powłokę, sprawdzana jest odporność materiałowa (`CanMaterialReceiveStatus`). Kamień i metal odrzucają ogień, chroniąc obiekt przed niepoprawnym zapłonem.
 * Tablica aktywnych statusów:
   ```cpp
   UPROPERTY(ReplicatedUsing = OnRep_ActiveEffects)
   TArray<FActiveStatusEffectInstance> ReplicatedEffects;
   ```
-* Cykl życia, DoT oraz ewaluacja `UElementalChemistryLibrary` wykonywane są **wyłącznie na serwerze**.
-* Klient na podstawie `OnRep_ActiveEffects` zarządza kontenerem ikon w `UPlayerHUDWidget` oraz lokalnymi efektami wizualnymi cząsteczek.
+* Cykl życia, DoT oraz ewaluacja chemii wykonywane są **wyłącznie na serwerze**.
 
 ### 4. `AInteractivePropBase` & `AVolatileProp`
 * `bReplicates = true`, `SetReplicateMovement(true)`.
@@ -124,16 +135,19 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
 ### 5. `UInteractionComponent`
 * Podnoszenie i rzucanie propów zorganizowane w schemacie:
   ```cpp
-  // 1. Klient wciska klawisz 'E'
+  // 1. Klient wciska klawisz 'E' (Podnieś / Upuść / Rzuć zamachem)
   void PrimaryInteract();
 
-  // 2. Klient prosi serwer o podniesienie konkretnego aktora
-  UFUNCTION(Server, Reliable, WithValidation)
-  void Server_RequestGrab(AActor* TargetProp);
+  // 2. Klient wciska LPM (Dedykowany silny rzut w przód)
+  void ThrowCurrentProp();
 
-  // 3. Klient prosi serwer o rzut w danym kierunku wzroku
+  // 3. RPC do serwera o podniesienie konkretnego aktora
   UFUNCTION(Server, Reliable, WithValidation)
-  void Server_RequestThrow(const FVector& ThrowDirection, float Force);
+  void Server_RequestGrab(AActor* TargetProp, UPrimitiveComponent* ComponentToGrab);
+
+  // 4. RPC do serwera o upuszczenie lub rzut z wyliczonym wektorem pędu
+  UFUNCTION(Server, Reliable, WithValidation)
+  void Server_RequestReleaseOrThrow(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity);
   ```
 
 ---
@@ -159,13 +173,6 @@ Do testów Co-op **nie jest potrzebne żadne lobby ani menu główne**:
    * **Okno 2 (Client 1):** Postać gracza-klienta połączona przez lokalną pętlę sieciową `127.0.0.1`.
 4. Przełączanie między oknami odbywa się kliknięciem myszki. Obaj gracze widzą się nawzajem w czasie rzeczywistym.
 
-### Dlaczego Lobby, Pokoje i Steam są odkładane na sam koniec?
-* W architekturze silnika gra podzielona jest na dwie niezależne warstwy:
-  1. **Warstwa Rozgrywki (Gameplay Netcode):** Poruszanie się, obrażenia, fizyka propów, statusy i wybuchy (kod w `Source/MyProject`).
-  2. **Warstwa Sesji (Session Management):** Menu główne, wyszukiwanie serwerów, zaproszenia przez Steam / EOS (`OnlineSubsystem`).
-* Warstwa sesji to wyłącznie cienki wrapper, który po wybraniu pokoju wywołuje polecenie konsoli: `open <IP_Address>` lub `open <SteamSessionID>`.
-* Budowanie lobby przed działającym gameplayem to błąd – testowanie w PIE na 2 oknach jest 10-krotnie szybsze, a warstwę sesji Steam/EOS podpina się na gotowy, przetestowany fundament.
-
 ---
 
 ## 6. Checklista Weryfikacji Nowej Funkcji (Netcode Checklist)
@@ -175,5 +182,5 @@ Przed zakończeniem implementacji jakiegokolwiek komponentu lub aktora zadaj sob
 - [ ] **Bandwidth:** Czy replikuję zmienne, które zmieniają się co klatkę (np. timery, prędkości)? (Musi być: NIE, użyj `ServerEndTime` lub estymacji).
 - [ ] **Quantization:** Czy w `ReplicatedMovement` włączono kwantyzację pozycji i rotacji (`RoundTwoDecimals`, `ByteComponents`)? (Musi być: TAK).
 - [ ] **Containers:** Czy żadne pole `UPROPERTY(Replicated)` nie jest `TMap` ani `TSet`? (Musi być: TAK, tylko `TArray` lub proste typy).
-- [ ] **Physics:** Czy podnoszone lub przenoszone obiekty fizyczne nie generują konfliktów w solverze Chaosu? (Musi być: TAK, zastosowano Attach).
+- [ ] **Physics:** Czy podnoszone lub przenoszone obiekty fizyczne nie generują konfliktów w solverze Chaosu? (Musi być: TAK, zastosowano Kinematic Follow ze sweepem i Anti-Bulldozer clampem).
 - [ ] **Cosmetics:** Czy efekty cząsteczkowe i dźwięki są odpalane po stronie klienta (OnRep/Unreliable RPC), a nie blokują wątku serwera? (Musi być: TAK).
