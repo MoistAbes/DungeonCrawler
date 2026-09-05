@@ -26,7 +26,7 @@ protected:
     virtual void HandleOnDestroyed(AActor* DestroyedActor) override;
 
     /** Lekki RPC rozsyłający do wszystkich połączonych graczy sygnał o wybuchu (FX, dźwięki, debug) */
-    UFUNCTION(NetMulticast, Unreliable)
+    UFUNCTION(NetMulticast, Reliable)
     void Multicast_PlayExplosionEffects(const FVector& DetonationCenter);
 
     // -------------------------------------------------------------------------

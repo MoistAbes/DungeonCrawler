@@ -34,10 +34,13 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     const FVector DetonationCenter = GetActorLocation();
     UWorld* World = GetWorld();
 
-    // 1. Rozsyłamy powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich graczy
+    // 1. Rozsyłamy niezawodne powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich połączonych graczy
     Multicast_PlayExplosionEffects(DetonationCenter);
 
-    // 2. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer
+    // 2. Wymuszamy natychmiastowe wysłanie pakietu sieciowego zanim aktor zniknie ze świata gry
+    ForceNetUpdate();
+
+    // 3. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer
     if (BaseDamage > 0.0f || (bApplyKnockback && KnockbackForce > 0.0f))
     {
         const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
@@ -52,7 +55,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             false /* serwer nie musi rysować debuga, zrobi to multicast */);
     }
 
-    // 3. Aplikowanie statusu żywiołowego w promieniu wybuchu (Tylko Serwer)
+    // 4. Aplikowanie statusu żywiołowego w promieniu wybuchu (Tylko Serwer)
     if (StatusToApply != EStatusEffectType::None && World)
     {
         TArray<FOverlapResult> Overlaps;
@@ -83,7 +86,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             }
             AffectedActors.Add(HitActor);
 
-            if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
+            if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())\
             {
                 StatusComp->ApplyStatus(StatusToApply, StatusDuration, this);
             }
