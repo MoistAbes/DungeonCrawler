@@ -64,6 +64,9 @@ APlayerCharacter::APlayerCharacter()
         MovementComponent->GravityScale = 1.8f;
         MovementComponent->JumpZVelocity = 600.0f;
         MovementComponent->SetWalkableFloorZ(0.7f);
+
+        // Wyłączamy natywne, nieskalowane pchanie silnika - przejmujemy pełną fizyczną kontrolę w MoveBlockedBy
+        MovementComponent->bEnablePhysicsInteraction = false;
     }
 
 
@@ -311,6 +314,43 @@ void APlayerCharacter::SetupPlayerInputComponent(
             this,
             &ACharacter::StopJumping);
     }
+}
+
+
+void APlayerCharacter::MoveBlockedBy(const FHitResult& Impact)
+{
+    Super::MoveBlockedBy(Impact);
+
+    UPrimitiveComponent* HitComp = Impact.GetComponent();
+    if (!HitComp || !HitComp->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    const float PropMass = HitComp->GetMass();
+
+    // Jeśli pojedynczy prop przekracza maksymalny udźwig gracza, postać go nie ruszy
+    if (PropMass > MaxPushableMass)
+    {
+        return;
+    }
+
+    // Kierunek pchnięcia w płaszczyźnie poziomej XY (przeciwny do normalnej zderzenia)
+    FVector PushDir = -Impact.ImpactNormal;
+    PushDir.Z = 0.0f;
+    PushDir = PushDir.GetSafeNormal();
+
+    if (PushDir.IsNearlyZero())
+    {
+        PushDir = GetActorForwardVector();
+    }
+
+    // Fizyczna siła pchania:
+    // Aplikujemy rzeczywistą siłę (AddForceAtLocation), a NIE sztuczną zmianę prędkości (bVelChange=false).
+    // Dzięki temu, jeśli przed tym propem stoi cięższy obiekt (np. 177 kg) lub ściana,
+    // silnik Chaos uwzględnia sumaryczną masę i tarcie całego łańcucha - zator natychmiast zatrzymuje się w miejscu!
+    HitComp->WakeRigidBody();
+    HitComp->AddForceAtLocation(PushDir * PlayerPushForce, Impact.ImpactPoint, Impact.BoneName);
 }
 
 

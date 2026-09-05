@@ -109,11 +109,25 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> JumpAction;
 
+    // -------------------------------------------------------------------------
+    // Physics Prop Pushing (Opcja B: Kontrolowane pchanie fizyczne z zachowaniem praw pędu)
+    // -------------------------------------------------------------------------
+
+    /** Maksymalna masa pojedynczego propa (w kg), którą postać podejmuje próbę przepchnąć */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|PhysicsPush", meta = (ClampMin = "0.0"))
+    float MaxPushableMass = 100.0f;
+
+    /** Siła pchania gracza w niutonach (N). Determinuje fizyczny wydatek siły na propa/układ propów */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|PhysicsPush", meta = (ClampMin = "0.0"))
+    float PlayerPushForce = 150000.0f;
+
 protected:
     virtual void BeginPlay() override;
 
     virtual void SetupPlayerInputComponent(
         UInputComponent* PlayerInputComponent) override;
+
+    virtual void MoveBlockedBy(const FHitResult& Impact) override;
 
     // -------------------------------------------------------------------------
     // Material Configuration

@@ -27,8 +27,9 @@ AInteractivePropBase::AInteractivePropBase()
     MeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
     MeshComponent->SetUseCCD(true);
 
-    // 3. Kontrola wchodzenia i stania postaci na propie
-    MeshComponent->CanCharacterStepUpOn = ECB_Yes;
+    // 3. Propy fizyczne nie powinny wywoływać automatycznego wchodzenia na nie schodkiem (StepUp)
+    // Zapobiega to desynchronizacji sieciowej, drganiom kamery i gubieniu gruntu pod stopami.
+    MeshComponent->CanCharacterStepUpOn = ECB_No;
 
     // 4. Tłumienie kątowe i liniowe stabilizujące fizykę brył
     MeshComponent->SetLinearDamping(0.8f);
