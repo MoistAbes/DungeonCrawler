@@ -11,6 +11,8 @@
  * - Opcjonalne obrażenia fizyczne (BaseDamage)
  * - Opcjonalny radialny odrzut kinetyczny (KnockbackForce)
  * - Opcjonalny status żywiołowy (Burning, Wet, Electrified, Oiled)
+ * Logika i obrażenia: Server-Authoritative.
+ * Efekty wizualne i dźwiękowe: Zdarzeniowy NetMulticast.
  */
 UCLASS()
 class MYPROJECT_API AVolatileProp : public AInteractivePropBase
@@ -22,6 +24,10 @@ public:
 
 protected:
     virtual void HandleOnDestroyed(AActor* DestroyedActor) override;
+
+    /** Lekki RPC rozsyłający do wszystkich połączonych graczy sygnał o wybuchu (FX, dźwięki, debug) */
+    UFUNCTION(NetMulticast, Unreliable)
+    void Multicast_PlayExplosionEffects(const FVector& DetonationCenter);
 
     // -------------------------------------------------------------------------
     // Zasięg Efektu

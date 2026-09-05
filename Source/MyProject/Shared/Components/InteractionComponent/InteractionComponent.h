@@ -4,12 +4,11 @@
 #include "Components/ActorComponent.h"
 #include "InteractionComponent.generated.h"
 
-class UPhysicsHandleComponent;
-
 /**
  * Serwis domenowy odpowiedzialny za wykrywanie, chwytanie i rzucanie obiektów fizycznych
  * oraz interakcję logiczną (przełączniki, dźwignie, mechanizmy).
- * Może być używany zarówno przez Gracza, jak i przez postacie sterowane przez AI.
+ * W pełni zsynchronizowany w sieci: Client-Request -> Server-Authoritative Execution.
+ * Wykorzystuje stabilny, bezlagowy wzorzec Attach-on-Grab.
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYPROJECT_API UInteractionComponent : public UActorComponent
@@ -18,8 +17,6 @@ class MYPROJECT_API UInteractionComponent : public UActorComponent
 
 public:
     UInteractionComponent();
-
-    virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     /** Główna akcja: podnieś lub upuść obiekt pod celownikiem / wektorem wzroku */
     void PrimaryInteract();
@@ -38,19 +35,25 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float MaxCarryMass = 35.0f;
 
-    /** Odległość przed postacią w osi wzroku/kamery, w której zawieszony jest trzymany obiekt */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
-    float HoldDistance = 180.0f;
-
     /** Siła pędu nadawanego obiektowi przy rzuceniu */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
-    float ThrowImpulseStrength = 1200.0f;
+    float ThrowImpulseStrength = 1400.0f;
+
+    // --- RPCs Sieciowe (Zarządzane przez Serwer) ---
+
+    /** Żądanie klienta do serwera o podniesienie wskazanego propa */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
+
+    /** Żądanie klienta do serwera o upuszczenie lub rzucenie trzymanym propem */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestReleaseOrThrow(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity);
+
+    /** Żądanie interakcji logicznej (dźwignia, przełącznik) na serwerze */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestInteract(AActor* TargetActor);
 
 private:
-    /** Referencja do fizycznego uchwytu zarządzanego przez postać */
-    UPROPERTY()
-    TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
-
     /** Aktualnie trzymany aktor */
     UPROPERTY()
     TObjectPtr<AActor> GrabbedActor;
@@ -62,7 +65,6 @@ private:
     // --- Metody pomocnicze ---
     void GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const;
     bool PerformTrace(FHitResult& OutHit) const;
-    void GrabProp(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
-    void ReleaseProp();
-    void UpdateHoldLocation();
+    void ExecuteGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
+    void ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity);
 };

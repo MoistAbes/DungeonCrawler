@@ -1,42 +1,22 @@
 ﻿#include "InteractionComponent.h"
 
-#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
-#include "TimerManager.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/IInteractableInterface.h"
 
 UInteractionComponent::UInteractionComponent()
 {
-    PrimaryComponentTick.bCanEverTick = true;
-    PrimaryComponentTick.bStartWithTickEnabled = false;
+    PrimaryComponentTick.bCanEverTick = false;
+    SetIsReplicatedByDefault(true);
 }
 
 void UInteractionComponent::BeginPlay()
 {
     Super::BeginPlay();
-
-    if (AActor* Owner = GetOwner())
-    {
-        PhysicsHandle = Owner->FindComponentByClass<UPhysicsHandleComponent>();
-        if (!PhysicsHandle)
-        {
-            UE_LOG(LogTemp, Error, TEXT("[InteractionService] PhysicsHandleComponent NOT FOUND on Actor: %s!"), *Owner->GetName());
-        }
-    }
-}
-
-void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
-{
-    Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-    if (GrabbedActor && PhysicsHandle)
-    {
-        UpdateHoldLocation();
-    }
 }
 
 void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const
@@ -62,11 +42,19 @@ void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& O
 
 void UInteractionComponent::PrimaryInteract()
 {
-    UE_LOG(LogTemp, Warning, TEXT("[InteractionService] PrimaryInteract triggered."));
+    UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered."), *NetUtils::GetNetRolePrefix(this));
 
     if (GrabbedActor)
     {
-        ReleaseProp();
+        if (NetUtils::HasAuthority(this))
+        {
+            ExecuteRelease(false, FVector::ZeroVector);
+        }
+        else
+        {
+            Server_RequestReleaseOrThrow(false, FVector_NetQuantize::ZeroVector);
+            ExecuteRelease(false, FVector::ZeroVector);
+        }
         return;
     }
 
@@ -79,7 +67,7 @@ void UInteractionComponent::PrimaryInteract()
     AActor* HitActor = HitResult.GetActor();
     if (!HitActor) return;
 
-    // 1. Priorytet Fizyczny: Sprawdź czy obiekt można fizycznie chwycić (IGrabbable)
+    // 1. Priorytet Fizyczny: Sprawdź czy obiekt można chwycić (IGrabbable)
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(HitActor))
     {
         if (Grabbable->CanGrab(GetOwner()))
@@ -91,7 +79,15 @@ void UInteractionComponent::PrimaryInteract()
                 return;
             }
 
-            GrabProp(HitActor, HitResult.GetComponent());
+            if (NetUtils::HasAuthority(this))
+            {
+                ExecuteGrab(HitActor, HitResult.GetComponent());
+            }
+            else
+            {
+                Server_RequestGrab(HitActor, HitResult.GetComponent());
+                ExecuteGrab(HitActor, HitResult.GetComponent());
+            }
             return;
         }
     }
@@ -101,12 +97,40 @@ void UInteractionComponent::PrimaryInteract()
     {
         if (Interactable->CanInteract(GetOwner()))
         {
-            Interactable->Interact(GetOwner());
+            if (NetUtils::HasAuthority(this))
+            {
+                Interactable->Interact(GetOwner());
+            }
+            else
+            {
+                Server_RequestInteract(HitActor);
+            }
             return;
         }
     }
 
     UE_LOG(LogTemp, Warning, TEXT("[InteractionService] Actor %s has no actionable contract."), *HitActor->GetName());
+}
+
+void UInteractionComponent::ThrowCurrentProp()
+{
+    if (!GrabbedActor) return;
+
+    FVector CameraLoc;
+    FRotator CameraRot;
+    GetCameraViewPoint(CameraLoc, CameraRot);
+
+    const FVector LaunchVelocity = CameraRot.Vector() * ThrowImpulseStrength;
+
+    if (NetUtils::HasAuthority(this))
+    {
+        ExecuteRelease(true, LaunchVelocity);
+    }
+    else
+    {
+        Server_RequestReleaseOrThrow(true, FVector_NetQuantize(LaunchVelocity));
+        ExecuteRelease(true, LaunchVelocity);
+    }
 }
 
 bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
@@ -118,7 +142,6 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     FRotator CameraRotation;
     GetCameraViewPoint(CameraLocation, CameraRotation);
 
-    // Celowanie oparte na widoku kamery / wzroku postaci
     const float ExtendedTraceDistance = TraceDistance + 1000.0f;
     const FVector TraceEnd = CameraLocation + (CameraRotation.Vector() * ExtendedTraceDistance);
 
@@ -138,7 +161,6 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
         return false;
     }
 
-    // Weryfikacja zasięgu: czy trafiony punkt znajduje się w dopuszczalnym zasięgu postaci
     const float DistanceFromPlayer = FVector::Dist(OutHit.ImpactPoint, Owner->GetActorLocation());
     if (DistanceFromPlayer > TraceDistance)
     {
@@ -149,9 +171,9 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     return true;
 }
 
-void UInteractionComponent::GrabProp(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
+void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
 {
-    if (!TargetActor || !ComponentToGrab || !PhysicsHandle) return;
+    if (!TargetActor || !ComponentToGrab) return;
 
     GrabbedActor = TargetActor;
     GrabbedComponent = ComponentToGrab;
@@ -161,105 +183,80 @@ void UInteractionComponent::GrabProp(AActor* TargetActor, UPrimitiveComponent* C
         Grabbable->OnGrabbed(GetOwner());
     }
 
-    if (AActor* OwnerActor = GetOwner())
-    {
-        GrabbedComponent->IgnoreActorWhenMoving(OwnerActor, true);
-    }
+    // Podpinamy obiekt do postaci (wspólna metoda z biblioteki domenowej Networking)
+    NetUtils::AttachCarriedProp(GrabbedActor, GrabbedComponent, GetOwner());
 
-    GrabbedComponent->SetNotifyRigidBodyCollision(true);
-    GrabbedComponent->WakeRigidBody();
-
-    PhysicsHandle->GrabComponentAtLocationWithRotation(
-        GrabbedComponent,
-        NAME_None,
-        GrabbedComponent->GetComponentLocation(),
-        GrabbedComponent->GetComponentRotation()
-    );
-
-    SetComponentTickEnabled(true);
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService] Successfully grabbed: %s"), *GrabbedActor->GetName());
+    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed & Attached: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
 }
 
-void UInteractionComponent::ReleaseProp()
+void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity)
 {
-    if (!GrabbedActor || !PhysicsHandle) return;
-
-    SetComponentTickEnabled(false);
-    PhysicsHandle->ReleaseComponent();
-
-    if (GrabbedComponent)
-    {
-        GrabbedComponent->SetNotifyRigidBodyCollision(true);
-        GrabbedComponent->WakeRigidBody();
-
-        if (AActor* OwnerActor = GetOwner())
-        {
-            TWeakObjectPtr<UPrimitiveComponent> WeakComp = GrabbedComponent;
-            TWeakObjectPtr<AActor> WeakOwner = OwnerActor;
-
-            // Przywracamy kolizję z graczem z bezpiecznym buforem czasowym (zapobiega glitchom i uderzeniom o własną kapsułę)
-            if (UWorld* World = GetWorld())
-            {
-                FTimerHandle UnignoreTimer;
-                World->GetTimerManager().SetTimer(UnignoreTimer, [WeakComp, WeakOwner]()
-                {
-                    if (WeakComp.IsValid() && WeakOwner.IsValid())
-                    {
-                        WeakComp->IgnoreActorWhenMoving(WeakOwner.Get(), false);
-                    }
-                }, 0.25f, false);
-            }
-        }
-    }
+    if (!GrabbedActor) return;
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))
     {
         Grabbable->OnDropped(GetOwner());
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService] Released: %s"), *GrabbedActor->GetName());
+    // Odpinamy i włączamy fizykę z powrotem
+    NetUtils::DetachCarriedProp(GrabbedActor, GrabbedComponent, GetOwner(), bIsThrow ? LaunchVelocity : FVector::ZeroVector);
+
+    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Released/Thrown: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
 
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
 }
 
-void UInteractionComponent::ThrowCurrentProp()
+// -------------------------------------------------------------------------------------------------
+// RPC Implementations (Server)
+// -------------------------------------------------------------------------------------------------
+
+bool UInteractionComponent::Server_RequestGrab_Validate(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
 {
-    if (!GrabbedActor || !GrabbedComponent) return;
-
-    UPrimitiveComponent* PropPhysicsComp = GrabbedComponent;
-    AActor* Owner = GetOwner();
-
-    FVector CameraLoc;
-    FRotator CameraRot;
-    GetCameraViewPoint(CameraLoc, CameraRot);
-
-    ReleaseProp();
-
-    if (PropPhysicsComp && Owner)
-    {
-        PropPhysicsComp->SetNotifyRigidBodyCollision(true);
-        PropPhysicsComp->WakeRigidBody();
-
-        const FVector LaunchVelocity = CameraRot.Vector() * ThrowImpulseStrength;
-        PropPhysicsComp->AddImpulse(LaunchVelocity, NAME_None, true);
-
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService] Prop launched with Velocity: %s"), *LaunchVelocity.ToString());
-    }
+    return TargetActor != nullptr;
 }
 
-void UInteractionComponent::UpdateHoldLocation()
+void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
 {
-    const AActor* Owner = GetOwner();
-    if (!Owner || !PhysicsHandle) return;
+    if (!TargetActor || !ComponentToGrab) return;
 
-    FVector CameraLoc;
-    FRotator CameraRot;
-    GetCameraViewPoint(CameraLoc, CameraRot);
+    if (const AActor* Owner = GetOwner())
+    {
+        const float Dist = FVector::Dist(Owner->GetActorLocation(), TargetActor->GetActorLocation());
+        if (Dist > (TraceDistance + 150.0f))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);
+            return;
+        }
+    }
 
-    // Punkt zawieszenia trzymanego obiektu w osi kamery przed postacią
-    const FVector PlayerCenter = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 30.0f);
-    const FVector TargetLocation = PlayerCenter + (CameraRot.Vector() * HoldDistance);
+    ExecuteGrab(TargetActor, ComponentToGrab);
+}
 
-    PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, CameraRot);
+bool UInteractionComponent::Server_RequestReleaseOrThrow_Validate(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity)
+{
+    return true;
+}
+
+void UInteractionComponent::Server_RequestReleaseOrThrow_Implementation(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity)
+{
+    ExecuteRelease(bIsThrow, LaunchVelocity);
+}
+
+bool UInteractionComponent::Server_RequestInteract_Validate(AActor* TargetActor)
+{
+    return TargetActor != nullptr;
+}
+
+void UInteractionComponent::Server_RequestInteract_Implementation(AActor* TargetActor)
+{
+    if (!TargetActor) return;
+
+    if (IInteractableInterface* Interactable = Cast<IInteractableInterface>(TargetActor))
+    {
+        if (Interactable->CanInteract(GetOwner()))
+        {
+            Interactable->Interact(GetOwner());
+        }
+    }
 }

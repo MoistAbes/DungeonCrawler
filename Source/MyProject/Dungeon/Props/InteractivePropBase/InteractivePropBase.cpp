@@ -1,6 +1,8 @@
 ﻿#include "InteractivePropBase.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Net/UnrealNetwork.h"
+#include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
@@ -10,10 +12,13 @@ AInteractivePropBase::AInteractivePropBase()
 {
     PrimaryActorTick.bCanEverTick = false;
 
+    // 1. Centralna konfiguracja replikacji sieciowej i optymalizacji pasma
+    NetUtils::SetupQuantizedPhysicsReplication(this);
+
     MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
     RootComponent = MeshComponent;
 
-    // 1. Symulacja sztywnej bryły Chaos z ciągłą detekcją kolizji (CCD)
+    // 2. Symulacja sztywnej bryły Chaos z ciągłą detekcją kolizji (CCD)
     MeshComponent->SetSimulatePhysics(true);
     MeshComponent->SetNotifyRigidBodyCollision(true);
     MeshComponent->SetCollisionProfileName(TEXT("PhysicsActor"));
@@ -22,15 +27,22 @@ AInteractivePropBase::AInteractivePropBase()
     MeshComponent->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
     MeshComponent->SetUseCCD(true);
 
-    // 2. Kontrola wchodzenia i stania postaci na propie
+    // 3. Kontrola wchodzenia i stania postaci na propie
     MeshComponent->CanCharacterStepUpOn = ECB_Yes;
 
-    // 3. Tłumienie kątowe i liniowe stabilizujące fizykę brył
+    // 4. Tłumienie kątowe i liniowe stabilizujące fizykę brył
     MeshComponent->SetLinearDamping(0.8f);
     MeshComponent->SetAngularDamping(5.0f);
 
     DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
     StatusEffectComponent = CreateDefaultSubobject<UStatusEffectComponent>(TEXT("StatusEffectComponent"));
+}
+
+void AInteractivePropBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(AInteractivePropBase, CarryingActor);
 }
 
 void AInteractivePropBase::PostInitializeComponents()
@@ -55,6 +67,8 @@ void AInteractivePropBase::BeginPlay()
 
 void AInteractivePropBase::Interact(AActor* Interactor)
 {
+    REQUIRE_AUTHORITY();
+
     if (MeshComponent)
     {
         MeshComponent->WakeRigidBody();
@@ -69,24 +83,33 @@ bool AInteractivePropBase::CanInteract(const AActor* Interactor) const
 bool AInteractivePropBase::CanGrab(const AActor* Grabber) const
 {
     const bool bIsAlive = DamageableComponent ? !DamageableComponent->IsDestroyed() : true;
-    return bCanBeGrabbed && bIsAlive;
+    return bCanBeGrabbed && bIsAlive && (CarryingActor == nullptr);
 }
 
 void AInteractivePropBase::OnGrabbed(AActor* Grabber)
 {
-    bIsBeingCarried = true;
-    if (MeshComponent)
-    {
-        MeshComponent->WakeRigidBody();
-    }
+    REQUIRE_AUTHORITY();
+
+    CarryingActor = Grabber;
 }
 
 void AInteractivePropBase::OnDropped(AActor* Dropper)
 {
-    bIsBeingCarried = false;
-    if (MeshComponent)
+    REQUIRE_AUTHORITY();
+
+    CarryingActor = nullptr;
+}
+
+void AInteractivePropBase::OnRep_CarryingActor()
+{
+    // Klient aktualizuje lokalny stan podpięcia na bazie autorytatywnego stanu serwera
+    if (CarryingActor)
     {
-        MeshComponent->WakeRigidBody();
+        NetUtils::AttachCarriedProp(this, MeshComponent, CarryingActor);
+    }
+    else
+    {
+        NetUtils::DetachCarriedProp(this, MeshComponent, nullptr);
     }
 }
 
@@ -99,7 +122,10 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                                              UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                              const FHitResult& Hit)
 {
-    if (!MeshComponent || bIsBeingCarried || !OtherActor || OtherActor == this)
+    // Obliczenia kinetyczne, uszkodzenia i odrzuty wykonuje WYŁĄCZNIE serwer
+    REQUIRE_AUTHORITY();
+
+    if (!MeshComponent || CarryingActor != nullptr || !OtherActor || OtherActor == this)
     {
         return;
     }
@@ -164,8 +190,8 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                     TargetDamageable->ApplyKineticImpact(EffectivePropSpeed * MassFactor);
                 }
 
-                UE_LOG(LogTemp, Warning, TEXT("[PropKineticTransfer] %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
-                    *GetName(), *OtherActor->GetName(), EffectivePropSpeed, KnockbackForce, Mass);
+                UE_LOG(LogTemp, Warning, TEXT("[PropKineticTransfer]%s %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
+                    *NetUtils::GetNetRolePrefix(this), *GetName(), *OtherActor->GetName(), EffectivePropSpeed, KnockbackForce, Mass);
             }
         }
     }
@@ -173,6 +199,10 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
 
 void AInteractivePropBase::HandleOnDestroyed(AActor* DestroyedActor)
 {
-    UE_LOG(LogTemp, Error, TEXT("[PropEntity] Object destroyed via Event: %s"), *GetName());
+    REQUIRE_AUTHORITY();
+
+    UE_LOG(LogTemp, Error, TEXT("[PropEntity]%s Object destroyed via Event: %s"), 
+        *NetUtils::GetNetRolePrefix(this), *GetName());
+
     Destroy();
 }

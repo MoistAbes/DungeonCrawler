@@ -3,6 +3,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
@@ -22,6 +23,8 @@ AVolatileProp::AVolatileProp()
 
 void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
 {
+    REQUIRE_AUTHORITY();
+
     if (bHasDetonated)
     {
         return;
@@ -31,7 +34,10 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     const FVector DetonationCenter = GetActorLocation();
     UWorld* World = GetWorld();
 
-    // 1. Fizyczna eksplozja kinetyczna (obrażenia i odrzut)
+    // 1. Rozsyłamy powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich graczy
+    Multicast_PlayExplosionEffects(DetonationCenter);
+
+    // 2. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer
     if (BaseDamage > 0.0f || (bApplyKnockback && KnockbackForce > 0.0f))
     {
         const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
@@ -43,17 +49,16 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             AppliedKnockback,
             this,
             nullptr,
-            bDrawDebugRadius);
+            false /* serwer nie musi rysować debuga, zrobi to multicast */);
     }
 
-    // 2. Aplikowanie statusu żywiołowego w promieniu wybuchu
+    // 3. Aplikowanie statusu żywiołowego w promieniu wybuchu (Tylko Serwer)
     if (StatusToApply != EStatusEffectType::None && World)
     {
         TArray<FOverlapResult> Overlaps;
         FCollisionShape SphereShape = FCollisionShape::MakeSphere(EffectRadius);
         FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(VolatileStatusDetonation), false, this);
 
-        // Wykrywamy graczy, AI i propy w zasięgu
         World->OverlapMultiByChannel(Overlaps, DetonationCenter, FQuat::Identity, ECC_Pawn, SphereShape, QueryParams);
 
         TArray<FOverlapResult> DynamicOverlaps;
@@ -83,15 +88,21 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
                 StatusComp->ApplyStatus(StatusToApply, StatusDuration, this);
             }
         }
-
-        if (bDrawDebugRadius)
-        {
-            DrawDebugSphere(World, DetonationCenter, EffectRadius, 24, FColor::Orange, false, 2.0f, 0, 1.5f);
-        }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[VolatileProp] %s detonated at %s (Status: %s)"),
-        *GetName(), *DetonationCenter.ToString(), *UEnum::GetValueAsString(StatusToApply));
+    UE_LOG(LogTemp, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Status: %s)"),
+        *NetUtils::GetNetRolePrefix(this), *GetName(), *DetonationCenter.ToString(), *UEnum::GetValueAsString(StatusToApply));
 
     Super::HandleOnDestroyed(DestroyedActor);
+}
+
+void AVolatileProp::Multicast_PlayExplosionEffects_Implementation(const FVector& DetonationCenter)
+{
+    // Odtwarzane u wszystkich połączonych klientów oraz na serwerze
+    if (bDrawDebugRadius && GetWorld())
+    {
+        DrawDebugSphere(GetWorld(), DetonationCenter, EffectRadius, 24, FColor::Orange, false, 2.0f, 0, 1.5f);
+    }
+
+    // Tutaj wpięte zostaną UNiagaraFunctionLibrary::SpawnSystemAtLocation oraz UGameplayStatics::PlaySoundAtLocation
 }

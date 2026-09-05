@@ -16,6 +16,7 @@ class UStatusEffectComponent;
  * Bazowa klasa dla interaktywnych elementów wyposażenia lochu (skrzynie, wazy, beczki).
  * Symuluje fizykę Chaos, wspiera chwytanie (IGrabbable), interakcję (IInteractable),
  * tożsamość materiałową (IMaterialProviderInterface) oraz statusy żywiołowe (UStatusEffectComponent).
+ * W pełni zoptymalizowana pod kątem kooperacji 1–6 graczy (Server-Authoritative, kwantyzacja transformu).
  */
 UCLASS(Abstract)
 class MYPROJECT_API AInteractivePropBase : public AActor, 
@@ -27,6 +28,8 @@ class MYPROJECT_API AInteractivePropBase : public AActor,
 
 public:
     AInteractivePropBase();
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
     // --- IMaterialProviderInterface ---
     virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
@@ -54,7 +57,7 @@ public:
     virtual void OnGrabbed(AActor* Grabber) override;
     virtual void OnDropped(AActor* Dropper) override;
     virtual float GetMass() const override;
-    virtual bool IsGrabbed() const override { return bIsBeingCarried; }
+    virtual bool IsGrabbed() const override { return CarryingActor != nullptr; }
 
 protected:
     virtual void PostInitializeComponents() override;
@@ -80,9 +83,12 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     bool bCanBeGrabbed = true;
 
-    /** Flaga określająca, czy obiekt jest aktualnie trzymany w rękach przez postać */
-    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|State")
-    bool bIsBeingCarried = false;
+    /** Wskaźnik na postać aktualnie niosącą ten rekwizyt (Replikowany do wszystkich klientów) */
+    UPROPERTY(ReplicatedUsing = OnRep_CarryingActor, VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|State")
+    TObjectPtr<AActor> CarryingActor = nullptr;
+
+    UFUNCTION()
+    virtual void OnRep_CarryingActor();
 
     // --- Konfiguracja kinetyczna uderzeń (Kinetic Impact Transfer) ---
 

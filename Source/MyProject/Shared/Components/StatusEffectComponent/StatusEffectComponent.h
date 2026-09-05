@@ -14,6 +14,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnElementalReactionTriggered, ES
 
 /**
  * Pojedyncza instancja aktywnego statusu na obiekcie.
+ * Zoptymalizowana pod Zero-Bandwidth Networking (tylko 9 bajtów w pakiecie sieciowym).
  */
 USTRUCT(BlueprintType)
 struct FActiveStatusEffectInstance
@@ -24,35 +25,38 @@ struct FActiveStatusEffectInstance
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     EStatusEffectType EffectType = EStatusEffectType::None;
 
-    /** Czas pozostały do samoczynnego wygaśnięcia statusu (w sekundach) */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
-    float RemainingDuration = 0.0f;
-
-    /** Całkowity czas, na jaki został zaaplikowany ten status */
+    /** Całkowity czas, na jaki został zaaplikowany ten status (np. 5.0s) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TotalDuration = 0.0f;
 
-    /** Interwał (w sekundach), z jaką częstotliwością status wywołuje swój efekt okresowy (DoT) */
+    /** Czas serwera (GetTimeSeconds), w którym status samoczynnie wygasa (Wzorzec Zero-Bandwidth) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
+    float ServerEndTime = 0.0f;
+
+    /** Interwał (w sekundach) DoT - przetwarzany wyłącznie lokalnie na serwerze */
+    UPROPERTY(NotReplicated)
     float TickInterval = 1.0f;
 
-    /** Czas do najbliższego uderzenia efektu okresowego */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
+    /** Czas do najbliższego uderzenia DoT - przetwarzany wyłącznie lokalnie na serwerze */
+    UPROPERTY(NotReplicated)
     float TimeUntilNextTick = 0.0f;
 
     /** Aktor, który zainicjował nałożenie tego statusu */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
+    UPROPERTY(NotReplicated)
     TWeakObjectPtr<AActor> InstigatorActor = nullptr;
+
+    bool operator==(const FActiveStatusEffectInstance& Other) const
+    {
+        return EffectType == Other.EffectType;
+    }
 };
 
 /**
- * Komponent zarządzający aktywnymi statusami żywiołowymi (Burning, Wet, Electrified, Oiled).
- * Odpowiedzialny wyłącznie za:
- * - Cykl życia i odliczanie czasu trwania nałożonych stanów
- * - Zadawanie okresowych obrażeń (DoT)
- * - Powiadamianie świata o zmianach stanu przez zdarzenia (delegaty)
- * 
- * Prawa chemii i reakcje delegowane są do UElementalChemistryLibrary.
+ * Replikowany komponent zarządzający aktywnymi statusami żywiołowymi (Burning, Wet, Electrified, Oiled).
+ * Zaprojektowany pod kątem maksymalnej wydajności w kooperacji 1–6 graczy:
+ * - Server-Authoritative: Tylko serwer nakłada/usuwa statusy i zadaje obrażenia DoT
+ * - Zero-Bandwidth Timers: Replikowany ServerEndTime eliminuje pakietowy spam w klatkach
+ * - Zero-Tick Idle: Komponent jest wygaszony gdy obiekt nie ma żadnych statusów
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYPROJECT_API UStatusEffectComponent : public UActorComponent
@@ -62,21 +66,22 @@ class MYPROJECT_API UStatusEffectComponent : public UActorComponent
 public:
     UStatusEffectComponent();
 
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
     // -------------------------------------------------------------------------
-    // API Domenowe
+    // API Domenowe (Server-Authoritative)
     // -------------------------------------------------------------------------
 
-    /** Aplikuje status elementarny z podanym czasem trwania i sprawdzaniem reakcji */
+    /** Aplikuje status elementarny z podanym czasem trwania i sprawdzaniem reakcji (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     bool ApplyStatus(EStatusEffectType NewStatus, float Duration = 5.0f, AActor* InstigatorActor = nullptr);
 
-    /** Usuwa aktywny status z obiektu */
+    /** Usuwa aktywny status z obiektu (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     bool RemoveStatus(EStatusEffectType StatusToRemove);
 
-    /** Usuwa wszystkie aktywne statusy */
+    /** Usuwa wszystkie aktywne statusy (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     void ClearAllStatuses();
 
@@ -84,7 +89,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     bool HasStatus(EStatusEffectType Status) const;
 
-    /** Zwraca pozostały czas trwania danego statusu (0.0 jeśli brak) */
+    /** Zwraca pozostały czas trwania danego statusu w sekundach (obliczany on-demand z ServerEndTime) */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     float GetRemainingDuration(EStatusEffectType Status) const;
 
@@ -92,7 +97,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     float GetTotalDuration(EStatusEffectType Status) const;
 
-    /** Zwraca listę wszystkich aktualnie nałożonych statusów */
+    /** Zwraca listę wszystkich aktualnie nałożonych typów statusów */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     TArray<EStatusEffectType> GetActiveStatuses() const;
 
@@ -132,15 +137,25 @@ protected:
     bool bShowDebugInWorld = true;
 
 private:
-    /** Aktywne statusy indeksowane typem (gwarancja braku duplikatów) */
-    UPROPERTY(VisibleInstanceOnly, Category = "Custom|Status Effects|State")
-    TMap<EStatusEffectType, FActiveStatusEffectInstance> ActiveEffects;
+    /** 
+     * Replikowana lista aktywnych instancji statusów.
+     * Zastępuje TMap (niekompatybilne z UHT). Linear search na 1-4 elementach jest szybszy niż węzły mapy.
+     */
+    UPROPERTY(ReplicatedUsing = OnRep_ActiveStatusEffects, VisibleInstanceOnly, Category = "Custom|Status Effects|State")
+    TArray<FActiveStatusEffectInstance> ActiveStatusEffects;
+
+    /** Reaktywne powiadomienie klienta o zmianach w liście statusów */
+    UFUNCTION()
+    void OnRep_ActiveStatusEffects(const TArray<FActiveStatusEffectInstance>& OldEffects);
 
     /** Buforowana referencja do komponentu obrażeń */
     UPROPERTY()
     TObjectPtr<UDamageableComponent> DamageableComponent;
 
     // --- Metody pomocnicze ---
+    const FActiveStatusEffectInstance* FindInstance(EStatusEffectType Status) const;
+    FActiveStatusEffectInstance* FindInstanceMutable(EStatusEffectType Status);
     EPhysicalMaterialType GetOwnerMaterialType() const;
     void UpdateTickState();
+    void DrawDebugLabels() const;
 };

@@ -2,7 +2,10 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "Net/UnrealNetwork.h"
+#include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
@@ -12,6 +15,14 @@ UStatusEffectComponent::UStatusEffectComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
     PrimaryComponentTick.bStartWithTickEnabled = false;
+    SetIsReplicatedByDefault(true);
+}
+
+void UStatusEffectComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+    DOREPLIFETIME(UStatusEffectComponent, ActiveStatusEffects);
 }
 
 void UStatusEffectComponent::BeginPlay()
@@ -22,25 +33,32 @@ void UStatusEffectComponent::BeginPlay()
     {
         DamageableComponent = Owner->FindComponentByClass<UDamageableComponent>();
     }
+
+    UpdateTickState();
 }
 
 void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-    if (ActiveEffects.Num() == 0)
+    // Klienci nie przetwarzają DoT ani wygasania - jedynie renderują etykiety podglądu
+    if (!NetUtils::HasAuthority(this))
     {
-        SetComponentTickEnabled(false);
+        DrawDebugLabels();
         return;
     }
 
+    if (ActiveStatusEffects.IsEmpty())
+    {
+        UpdateTickState();
+        return;
+    }
+
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
     TArray<EStatusEffectType> ExpiredEffects;
 
-    for (auto& Pair : ActiveEffects)
+    for (FActiveStatusEffectInstance& Instance : ActiveStatusEffects)
     {
-        FActiveStatusEffectInstance& Instance = Pair.Value;
-        Instance.RemainingDuration -= DeltaTime;
-
         // Okresowe tyknięcie (np. DoT pobierany z rejestru definicji)
         Instance.TimeUntilNextTick -= DeltaTime;
         if (Instance.TimeUntilNextTick <= 0.0f)
@@ -55,62 +73,14 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             }
         }
 
-        if (Instance.RemainingDuration <= 0.0f)
+        // Weryfikacja wygaśnięcia czasu trwania (Zero-Bandwidth pattern)
+        if (CurrentTime >= Instance.ServerEndTime)
         {
-            ExpiredEffects.Add(Pair.Key);
+            ExpiredEffects.Add(Instance.EffectType);
         }
     }
 
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-    // Dynamiczny podgląd 3D nad obiektem w świecie gry
-    if (bShowDebugInWorld && GetWorld())
-    {
-        if (const AActor* Owner = GetOwner())
-        {
-            FVector Origin, BoxExtent;
-            Owner->GetActorBounds(true, Origin, BoxExtent);
-            const FVector BaseLocation = Origin + FVector(0.0f, 0.0f, BoxExtent.Z + 15.0f);
-
-            int32 StackIndex = 0;
-            for (const auto& Pair : ActiveEffects)
-            {
-                const EStatusEffectType Status = Pair.Key;
-                const FActiveStatusEffectInstance& Inst = Pair.Value;
-
-                FColor StatusColor = FColor::White;
-                FString StatusName = TEXT("Status");
-
-                switch (Status)
-                {
-                case EStatusEffectType::Burning:
-                    StatusColor = FColor(255, 60, 0);
-                    StatusName = TEXT("BURNING");
-                    break;
-                case EStatusEffectType::Wet:
-                    StatusColor = FColor(0, 180, 255);
-                    StatusName = TEXT("WET");
-                    break;
-                case EStatusEffectType::Electrified:
-                    StatusColor = FColor(255, 230, 0);
-                    StatusName = TEXT("ELECTRIFIED");
-                    break;
-                case EStatusEffectType::Oiled:
-                    StatusColor = FColor(180, 110, 40);
-                    StatusName = TEXT("OILED");
-                    break;
-                default:
-                    break;
-                }
-
-                const FString DebugStr = FString::Printf(TEXT("%s (%.1fs)"), *StatusName, Inst.RemainingDuration);
-                const FVector DrawPos = BaseLocation + FVector(0.0f, 0.0f, StackIndex * 22.0f);
-
-                DrawDebugString(GetWorld(), DrawPos, DebugStr, nullptr, StatusColor, 0.0f, true, 1.2f);
-                StackIndex++;
-            }
-        }
-    }
-#endif
+    DrawDebugLabels();
 
     for (EStatusEffectType Expired : ExpiredEffects)
     {
@@ -120,6 +90,8 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
 bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Duration, AActor* InstigatorActor)
 {
+    REQUIRE_AUTHORITY_RET(false);
+
     if (NewStatus == EStatusEffectType::None || Duration <= 0.0f)
     {
         return false;
@@ -131,8 +103,8 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     // 1. Walidacja tożsamości materiałowej celu przez dedykowany silnik chemii
     if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
     {
-        UE_LOG(LogTemp, Log, TEXT("[StatusEffect] %s cannot receive %s (Material %d incompatible)"),
-            *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
+        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s cannot receive %s (Material %d incompatible)"),
+            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
         return false;
     }
 
@@ -152,8 +124,8 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
             DamageableComponent->ApplyDamage(Reaction.BonusInstantDamage);
         }
 
-        UE_LOG(LogTemp, Warning, TEXT("[StatusReaction] %s: Triggered '%s'!"),
-            *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
+        UE_LOG(LogTemp, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
+            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
         if (bShowDebugInWorld && GetWorld() && GetOwner())
@@ -178,28 +150,31 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         }
     }
 
+    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    const float NewEndTime = CurrentTime + Duration;
+
     // 3. Brak duplikatów: jeśli status już trwa, odświeżamy czas trwania
-    if (FActiveStatusEffectInstance* Existing = ActiveEffects.Find(NewStatus))
+    if (FActiveStatusEffectInstance* Existing = FindInstanceMutable(NewStatus))
     {
-        Existing->RemainingDuration = FMath::Max(Existing->RemainingDuration, Duration);
+        Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, NewEndTime);
         Existing->TotalDuration = FMath::Max(Existing->TotalDuration, Duration);
         if (InstigatorActor)
         {
             Existing->InstigatorActor = InstigatorActor;
         }
 
-        UE_LOG(LogTemp, Log, TEXT("[StatusEffect] %s refreshed status %s (Remaining: %.1fs)"),
-            *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Existing->RemainingDuration);
+        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
+            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), GetRemainingDuration(NewStatus));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
         if (GEngine && GetOwner())
         {
             GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
-                FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Existing->RemainingDuration));
+                FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), GetRemainingDuration(NewStatus)));
         }
 #endif
 
-        OnStatusEffectApplied.Broadcast(NewStatus, Existing->RemainingDuration);
+        OnStatusEffectApplied.Broadcast(NewStatus, GetRemainingDuration(NewStatus));
         return true;
     }
 
@@ -208,17 +183,17 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 
     FActiveStatusEffectInstance NewInstance;
     NewInstance.EffectType = NewStatus;
-    NewInstance.RemainingDuration = Duration;
     NewInstance.TotalDuration = Duration;
+    NewInstance.ServerEndTime = NewEndTime;
     NewInstance.TickInterval = (Def.TickInterval > 0.0f) ? Def.TickInterval : 1.0f;
     NewInstance.TimeUntilNextTick = NewInstance.TickInterval;
     NewInstance.InstigatorActor = InstigatorActor;
 
-    ActiveEffects.Add(NewStatus, NewInstance);
+    ActiveStatusEffects.Add(NewInstance);
     UpdateTickState();
 
-    UE_LOG(LogTemp, Warning, TEXT("[StatusEffect] %s GAINED status: %s (Duration: %.1fs)"),
-        *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration);
+    UE_LOG(LogTemp, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Duration: %.1fs)"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
     if (GEngine && GetOwner())
@@ -234,16 +209,23 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 
 bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
 {
-    if (!ActiveEffects.Contains(StatusToRemove))
+    REQUIRE_AUTHORITY_RET(false);
+
+    const int32 Index = ActiveStatusEffects.IndexOfByPredicate([StatusToRemove](const FActiveStatusEffectInstance& Item)
+    {
+        return Item.EffectType == StatusToRemove;
+    });
+
+    if (Index == INDEX_NONE)
     {
         return false;
     }
 
-    ActiveEffects.Remove(StatusToRemove);
+    ActiveStatusEffects.RemoveAt(Index);
     UpdateTickState();
 
-    UE_LOG(LogTemp, Log, TEXT("[StatusEffect] %s LOST status: %s"),
-        *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove));
+    UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s LOST status: %s"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
     if (GEngine && GetOwner())
@@ -259,32 +241,35 @@ bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
 
 void UStatusEffectComponent::ClearAllStatuses()
 {
-    TArray<EStatusEffectType> Keys;
-    ActiveEffects.GetKeys(Keys);
+    REQUIRE_AUTHORITY();
 
-    for (EStatusEffectType Key : Keys)
+    const TArray<EStatusEffectType> CurrentTypes = GetActiveStatuses();
+    for (EStatusEffectType Status : CurrentTypes)
     {
-        RemoveStatus(Key);
+        RemoveStatus(Status);
     }
 }
 
 bool UStatusEffectComponent::HasStatus(EStatusEffectType Status) const
 {
-    return ActiveEffects.Contains(Status);
+    return FindInstance(Status) != nullptr;
 }
 
 float UStatusEffectComponent::GetRemainingDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))
+    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
     {
-        return Found->RemainingDuration;
+        if (const UWorld* World = GetWorld())
+        {
+            return FMath::Max(0.0f, Found->ServerEndTime - World->GetTimeSeconds());
+        }
     }
     return 0.0f;
 }
 
 float UStatusEffectComponent::GetTotalDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = ActiveEffects.Find(Status))
+    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
     {
         return Found->TotalDuration;
     }
@@ -294,8 +279,62 @@ float UStatusEffectComponent::GetTotalDuration(EStatusEffectType Status) const
 TArray<EStatusEffectType> UStatusEffectComponent::GetActiveStatuses() const
 {
     TArray<EStatusEffectType> Result;
-    ActiveEffects.GetKeys(Result);
+    Result.Reserve(ActiveStatusEffects.Num());
+    for (const FActiveStatusEffectInstance& Item : ActiveStatusEffects)
+    {
+        Result.Add(Item.EffectType);
+    }
     return Result;
+}
+
+void UStatusEffectComponent::OnRep_ActiveStatusEffects(const TArray<FActiveStatusEffectInstance>& OldEffects)
+{
+    // 1. Wykryj usunięte statusy (obecne w OldEffects, ale brak w ActiveStatusEffects)
+    for (const FActiveStatusEffectInstance& Old : OldEffects)
+    {
+        if (!HasStatus(Old.EffectType))
+        {
+            OnStatusEffectRemoved.Broadcast(Old.EffectType);
+        }
+    }
+
+    // 2. Wykryj nowo dodane lub odświeżone statusy
+    for (const FActiveStatusEffectInstance& Current : ActiveStatusEffects)
+    {
+        const FActiveStatusEffectInstance* Old = OldEffects.FindByPredicate([Current](const FActiveStatusEffectInstance& Item)
+        {
+            return Item.EffectType == Current.EffectType;
+        });
+
+        if (!Old)
+        {
+            // Nowo nałożony status u klienta
+            OnStatusEffectApplied.Broadcast(Current.EffectType, GetRemainingDuration(Current.EffectType));
+        }
+        else if (!FMath::IsNearlyEqual(Old->ServerEndTime, Current.ServerEndTime, 0.05f))
+        {
+            // Odświeżony czas trwania
+            OnStatusEffectApplied.Broadcast(Current.EffectType, GetRemainingDuration(Current.EffectType));
+        }
+    }
+
+    UpdateTickState();
+}
+
+const FActiveStatusEffectInstance* UStatusEffectComponent::FindInstance(EStatusEffectType Status) const
+{
+    return ActiveStatusEffects.FindByPredicate([Status](const FActiveStatusEffectInstance& Item)
+    {
+        return Item.EffectType == Status;
+    });
+}
+
+FActiveStatusEffectInstance* UStatusEffectComponent::FindInstanceMutable(EStatusEffectType Status)
+{
+    return ActiveStatusEffects.FindByPredicate([Status](const FActiveStatusEffectInstance& Item)
+    {
+        return Item.EffectType == Status;
+    });
 }
 
 EPhysicalMaterialType UStatusEffectComponent::GetOwnerMaterialType() const
@@ -316,6 +355,72 @@ EPhysicalMaterialType UStatusEffectComponent::GetOwnerMaterialType() const
 
 void UStatusEffectComponent::UpdateTickState()
 {
-    const bool bShouldTick = (ActiveEffects.Num() > 0);
+    const bool bHasEffects = (ActiveStatusEffects.Num() > 0);
+    const bool bIsServer = NetUtils::HasAuthority(this);
+
+    bool bShouldTick = false;
+    if (bIsServer)
+    {
+        bShouldTick = bHasEffects;
+    }
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    else if (bShowDebugInWorld && bHasEffects)
+    {
+        bShouldTick = true;
+    }
+#endif
+
     SetComponentTickEnabled(bShouldTick);
+}
+
+void UStatusEffectComponent::DrawDebugLabels() const
+{
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    if (!bShowDebugInWorld || !GetWorld()) return;
+
+    const AActor* Owner = GetOwner();
+    if (!Owner) return;
+
+    FVector Origin, BoxExtent;
+    Owner->GetActorBounds(true, Origin, BoxExtent);
+    const FVector BaseLocation = Origin + FVector(0.0f, 0.0f, BoxExtent.Z + 15.0f);
+
+    int32 StackIndex = 0;
+    for (const FActiveStatusEffectInstance& Inst : ActiveStatusEffects)
+    {
+        const EStatusEffectType Status = Inst.EffectType;
+
+        FColor StatusColor = FColor::White;
+        FString StatusName = TEXT("Status");
+
+        switch (Status)
+        {
+        case EStatusEffectType::Burning:
+            StatusColor = FColor(255, 60, 0);
+            StatusName = TEXT("BURNING");
+            break;
+        case EStatusEffectType::Wet:
+            StatusColor = FColor(0, 180, 255);
+            StatusName = TEXT("WET");
+            break;
+        case EStatusEffectType::Electrified:
+            StatusColor = FColor(255, 230, 0);
+            StatusName = TEXT("ELECTRIFIED");
+            break;
+        case EStatusEffectType::Oiled:
+            StatusColor = FColor(180, 110, 40);
+            StatusName = TEXT("OILED");
+            break;
+        default:
+            break;
+        }
+
+        const float Remaining = GetRemainingDuration(Status);
+        const FString DebugStr = FString::Printf(TEXT("%s (%.1fs)"), *StatusName, Remaining);
+        const FVector DrawPos = BaseLocation + FVector(0.0f, 0.0f, StackIndex * 22.0f);
+
+        DrawDebugString(GetWorld(), DrawPos, DebugStr, nullptr, StatusColor, 0.0f, true, 1.2f);
+        StackIndex++;
+    }
+#endif
 }
