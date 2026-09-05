@@ -100,19 +100,11 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
     const TArray<EStatusEffectType> ActiveStatusList = GetActiveStatuses();
 
-    // 1. Walidacja tożsamości materiałowej celu przez dedykowany silnik chemii
-    if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
-    {
-        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s cannot receive %s (Material %d incompatible)"),
-            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
-        return false;
-    }
-
-    // 2. Ewaluacja reakcji żywiołowych przez dedykowany silnik chemii
+    // 1. Ewaluacja reakcji żywiołowych przez dedykowany silnik chemii (Żywioł vs Powłoka na celu ma pierwszeństwo)
     const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(NewStatus, ActiveStatusList);
     if (Reaction.bReactionOccurred)
     {
-        // Usunięcie skonsumowanego/wypartego statusu
+        // Usunięcie skonsumowanego/wypartego statusu (np. woda odparowuje od ognia, olej spala się)
         if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
         {
             RemoveStatus(Reaction.ExistingStatusToRemove);
@@ -142,12 +134,21 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 
         OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
 
-        // Jeśli reakcja zneutralizowała przychodzący żywioł (np. woda zgasiła ogień)
+        // Jeśli reakcja całkowicie zneutralizowała przychodzący żywioł (np. woda zgasiła ogień / ogień odparował wodę)
         if (Reaction.bConsumeIncomingStatus)
         {
             UpdateTickState();
             return true;
         }
+    }
+
+    // 2. Walidacja tożsamości materiałowej celu: czy materiał pod spodem może utrzymać ten status?
+    // Uwzględniamy stan powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
+    if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
+    {
+        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
+            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
+        return false;
     }
 
     const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
@@ -257,7 +258,7 @@ bool UStatusEffectComponent::HasStatus(EStatusEffectType Status) const
 
 float UStatusEffectComponent::GetRemainingDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
+    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))\
     {
         if (const UWorld* World = GetWorld())
         {
