@@ -11,7 +11,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestroyedSignature, AActor*, Dest
 
 /**
  * Uniwersalny komponent integralności, punktów życia i wytrzymałości fizycznej (Durability).
- * Stosowany zarówno na postaciach gracza, potworach, jak i na niszczalnych strukturach czy propach.
+ * Działa w architekturze Server-Authoritative First: modyfikacje stanu odbywają się wyłącznie
+ * na serwerze, a stan jest replikowany do klientów za pomocą OnRep.
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MYPROJECT_API UDamageableComponent : public UActorComponent, public IStatProviderInterface
@@ -21,6 +22,8 @@ class MYPROJECT_API UDamageableComponent : public UActorComponent, public IStatP
 public:
     UDamageableComponent();
 
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
     // --- IStatProviderInterface ---
     virtual float GetCurrentValue() const override { return CurrentDurability; }
     virtual float GetMaxValue() const override { return MaxDurability; }
@@ -28,11 +31,11 @@ public:
 
     // --- Domena ---
 
-    /** Aplikuje bezpośrednie obrażenia redukujące aktualną wytrzymałość/punkty życia */
+    /** Aplikuje bezpośrednie obrażenia redukujące aktualną wytrzymałość/punkty życia (tylko na serwerze) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Durability")
     void ApplyDamage(float Amount);
     
-    /** Aplikuje obrażenia kinetyczne na podstawie prędkości uderzenia (cm/s), uwzględniając próg i mnożnik */
+    /** Aplikuje obrażenia kinetyczne na podstawie prędkości uderzenia (cm/s), uwzględniając próg i mnożnik (tylko na serwerze) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyKineticImpact(float ImpactSpeed);
 
@@ -68,7 +71,7 @@ protected:
     virtual void BeginPlay() override;
 
     /** Maksymalna liczba punktów wytrzymałości / zdrowia */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Durability", meta = (ClampMin = "1.0"))
+    UPROPERTY(ReplicatedUsing = OnRep_MaxDurability, EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Durability", meta = (ClampMin = "1.0"))
     float MaxDurability = 100.0f;
 
     /** Początkowa liczba punktów wytrzymałości przy spawnie obiektu */
@@ -87,9 +90,17 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.0"))
     float ImpactDamageMultiplier = 0.05f;
 
+    /** Reakcja na replikację maksymalnej wytrzymałości */
+    UFUNCTION()
+    void OnRep_MaxDurability(float OldMaxDurability);
+
+    /** Reakcja na replikację aktualnej wytrzymałości z serwera */
+    UFUNCTION()
+    void OnRep_CurrentDurability(float OldDurability);
+
 private:
-    /** Aktualna wartość punktów wytrzymałości w czasie rzeczywistym */
-    UPROPERTY(VisibleInstanceOnly, Category = "Custom|Durability")
+    /** Aktualna wartość punktów wytrzymałości w czasie rzeczywistym (replikowana z serwera) */
+    UPROPERTY(ReplicatedUsing = OnRep_CurrentDurability, VisibleInstanceOnly, Category = "Custom|Durability")
     float CurrentDurability = 100.0f;
 
     UFUNCTION()

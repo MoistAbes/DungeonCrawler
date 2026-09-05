@@ -84,19 +84,19 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
                 {
                 case EStatusEffectType::Burning:
                     StatusColor = FColor(255, 60, 0);
-                    StatusName = TEXT("🔥 BURNING");
+                    StatusName = TEXT("BURNING");
                     break;
                 case EStatusEffectType::Wet:
                     StatusColor = FColor(0, 180, 255);
-                    StatusName = TEXT("💧 WET");
+                    StatusName = TEXT("WET");
                     break;
                 case EStatusEffectType::Electrified:
                     StatusColor = FColor(255, 230, 0);
-                    StatusName = TEXT("⚡ ELECTRIFIED");
+                    StatusName = TEXT("ELECTRIFIED");
                     break;
                 case EStatusEffectType::Oiled:
                     StatusColor = FColor(180, 110, 40);
-                    StatusName = TEXT("🛢️ OILED");
+                    StatusName = TEXT("OILED");
                     break;
                 default:
                     break;
