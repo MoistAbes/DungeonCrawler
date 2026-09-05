@@ -29,6 +29,8 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
     {
         GrabbedActor = nullptr;
         GrabbedComponent = nullptr;
+        PreviousCameraRotation = FRotator::ZeroRotator;
+        TrackedCameraSwingVelocity = FVector::ZeroVector;
         SetComponentTickEnabled(false);
         return;
     }
@@ -40,6 +42,11 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
 {
     GrabbedActor = InProp;
+    FVector CamLoc;
+    FRotator CamRot;
+    GetCameraViewPoint(CamLoc, CamRot);
+    PreviousCameraRotation = CamRot;
+    TrackedCameraSwingVelocity = FVector::ZeroVector;
     SetComponentTickEnabled(true);
 }
 
@@ -51,6 +58,8 @@ void UInteractionComponent::NotifyCarriedPropDetached()
     }
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
+    PreviousCameraRotation = FRotator::ZeroRotator;
+    TrackedCameraSwingVelocity = FVector::ZeroVector;
     SetComponentTickEnabled(false);
 }
 
@@ -128,7 +137,27 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     FHitResult SweepHit;
     GrabbedActor->SetActorLocationAndRotation(DesiredLocation, DesiredRotation, true, &SweepHit, ETeleportType::None);
 
-    // 2. Inteligentna reakcja na napotkane przeszkody fizyczne
+    // 2. Śledzenie czystej prędkości kątowej kamery (zamach myszką w 100% niezależny od ruchu postaci)
+    FVector CamLoc;
+    FRotator CamRot;
+    GetCameraViewPoint(CamLoc, CamRot);
+
+    if (!PreviousCameraRotation.IsZero() && DeltaTime > 0.0001f)
+    {
+        const FRotator DeltaRot = (CamRot - PreviousCameraRotation).GetNormalized();
+        const float YawRateRad = FMath::DegreesToRadians(DeltaRot.Yaw / DeltaTime);
+        const float PitchRateRad = FMath::DegreesToRadians(DeltaRot.Pitch / DeltaTime);
+
+        // Obliczamy prędkość liniową na ramieniu trzymania (ok. 110 cm)
+        const float HoldRadius = 110.0f;
+        const FVector TangentialVelocity = (CamRot.RotateVector(FVector::RightVector) * (YawRateRad * HoldRadius))
+                                         + (CamRot.RotateVector(FVector::UpVector) * (PitchRateRad * HoldRadius));
+
+        TrackedCameraSwingVelocity = FMath::VInterpTo(TrackedCameraSwingVelocity, TangentialVelocity, DeltaTime, 16.0f);
+    }
+    PreviousCameraRotation = CamRot;
+
+    // 3. Inteligentna reakcja na napotkane przeszkody fizyczne
     if (SweepHit.bBlockingHit)
     {
         if (UPrimitiveComponent* HitComp = SweepHit.GetComponent())
@@ -156,8 +185,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
                 else
                 {
                     // Obiekt jest zbyt ciężki dla gracza (np. beczka 177-200 kg).
-                    // Jeśli był w spoczynku / powolnym ruchu, uniemożliwiamy szturnięcia i spychacz,
-                    // zerując wszelkie sztuczne impulsy kontaktowe solvera Chaos.
+                    // Zerujemy sztuczne impulsy kontaktowe solvera Chaos, uniemożliwiając szturnięcia i spychacz.
                     if (PreHitSpeed < 60.0f)
                     {
                         HitComp->SetPhysicsLinearVelocity(FVector::ZeroVector);
@@ -168,8 +196,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
         }
     }
 
-    // 3. Zabezpieczenie przed rotacją kamery i szturnięciami od boku:
-    // Sprawdzamy komponenty nakładające się na trzymany prop. Jeśli któryś jest zbyt ciężki i w spoczynku - blokujemy pchnięcie.
+    // 4. Zabezpieczenie przed rotacją kamery i szturnięciami od boku (Overlaps check)
     if (UPrimitiveComponent* PropPrim = GrabbedComponent ? GrabbedComponent.Get() : Cast<UPrimitiveComponent>(GrabbedActor->GetRootComponent()))
     {
         TArray<UPrimitiveComponent*> Overlaps;
@@ -190,7 +217,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
         }
     }
 
-    // 4. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
+    // 5. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
     const float DistanceFromHands = FVector::Dist(GrabbedActor->GetActorLocation(), TargetLocation);
 
     if (DistanceFromHands > CarryBreakDistance)
@@ -228,18 +255,41 @@ void UInteractionComponent::PrimaryInteract()
 {
     UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered."), *NetUtils::GetNetRolePrefix(this));
 
-    // Jeśli trzymamy obiekt - upuszczamy go
+    // Jeśli trzymamy obiekt: czyste upuszczenie pod nogi (brak pędu) LUB rzut zamachem myszką
     if (GrabbedActor)
     {
-        if (NetUtils::HasAuthority(this))
+        FVector ReleaseVelocity = FVector::ZeroVector;
+
+        // Jeśli gracz wykonał celowy, dynamiczny zamach samą myszką (powyżej progu):
+        const float SwingSpeed = TrackedCameraSwingVelocity.Size();
+        if (SwingSpeed >= MinSwingSpeedToThrow)
         {
-            ExecuteRelease(false, FVector::ZeroVector);
+            const float ScaledSpeed = FMath::Clamp(SwingSpeed * SwingVelocityMultiplier, 0.0f, MaxSwingThrowSpeed);
+            ReleaseVelocity = TrackedCameraSwingVelocity.GetSafeNormal() * ScaledSpeed;
+
+            UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Mouse Swing Throw! Swing Speed: %.1f cm/s"),
+                *NetUtils::GetNetRolePrefix(this), ScaledSpeed);
         }
         else
         {
-            Server_RequestReleaseOrThrow(false, FVector_NetQuantize::ZeroVector);
+            // Ruch postaci/bieg nie generuje pędu: prop po prostu opada pod stopy
+            UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Pure drop under feet (Zero launch velocity)."),
+                *NetUtils::GetNetRolePrefix(this));
+        }
+
+        const bool bIsThrow = !ReleaseVelocity.IsNearlyZero();
+
+        if (NetUtils::HasAuthority(this))
+        {
+            ExecuteRelease(bIsThrow, ReleaseVelocity);
+        }
+        else
+        {
+            Server_RequestReleaseOrThrow(bIsThrow, FVector_NetQuantize(ReleaseVelocity));
             GrabbedActor = nullptr;
             GrabbedComponent = nullptr;
+            PreviousCameraRotation = FRotator::ZeroRotator;
+            TrackedCameraSwingVelocity = FVector::ZeroVector;
             SetComponentTickEnabled(false);
         }
         return;
@@ -320,6 +370,8 @@ void UInteractionComponent::ThrowCurrentProp()
         Server_RequestReleaseOrThrow(true, FVector_NetQuantize(LaunchVelocity));
         GrabbedActor = nullptr;
         GrabbedComponent = nullptr;
+        PreviousCameraRotation = FRotator::ZeroRotator;
+        TrackedCameraSwingVelocity = FVector::ZeroVector;
         SetComponentTickEnabled(false);
     }
 }
@@ -368,6 +420,11 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
 
     GrabbedActor = TargetActor;
     GrabbedComponent = ComponentToGrab;
+    FVector CamLoc;
+    FRotator CamRot;
+    GetCameraViewPoint(CamLoc, CamRot);
+    PreviousCameraRotation = CamRot;
+    TrackedCameraSwingVelocity = FVector::ZeroVector;
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))
     {
@@ -389,6 +446,8 @@ void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchV
     // Reset stanu lokalnego komponentu
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
+    PreviousCameraRotation = FRotator::ZeroRotator;
+    TrackedCameraSwingVelocity = FVector::ZeroVector;
     SetComponentTickEnabled(false);
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(ReleasedActor))
@@ -433,7 +492,12 @@ bool UInteractionComponent::Server_RequestReleaseOrThrow_Validate(bool bIsThrow,
 
 void UInteractionComponent::Server_RequestReleaseOrThrow_Implementation(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity)
 {
-    ExecuteRelease(bIsThrow, LaunchVelocity);
+    FVector ClampedVelocity = LaunchVelocity;
+    if (ClampedVelocity.Size() > MaxSwingThrowSpeed)
+    {
+        ClampedVelocity = ClampedVelocity.GetSafeNormal() * MaxSwingThrowSpeed;
+    }
+    ExecuteRelease(bIsThrow, ClampedVelocity);
 }
 
 bool UInteractionComponent::Server_RequestInteract_Validate(AActor* TargetActor)

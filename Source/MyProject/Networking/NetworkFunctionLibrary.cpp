@@ -189,10 +189,10 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         PropMesh->SetNotifyRigidBodyCollision(true);
         PropMesh->WakeRigidBody();
 
-        // 5. Aplikujemy ewentualny impuls rzutu (na Serwerze)
+        // 5. Aplikujemy prędkość początkową rzutu / pędu zamachu (na Serwerze)
         if (!LaunchVelocity.IsNearlyZero())
         {
-            PropMesh->AddImpulse(LaunchVelocity, NAME_None, true);
+            PropMesh->SetPhysicsLinearVelocity(LaunchVelocity);
         }
     }
 
