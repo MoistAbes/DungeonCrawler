@@ -44,6 +44,7 @@ void UInteractionComponent::PrimaryInteract()
 {
     UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered."), *NetUtils::GetNetRolePrefix(this));
 
+    // Jeśli trzymamy obiekt - upuszczamy go
     if (GrabbedActor)
     {
         if (NetUtils::HasAuthority(this))
@@ -53,7 +54,8 @@ void UInteractionComponent::PrimaryInteract()
         else
         {
             Server_RequestReleaseOrThrow(false, FVector_NetQuantize::ZeroVector);
-            ExecuteRelease(false, FVector::ZeroVector);
+            GrabbedActor = nullptr;
+            GrabbedComponent = nullptr;
         }
         return;
     }
@@ -85,8 +87,9 @@ void UInteractionComponent::PrimaryInteract()
             }
             else
             {
+                GrabbedActor = HitActor;
+                GrabbedComponent = HitResult.GetComponent();
                 Server_RequestGrab(HitActor, HitResult.GetComponent());
-                ExecuteGrab(HitActor, HitResult.GetComponent());
             }
             return;
         }
@@ -129,7 +132,8 @@ void UInteractionComponent::ThrowCurrentProp()
     else
     {
         Server_RequestReleaseOrThrow(true, FVector_NetQuantize(LaunchVelocity));
-        ExecuteRelease(true, LaunchVelocity);
+        GrabbedActor = nullptr;
+        GrabbedComponent = nullptr;
     }
 }
 
@@ -183,25 +187,22 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
         Grabbable->OnGrabbed(GetOwner());
     }
 
-    // Podpinamy obiekt do postaci (wspólna metoda z biblioteki domenowej Networking)
-    NetUtils::AttachCarriedProp(GrabbedActor, GrabbedComponent, GetOwner());
-
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed & Attached: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
+    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
 }
 
 void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity)
 {
     if (!GrabbedActor) return;
 
+    const FVector AppliedVelocity = bIsThrow ? LaunchVelocity : FVector::ZeroVector;
+
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))
     {
-        Grabbable->OnDropped(GetOwner());
+        Grabbable->OnDropped(GetOwner(), AppliedVelocity);
     }
 
-    // Odpinamy i włączamy fizykę z powrotem
-    NetUtils::DetachCarriedProp(GrabbedActor, GrabbedComponent, GetOwner(), bIsThrow ? LaunchVelocity : FVector::ZeroVector);
-
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Released/Thrown: %s"), *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName());
+    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Released/Thrown: %s (Velocity: %s)"), 
+        *NetUtils::GetNetRolePrefix(this), *GrabbedActor->GetName(), *AppliedVelocity.ToString());
 
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
@@ -225,7 +226,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
         const float Dist = FVector::Dist(Owner->GetActorLocation(), TargetActor->GetActorLocation());
         if (Dist > (TraceDistance + 150.0f))
         {
-            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);
+            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);\
             return;
         }
     }

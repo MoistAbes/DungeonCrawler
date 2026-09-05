@@ -12,7 +12,7 @@ class UGrabbableInterface : public UInterface
 
 /**
  * Odpowiednik: public interface GrabbableService
- * Służy do zarządzania fizyczną manipulacją obiektem przez PhysicsHandle (beczki, skrzynki, kamienie).
+ * Służy do zarządzania fizyczną manipulacją obiektem przez noszenie/rzucanie (beczki, skrzynki, kamienie).
  */
 class MYPROJECT_API IGrabbableInterface
 {
@@ -22,11 +22,11 @@ public:
 	/** Czy obiekt może zostać w tej chwili pochwycony */
 	virtual bool CanGrab(const AActor* Grabber) const = 0;
 
-	/** Hook cyklu życia: obiekt został złapany przez PhysicsHandle */
+	/** Hook cyklu życia: obiekt został złapany */
 	virtual void OnGrabbed(AActor* Grabber) = 0;
 
-	/** Hook cyklu życia: obiekt został upuszczony lub rzucony */
-	virtual void OnDropped(AActor* Dropper) = 0;
+	/** Hook cyklu życia: obiekt został upuszczony lub rzucony z zadaną prędkością */
+	virtual void OnDropped(AActor* Dropper, const FVector& LaunchVelocity = FVector::ZeroVector) = 0;
 
 	/** Pobiera masę obiektu w kg do walidacji udźwigu */
 	virtual float GetMass() const = 0;

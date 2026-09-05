@@ -55,7 +55,7 @@ public:
     // --- IGrabbableInterface ---
     virtual bool CanGrab(const AActor* Grabber) const override;
     virtual void OnGrabbed(AActor* Grabber) override;
-    virtual void OnDropped(AActor* Dropper) override;
+    virtual void OnDropped(AActor* Dropper, const FVector& LaunchVelocity = FVector::ZeroVector) override;
     virtual float GetMass() const override;
     virtual bool IsGrabbed() const override { return CarryingActor != nullptr; }
 
@@ -86,6 +86,10 @@ protected:
     /** Wskaźnik na postać aktualnie niosącą ten rekwizyt (Replikowany do wszystkich klientów) */
     UPROPERTY(ReplicatedUsing = OnRep_CarryingActor, VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|State")
     TObjectPtr<AActor> CarryingActor = nullptr;
+
+    /** Replikowany wektor prędkości rzutu zapewniający natychmiastowy lot na maszynach klientów */
+    UPROPERTY(Replicated)
+    FVector_NetQuantize RepLaunchVelocity = FVector_NetQuantize::ZeroVector;
 
     UFUNCTION()
     virtual void OnRep_CarryingActor();

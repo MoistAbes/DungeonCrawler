@@ -43,6 +43,7 @@ void AInteractivePropBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>&
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
     DOREPLIFETIME(AInteractivePropBase, CarryingActor);
+    DOREPLIFETIME(AInteractivePropBase, RepLaunchVelocity);
 }
 
 void AInteractivePropBase::PostInitializeComponents()
@@ -91,13 +92,18 @@ void AInteractivePropBase::OnGrabbed(AActor* Grabber)
     REQUIRE_AUTHORITY();
 
     CarryingActor = Grabber;
+    RepLaunchVelocity = FVector_NetQuantize::ZeroVector;
+    NetUtils::AttachCarriedProp(this, MeshComponent, Grabber);
 }
 
-void AInteractivePropBase::OnDropped(AActor* Dropper)
+void AInteractivePropBase::OnDropped(AActor* Dropper, const FVector& LaunchVelocity)
 {
     REQUIRE_AUTHORITY();
 
     CarryingActor = nullptr;
+    RepLaunchVelocity = LaunchVelocity;
+
+    NetUtils::DetachCarriedProp(this, MeshComponent, nullptr, LaunchVelocity);
 }
 
 void AInteractivePropBase::OnRep_CarryingActor()
@@ -109,7 +115,8 @@ void AInteractivePropBase::OnRep_CarryingActor()
     }
     else
     {
-        NetUtils::DetachCarriedProp(this, MeshComponent, nullptr);
+        // Klient odłącza propa i natychmiast aplikuje zreplikowany wektor lotu (eliminacja opadania pionowo w dół)
+        NetUtils::DetachCarriedProp(this, MeshComponent, nullptr, RepLaunchVelocity);
     }
 }
 
