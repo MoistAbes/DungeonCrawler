@@ -29,7 +29,7 @@ struct FActiveStatusEffectInstance
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TotalDuration = 0.0f;
 
-    /** Czas serwera (GetTimeSeconds), w którym status samoczynnie wygasa (Wzorzec Zero-Bandwidth) */
+    /** Czas serwera (GetServerWorldTimeSeconds), w którym status samoczynnie wygasa (Wzorzec Zero-Bandwidth) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float ServerEndTime = 0.0f;
 
@@ -120,18 +120,6 @@ public:
 protected:
     virtual void BeginPlay() override;
 
-    // -------------------------------------------------------------------------
-    // Konfiguracja DoT (Data-Driven Defaults)
-    // -------------------------------------------------------------------------
-
-    /** Punkty obrażeń zadawane co sekundę w trakcie trwania statusu Burning (Podpalenie) */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Status Effects|Burning", meta = (ClampMin = "0.0"))
-    float BurnDamagePerSecond = 5.0f;
-
-    /** Częstotliwość zadawania obrażeń przez status Burning (np. co 1.0 sekundy) */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Status Effects|Burning", meta = (ClampMin = "0.1"))
-    float BurnTickInterval = 1.0f;
-
     /** Czy renderować kolorowe etykiety debugowe 3D nad obiektem w świecie gry (nazwa statusu i czas) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Status Effects|Debug")
     bool bShowDebugInWorld = true;
@@ -152,10 +140,21 @@ private:
     UPROPERTY()
     TObjectPtr<UDamageableComponent> DamageableComponent;
 
-    // --- Metody pomocnicze ---
+    // --- Metody pomocnicze (Single Responsibility) ---
     const FActiveStatusEffectInstance* FindInstance(EStatusEffectType Status) const;
-    FActiveStatusEffectInstance* FindInstanceMutable(EStatusEffectType Status);
+    FActiveStatusEffectInstance* FindInstance(EStatusEffectType Status);
+
     EPhysicalMaterialType GetOwnerMaterialType() const;
+    float GetCurrentSyncedTime() const;
     void UpdateTickState();
     void DrawDebugLabels() const;
+
+    /** Przetwarza potencjalną reakcję chemiczną żywiołów. Zwraca true jeśli przychodzący status został skonsumowany */
+    bool ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
+
+    /** Odświeża czas trwania i parametry istniejącego statusu */
+    void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor);
+
+    /** Tworzy i rejestruje nową instancję statusu na podstawie danych z rejestru */
+    void AddNewStatusInstance(EStatusEffectType NewStatus, float Duration, float NewEndTime, AActor* InstigatorActor);
 };

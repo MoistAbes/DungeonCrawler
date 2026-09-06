@@ -4,6 +4,7 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
@@ -54,7 +55,7 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
         return;
     }
 
-    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+    const float CurrentTime = GetCurrentSyncedTime();
     TArray<EStatusEffectType> ExpiredEffects;
 
     for (FActiveStatusEffectInstance& Instance : ActiveStatusEffects)
@@ -100,50 +101,15 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
     const TArray<EStatusEffectType> ActiveStatusList = GetActiveStatuses();
 
-    // 1. Ewaluacja reakcji żywiołowych przez dedykowany silnik chemii (Żywioł vs Powłoka na celu ma pierwszeństwo)
-    const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(NewStatus, ActiveStatusList);
-    if (Reaction.bReactionOccurred)
+    // 1. Reakcje chemiczne żywiołów (np. Vaporize, Extinguish, Oil Ignition)
+    const bool bConsumed = ProcessElementalReaction(NewStatus, ActiveStatusList);
+    if (bConsumed)
     {
-        // Usunięcie skonsumowanego/wypartego statusu (np. woda odparowuje od ognia, olej spala się)
-        if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-        {
-            RemoveStatus(Reaction.ExistingStatusToRemove);
-        }
-
-        // Zadanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok elektryczny)
-        if (Reaction.BonusInstantDamage > 0.0f && DamageableComponent)
-        {
-            DamageableComponent->ApplyDamage(Reaction.BonusInstantDamage);
-        }
-
-        UE_LOG(LogTemp, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
-            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
-
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-        if (bShowDebugInWorld && GetWorld() && GetOwner())
-        {
-            const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
-            DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *Reaction.ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
-        }
-        if (GEngine && GetOwner())
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
-                FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString()));
-        }
-#endif
-
-        OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
-
-        // Jeśli reakcja całkowicie zneutralizowała przychodzący żywioł (np. woda zgasiła ogień / ogień odparował wodę)
-        if (Reaction.bConsumeIncomingStatus)
-        {
-            UpdateTickState();
-            return true;
-        }
+        return true;
     }
 
-    // 2. Walidacja tożsamości materiałowej celu: czy materiał pod spodem może utrzymać ten status?
-    // Uwzględniamy stan powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
+    // 2. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
+    // Przekazujemy listę powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
     if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
     {
         UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
@@ -151,35 +117,94 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         return false;
     }
 
-    const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-    const float NewEndTime = CurrentTime + Duration;
+    const float NewEndTime = GetCurrentSyncedTime() + Duration;
 
-    // 3. Brak duplikatów: jeśli status już trwa, odświeżamy czas trwania
-    if (FActiveStatusEffectInstance* Existing = FindInstanceMutable(NewStatus))
+    // 3. Odświeżenie istniejącego lub zarejestrowanie nowego statusu
+    if (FActiveStatusEffectInstance* Existing = FindInstance(NewStatus))
     {
-        Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, NewEndTime);
-        Existing->TotalDuration = FMath::Max(Existing->TotalDuration, Duration);
-        if (InstigatorActor)
-        {
-            Existing->InstigatorActor = InstigatorActor;
-        }
+        RefreshExistingStatus(*Existing, Duration, NewEndTime, InstigatorActor);
+    }
+    else
+    {
+        AddNewStatusInstance(NewStatus, Duration, NewEndTime, InstigatorActor);
+    }
 
-        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
-            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), GetRemainingDuration(NewStatus));
+    return true;
+}
+
+bool UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses)
+{
+    const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(NewStatus, ActiveStatuses);
+    if (!Reaction.bReactionOccurred)
+    {
+        return false;
+    }
+
+    // Usunięcie skonsumowanego/wypartego statusu (np. woda odparowuje od ognia, olej spala się)
+    if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+    {
+        RemoveStatus(Reaction.ExistingStatusToRemove);
+    }
+
+    // Zadanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok elektryczny)
+    if (Reaction.BonusInstantDamage > 0.0f && DamageableComponent)
+    {
+        DamageableComponent->ApplyDamage(Reaction.BonusInstantDamage);
+    }
+
+    UE_LOG(LogTemp, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-        if (GEngine && GetOwner())
-        {
-            GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
-                FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), GetRemainingDuration(NewStatus)));
-        }
+    if (bShowDebugInWorld && GetWorld() && GetOwner())
+    {
+        const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+        DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *Reaction.ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
+    }
+    if (GEngine && GetOwner())
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
+            FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString()));
+    }
 #endif
 
-        OnStatusEffectApplied.Broadcast(NewStatus, GetRemainingDuration(NewStatus));
+    OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
+
+    // Jeśli reakcja całkowicie zneutralizowała przychodzący żywioł (np. woda zgasiła ogień)
+    if (Reaction.bConsumeIncomingStatus)
+    {
+        UpdateTickState();
         return true;
     }
 
-    // 4. Nałożenie nowej instancji statusu na podstawie rejestru definicji
+    return false;
+}
+
+void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor)
+{
+    Existing.ServerEndTime = FMath::Max(Existing.ServerEndTime, NewEndTime);
+    Existing.TotalDuration = FMath::Max(Existing.TotalDuration, Duration);
+    if (InstigatorActor)
+    {
+        Existing.InstigatorActor = InstigatorActor;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), GetRemainingDuration(Existing.EffectType));
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+    if (GEngine && GetOwner())
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
+            FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), GetRemainingDuration(Existing.EffectType)));
+    }
+#endif
+
+    OnStatusEffectApplied.Broadcast(Existing.EffectType, GetRemainingDuration(Existing.EffectType));
+}
+
+void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, float Duration, float NewEndTime, AActor* InstigatorActor)
+{
     const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(NewStatus);
 
     FActiveStatusEffectInstance NewInstance;
@@ -205,7 +230,6 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 #endif
 
     OnStatusEffectApplied.Broadcast(NewStatus, Duration);
-    return true;
 }
 
 bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
@@ -258,12 +282,9 @@ bool UStatusEffectComponent::HasStatus(EStatusEffectType Status) const
 
 float UStatusEffectComponent::GetRemainingDuration(EStatusEffectType Status) const
 {
-    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))\
+    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
     {
-        if (const UWorld* World = GetWorld())
-        {
-            return FMath::Max(0.0f, Found->ServerEndTime - World->GetTimeSeconds());
-        }
+        return FMath::Max(0.0f, Found->ServerEndTime - GetCurrentSyncedTime());
     }
     return 0.0f;
 }
@@ -330,7 +351,7 @@ const FActiveStatusEffectInstance* UStatusEffectComponent::FindInstance(EStatusE
     });
 }
 
-FActiveStatusEffectInstance* UStatusEffectComponent::FindInstanceMutable(EStatusEffectType Status)
+FActiveStatusEffectInstance* UStatusEffectComponent::FindInstance(EStatusEffectType Status)
 {
     return ActiveStatusEffects.FindByPredicate([Status](const FActiveStatusEffectInstance& Item)
     {
@@ -352,6 +373,19 @@ EPhysicalMaterialType UStatusEffectComponent::GetOwnerMaterialType() const
     }
 
     return EPhysicalMaterialType::Flesh;
+}
+
+float UStatusEffectComponent::GetCurrentSyncedTime() const
+{
+    if (const UWorld* World = GetWorld())
+    {
+        if (const AGameStateBase* GS = World->GetGameState())
+        {
+            return GS->GetServerWorldTimeSeconds();
+        }
+        return World->GetTimeSeconds();
+    }
+    return 0.0f;
 }
 
 void UStatusEffectComponent::UpdateTickState()
@@ -392,30 +426,25 @@ void UStatusEffectComponent::DrawDebugLabels() const
         const EStatusEffectType Status = Inst.EffectType;
 
         FColor StatusColor = FColor::White;
-        FString StatusName = TEXT("Status");
-
         switch (Status)
         {
         case EStatusEffectType::Burning:
             StatusColor = FColor(255, 60, 0);
-            StatusName = TEXT("BURNING");
             break;
         case EStatusEffectType::Wet:
             StatusColor = FColor(0, 180, 255);
-            StatusName = TEXT("WET");
             break;
         case EStatusEffectType::Electrified:
             StatusColor = FColor(255, 230, 0);
-            StatusName = TEXT("ELECTRIFIED");
             break;
         case EStatusEffectType::Oiled:
             StatusColor = FColor(180, 110, 40);
-            StatusName = TEXT("OILED");
             break;
         default:
             break;
         }
 
+        const FString StatusName = UEnum::GetDisplayValueAsText(Status).ToString().ToUpper();
         const float Remaining = GetRemainingDuration(Status);
         const FString DebugStr = FString::Printf(TEXT("%s (%.1fs)"), *StatusName, Remaining);
         const FVector DrawPos = BaseLocation + FVector(0.0f, 0.0f, StackIndex * 22.0f);
