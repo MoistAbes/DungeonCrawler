@@ -8,7 +8,6 @@
 
 class UInputMappingContext;
 class UInputAction;
-class UPhysicsHandleComponent;
 class UCameraComponent;
 class USpringArmComponent;
 class UPlayerCameraComponent;
@@ -36,10 +35,6 @@ public:
     /** Komponent sterujący płynnym zoomem i zachowaniem kamery */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UPlayerCameraComponent> PlayerCameraComponent;
-
-    /** Fizyczny uchwyt umożliwiający chwytanie i niesienie obiektów przed postacią */
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-    TObjectPtr<UPhysicsHandleComponent> PhysicsHandleComponent;
 
     /** Kotwica pozycjonowania niesionego propa, płynnie podążająca za kątem patrzenia kamery */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")

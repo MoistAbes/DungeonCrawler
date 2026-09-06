@@ -10,7 +10,6 @@
 
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "PhysicsEngine/PhysicsHandleComponent.h"
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
@@ -103,21 +102,8 @@ APlayerCharacter::APlayerCharacter()
 
 
     // -------------------------------------------------------------------------
-    // Physics Handle & Hold Anchor
+    // Hold Anchor
     // -------------------------------------------------------------------------
-
-    PhysicsHandleComponent =
-        CreateDefaultSubobject<UPhysicsHandleComponent>(
-            TEXT("PhysicsHandleComponent"));
-
-    PhysicsHandleComponent->LinearDamping = 200.0f;
-    PhysicsHandleComponent->LinearStiffness = 1500.0f;
-
-    PhysicsHandleComponent->AngularDamping = 200.0f;
-    PhysicsHandleComponent->AngularStiffness = 1500.0f;
-
-    PhysicsHandleComponent->InterpolationSpeed = 50.0f;
-    PhysicsHandleComponent->bInterpolateTarget = true;
 
     HoldAnchorComponent =
         CreateDefaultSubobject<USceneComponent>(

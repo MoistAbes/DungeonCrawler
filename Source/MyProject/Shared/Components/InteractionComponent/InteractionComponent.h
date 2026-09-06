@@ -32,8 +32,6 @@ public:
     void NotifyCarriedPropDetached();
 
 protected:
-    virtual void BeginPlay() override;
-
     /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float TraceDistance = 300.0f;
@@ -98,4 +96,6 @@ private:
     void ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity);
     void UpdateHoldAnchorTransform(float DeltaTime);
     void UpdateCarriedPropTransform(float DeltaTime);
+    void ResetGrabState();
+    void StopHeavyPhysicsObject(UPrimitiveComponent* Comp, float MaxPushableMass);
 };

@@ -16,22 +16,13 @@ UInteractionComponent::UInteractionComponent()
     SetIsReplicatedByDefault(true);
 }
 
-void UInteractionComponent::BeginPlay()
-{
-    Super::BeginPlay();
-}
-
 void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
     Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
     if (!IsValid(GrabbedActor))
     {
-        GrabbedActor = nullptr;
-        GrabbedComponent = nullptr;
-        PreviousCameraRotation = FRotator::ZeroRotator;
-        TrackedCameraSwingVelocity = FVector::ZeroVector;
-        SetComponentTickEnabled(false);
+        ResetGrabState();
         return;
     }
 
@@ -56,11 +47,34 @@ void UInteractionComponent::NotifyCarriedPropDetached()
     {
         GrabbedActor->SetReplicateMovement(true);
     }
+    ResetGrabState();
+}
+
+void UInteractionComponent::ResetGrabState()
+{
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
     PreviousCameraRotation = FRotator::ZeroRotator;
     TrackedCameraSwingVelocity = FVector::ZeroVector;
     SetComponentTickEnabled(false);
+}
+
+void UInteractionComponent::StopHeavyPhysicsObject(UPrimitiveComponent* Comp, float MaxPushableMass)
+{
+    if (!Comp || !Comp->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    if (Comp->GetMass() > MaxPushableMass)
+    {
+        // Zerujemy mikroruchy i sztuczne impulsy kontaktowe solvera Chaos dla obiektów ciężkich (np. beczki 177-200 kg)
+        if (Comp->GetPhysicsLinearVelocity().Size() < 60.0f)
+        {
+            Comp->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            Comp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+        }
+    }
 }
 
 void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
@@ -157,7 +171,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     }
     PreviousCameraRotation = CamRot;
 
-    // 3. Inteligentna reakcja na napotkane przeszkody fizyczne
+    // 3. Reakcja na napotkane przeszkody fizyczne
     if (SweepHit.bBlockingHit)
     {
         if (UPrimitiveComponent* HitComp = SweepHit.GetComponent())
@@ -165,11 +179,9 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
             if (HitComp->IsSimulatingPhysics())
             {
                 const float HitMass = HitComp->GetMass();
-                const float PreHitSpeed = HitComp->GetPhysicsLinearVelocity().Size();
-
                 if (HitMass <= PlayerChar->MaxPushableMass)
                 {
-                    // Obiekt mieści się w limicie udźwigu gracza (np. skrzynia 60 kg) - przekazujemy fizyczną siłę pchania
+                    // Obiekt mieści się w limicie udźwigu gracza - przekazujemy fizyczną siłę pchania
                     FVector PushDir = -SweepHit.ImpactNormal;
                     PushDir.Z = 0.0f;
                     PushDir = PushDir.GetSafeNormal();
@@ -184,13 +196,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
                 }
                 else
                 {
-                    // Obiekt jest zbyt ciężki dla gracza (np. beczka 177-200 kg).
-                    // Zerujemy sztuczne impulsy kontaktowe solvera Chaos, uniemożliwiając szturnięcia i spychacz.
-                    if (PreHitSpeed < 60.0f)
-                    {
-                        HitComp->SetPhysicsLinearVelocity(FVector::ZeroVector);
-                        HitComp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-                    }
+                    StopHeavyPhysicsObject(HitComp, PlayerChar->MaxPushableMass);
                 }
             }
         }
@@ -203,17 +209,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
         PropPrim->GetOverlappingComponents(Overlaps);
         for (UPrimitiveComponent* OverlapComp : Overlaps)
         {
-            if (OverlapComp && OverlapComp->IsSimulatingPhysics())
-            {
-                if (OverlapComp->GetMass() > PlayerChar->MaxPushableMass)
-                {
-                    if (OverlapComp->GetPhysicsLinearVelocity().Size() < 60.0f)
-                    {
-                        OverlapComp->SetPhysicsLinearVelocity(FVector::ZeroVector);
-                        OverlapComp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-                    }
-                }
-            }
+            StopHeavyPhysicsObject(OverlapComp, PlayerChar->MaxPushableMass);
         }
     }
 
@@ -286,11 +282,7 @@ void UInteractionComponent::PrimaryInteract()
         else
         {
             Server_RequestReleaseOrThrow(bIsThrow, FVector_NetQuantize(ReleaseVelocity));
-            GrabbedActor = nullptr;
-            GrabbedComponent = nullptr;
-            PreviousCameraRotation = FRotator::ZeroRotator;
-            TrackedCameraSwingVelocity = FVector::ZeroVector;
-            SetComponentTickEnabled(false);
+            ResetGrabState();
         }
         return;
     }
@@ -368,11 +360,7 @@ void UInteractionComponent::ThrowCurrentProp()
     else
     {
         Server_RequestReleaseOrThrow(true, FVector_NetQuantize(LaunchVelocity));
-        GrabbedActor = nullptr;
-        GrabbedComponent = nullptr;
-        PreviousCameraRotation = FRotator::ZeroRotator;
-        TrackedCameraSwingVelocity = FVector::ZeroVector;
-        SetComponentTickEnabled(false);
+        ResetGrabState();
     }
 }
 
@@ -443,12 +431,7 @@ void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchV
     AActor* ReleasedActor = GrabbedActor;
     const FVector AppliedVelocity = bIsThrow ? LaunchVelocity : FVector::ZeroVector;
 
-    // Reset stanu lokalnego komponentu
-    GrabbedActor = nullptr;
-    GrabbedComponent = nullptr;
-    PreviousCameraRotation = FRotator::ZeroRotator;
-    TrackedCameraSwingVelocity = FVector::ZeroVector;
-    SetComponentTickEnabled(false);
+    ResetGrabState();
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(ReleasedActor))
     {
@@ -477,7 +460,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
         const float Dist = FVector::Dist(Owner->GetActorLocation(), TargetActor->GetActorLocation());
         if (Dist > (TraceDistance + 150.0f))
         {
-            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);
+            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target is too far (%.1f cm)"), Dist);\
             return;
         }
     }
