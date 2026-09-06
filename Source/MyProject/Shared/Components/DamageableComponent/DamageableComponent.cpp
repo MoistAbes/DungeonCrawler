@@ -35,7 +35,7 @@ void UDamageableComponent::BeginPlay()
         {
             Character->LandedDelegate.AddDynamic(this, &UDamageableComponent::HandleCharacterLanded);
 
-            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())\
             {
                 Capsule->SetNotifyRigidBodyCollision(true);
                 Capsule->OnComponentHit.AddDynamic(this, &UDamageableComponent::HandleCharacterHit);
@@ -74,6 +74,17 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
     if (ImpactSpeed <= ImpactSpeedThreshold)
     {
         return;
+    }
+
+    // Debounce / Cooldown chroniący przed powielaniem obrażeń w jednym zderzeniu (Double-Hit)
+    if (const UWorld* World = GetWorld())
+    {
+        const double CurrentTime = World->GetTimeSeconds();
+        if ((CurrentTime - LastKineticImpactTime) < KineticImpactCooldown)
+        {
+            return;
+        }
+        LastKineticImpactTime = CurrentTime;
     }
 
     const float ExcessSpeed = ImpactSpeed - ImpactSpeedThreshold;

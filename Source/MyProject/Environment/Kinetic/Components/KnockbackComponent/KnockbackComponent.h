@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "MyProject/Environment/Kinetic/Enums/KineticEnums.h"
 #include "KnockbackComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -12,7 +11,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 
 /**
  * Komponent odpowiedzialny za odbieranie i aplikowanie sił kinetycznych / odrzutów (Knockback).
- * Działa uniwersalnie dla postaci opartych o CharacterMovementComponent oraz obiektów symulujących fizykę.
+ * Działa uniwersalnie dla postaci opartych o CharacterMovementComponent oraz obiektów symulujących fizykę Chaos.
  */
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MYPROJECT_API UKnockbackComponent : public UActorComponent
@@ -22,7 +21,7 @@ class MYPROJECT_API UKnockbackComponent : public UActorComponent
 public:
     UKnockbackComponent();
 
-    /** Aplikuje siłę kierunkową z uwzględnieniem odporności na odrzut */
+    /** Aplikuje siłę kierunkową z uwzględnieniem odporności na odrzut oraz stanu w powietrzu */
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyImpulseForce(
         const FVector& Direction,
@@ -30,21 +29,12 @@ public:
         AActor* InstigatorActor = nullptr,
         bool bIgnoreResistance = false);
 
-    /** Bezpośrednio aplikuje wektor prędkości (np. silny cios młotem) */
+    /** Bezpośrednio aplikuje gotowy wektor prędkości (np. precyzyjny cios skryptowany) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyKnockback(
         const FVector& Velocity,
         bool bOverrideXY = true,
         bool bOverrideZ = true,
-        AActor* InstigatorActor = nullptr);
-
-    /** Aplikuje odrzut radialny od danego punktu w przestrzeni */
-    UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
-    void ApplyRadialImpulse(
-        const FVector& Origin,
-        float Radius,
-        float Strength,
-        EKnockbackFalloff Falloff = EKnockbackFalloff::Linear,
         AActor* InstigatorActor = nullptr);
 
     // -------------------------------------------------------------------------
@@ -109,4 +99,23 @@ protected:
         Category = "Custom|Kinetic",
         meta = (ClampMin = "100.0", ClampMax = "10000.0"))
     float MaxAllowedVelocity = 3500.0f;
+
+    /** Minimalny czas (w sekundach) między kolejnymi odrzutami. Zapobiega wielokrotnemu odrzutowi w sąsiednich klatkach kontaktu brył */
+    UPROPERTY(
+        EditDefaultsOnly,
+        BlueprintReadOnly,
+        Category = "Custom|Kinetic",
+        meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float KnockbackCooldown = 0.2f;
+
+private:
+    /** Czas świata ostatniego nałożonego odrzutu (do debounce) */
+    double LastKnockbackTime = -100.0;
+
+    /** Wykonuje faktyczny start postaci lub dodanie impulsu do bryły fizycznej */
+    void ExecuteLaunch(
+        const FVector& Velocity,
+        bool bOverrideXY,
+        bool bOverrideZ,
+        AActor* InstigatorActor);
 };

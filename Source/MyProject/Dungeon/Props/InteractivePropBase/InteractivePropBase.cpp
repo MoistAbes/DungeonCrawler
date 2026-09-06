@@ -166,11 +166,19 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
 
         if (PropSpeed >= MinImpactSpeedForKnockback)
         {
-            // Sprawdzamy prędkość, z jaką prop nadlatywał w stronę celu
+            // Sprawdzamy prędkość zbliżania propa do celu
             const FVector ToTarget = (OtherActor->GetActorLocation() - GetActorLocation()).GetSafeNormal();
             const float ClosingSpeedByNormal = -FVector::DotProduct(PropVelocity, Hit.ImpactNormal);
             const float ClosingSpeedByDirection = FVector::DotProduct(PropVelocity, ToTarget);
-            const float EffectivePropSpeed = FMath::Max(ClosingSpeedByNormal, ClosingSpeedByDirection);
+            float EffectivePropSpeed = FMath::Max(ClosingSpeedByNormal, ClosingSpeedByDirection);
+
+            // Chaos Physics Rebound Compensation:
+            // Jeśli obiekt uderzył w sztywną kapsułę postaci i solver fizyki już go odbił do tyłu
+            // (ClosingSpeed staje się ujemne), siła uderzenia odpowiada modułowi odbicia lub prędkości propa
+            if (EffectivePropSpeed < MinImpactSpeedForKnockback && PropSpeed >= MinImpactSpeedForKnockback)
+            {
+                EffectivePropSpeed = FMath::Max(FMath::Abs(ClosingSpeedByNormal), PropSpeed * 0.75f);
+            }
 
             if (EffectivePropSpeed >= MinImpactSpeedForKnockback)
             {
@@ -179,11 +187,16 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                 const float MassFactor = FMath::Clamp(Mass > 0.0f ? (Mass / 50.0f) : 1.0f, 0.5f, 3.5f);
                 const float KnockbackForce = EffectivePropSpeed * MassFactor * KnockbackStrengthMultiplier;
 
-                // Kierunek odrzutu zgodny z wektorem lotu propa, z lekkim uniesieniem w górę (Upward Bias)
-                FVector KnockbackDir = PropVelocity.GetSafeNormal();
+                // Kierunek odrzutu: ZAWSZE od środka propa w stronę celu (ToTarget) z podbiciem w górę (Upward Bias).
+                // Nigdy nie używamy odbitego PropVelocity, bo odrzuciłoby cel w stronę propa.
+                FVector KnockbackDir = ToTarget;
                 if (KnockbackDir.IsNearlyZero())
                 {
-                    KnockbackDir = ToTarget;
+                    KnockbackDir = -Hit.ImpactNormal;
+                }
+                if (KnockbackDir.IsNearlyZero())
+                {
+                    KnockbackDir = FVector::ForwardVector;
                 }
                 KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.25f, 0.1f, 1.0f);
                 KnockbackDir.Normalize();

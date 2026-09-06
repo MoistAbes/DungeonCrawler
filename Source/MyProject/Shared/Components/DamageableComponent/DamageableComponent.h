@@ -90,6 +90,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.0"))
     float ImpactDamageMultiplier = 0.05f;
 
+    /** Minimalny czas (w sekundach) między kolejnymi obrażeniami kinetycznymi. Zapobiega wielokrotnemu zadawaniu obrażeń w jednym zderzeniu (Double-Hit) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.0", ClampMax = "2.0"))
+    float KineticImpactCooldown = 0.25f;
+
     /** Reakcja na replikację maksymalnej wytrzymałości */
     UFUNCTION()
     void OnRep_MaxDurability(float OldMaxDurability);
@@ -99,6 +103,9 @@ protected:
     void OnRep_CurrentDurability(float OldDurability);
 
 private:
+    /** Czas świata ostatniego nałożenia obrażeń kinetycznych (do debounce) */
+    double LastKineticImpactTime = -100.0;
+
     /** Aktualna wartość punktów wytrzymałości w czasie rzeczywistym (replikowana z serwera) */
     UPROPERTY(ReplicatedUsing = OnRep_CurrentDurability, VisibleInstanceOnly, Category = "Custom|Durability")
     float CurrentDurability = 100.0f;

@@ -62,6 +62,29 @@ namespace KineticHelpers
 
         return nullptr;
     }
+
+    /**
+     * Zunifikowana metoda aplikowania siły kinetycznej na cel.
+     * Przekazuje siłę do dedykowanego UKnockbackComponent (jeśli cel go posiada)
+     * lub bezpośrednio do aktywnej bryły fizycznej Chaos.
+     */
+    static void ApplyKineticImpulse(AActor* TargetActor, const FVector& Direction, float Force, AActor* InstigatorActor)
+    {
+        if (!TargetActor || Force <= 0.0f)
+        {
+            return;
+        }
+
+        if (UKnockbackComponent* Knockback = TargetActor->FindComponentByClass<UKnockbackComponent>())
+        {
+            Knockback->ApplyImpulseForce(Direction, Force, InstigatorActor, false);
+        }
+        else if (UPrimitiveComponent* PhysComp = GetSimulatingPrimitive(TargetActor))
+        {
+            // bVelChange = true zapewnia spójną prędkość odrzutu niezależnie od różnicy mas
+            PhysComp->AddImpulse(Direction * Force, NAME_None, true);
+        }
+    }
 }
 
 float UKineticForceLibrary::CalculateImpactSpeed(
@@ -236,7 +259,7 @@ void UKineticForceLibrary::ApplyExplosion(
             }
         }
 
-        // 2. Aplikowanie odrzutu przez KnockbackComponent lub bezpośrednio na bryłę fizyczną Chaos
+        // 2. Aplikowanie odrzutu przez zunifikowany helper kinetyczny
         if (BaseKnockbackForce > 0.0f)
         {
             FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
@@ -250,16 +273,7 @@ void UKineticForceLibrary::ApplyExplosion(
             KnockbackDir.Normalize();
 
             const float ScaledForce = BaseKnockbackForce * FalloffFactor;
-
-            if (UKnockbackComponent* Knockback = HitActor->FindComponentByClass<UKnockbackComponent>())
-            {
-                Knockback->ApplyImpulseForce(KnockbackDir, ScaledForce, InstigatorActor, false);
-            }
-            else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(HitActor))
-            {
-                // bVelChange = true zapewnia spójną prędkość odrzutu niezależnie od różnicy mas
-                PhysComp->AddImpulse(KnockbackDir * ScaledForce, NAME_None, true);
-            }
+            KineticHelpers::ApplyKineticImpulse(HitActor, KnockbackDir, ScaledForce, InstigatorActor);
         }
     }
 }
@@ -286,14 +300,7 @@ void UKineticForceLibrary::ApplyDirectionalKnockback(
     AdjustedDirection.Z = FMath::Clamp(VerticalLiftRatio, 0.0f, 1.0f);
     AdjustedDirection.Normalize();
 
-    if (UKnockbackComponent* Knockback = TargetActor->FindComponentByClass<UKnockbackComponent>())
-    {
-        Knockback->ApplyImpulseForce(AdjustedDirection, Force, InstigatorActor, false);
-    }
-    else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(TargetActor))
-    {
-        PhysComp->AddImpulse(AdjustedDirection * Force, NAME_None, true);
-    }
+    KineticHelpers::ApplyKineticImpulse(TargetActor, AdjustedDirection, Force, InstigatorActor);
 }
 
 void UKineticForceLibrary::ApplyVortexPull(
@@ -371,13 +378,6 @@ void UKineticForceLibrary::ApplyVortexPull(
         const FVector PullDirection = Delta.GetSafeNormal();
         const float ScaledPull = PullStrength * FalloffFactor;
 
-        if (UKnockbackComponent* Knockback = HitActor->FindComponentByClass<UKnockbackComponent>())
-        {
-            Knockback->ApplyImpulseForce(PullDirection, ScaledPull, InstigatorActor, false);
-        }
-        else if (UPrimitiveComponent* PhysComp = KineticHelpers::GetSimulatingPrimitive(HitActor))
-        {
-            PhysComp->AddImpulse(PullDirection * ScaledPull, NAME_None, true);
-        }
+        KineticHelpers::ApplyKineticImpulse(HitActor, PullDirection, ScaledPull, InstigatorActor);
     }
 }

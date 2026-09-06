@@ -28,35 +28,20 @@ void UKnockbackComponent::ApplyImpulseForce(
 
     float EffectiveForce = Force * ResistanceFactor;
 
-    AActor* Owner = GetOwner();
-    if (!Owner)
+    // Postacie w powietrzu otrzymują zwiększony pęd (brak tarcia o podłoże)
+    if (const ACharacter* Character = Cast<ACharacter>(GetOwner()))
     {
-        return;
-    }
-
-    if (ACharacter* Character = Cast<ACharacter>(Owner))
-    {
-        UCharacterMovementComponent* CMC = Character->GetCharacterMovement();
-        if (CMC && CMC->IsFalling())
+        if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
         {
-            EffectiveForce *= AirborneMultiplier;
-        }
-
-        FVector LaunchVelocity = Direction.GetSafeNormal() * EffectiveForce;
-        LaunchVelocity = LaunchVelocity.GetClampedToMaxSize(MaxAllowedVelocity);
-
-        Character->LaunchCharacter(LaunchVelocity, true, true);
-        OnKnockbackReceived.Broadcast(LaunchVelocity, InstigatorActor);
-    }
-    else if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Owner->GetRootComponent()))
-    {
-        if (PrimComp->IsSimulatingPhysics())
-        {
-            const FVector Impulse = Direction.GetSafeNormal() * EffectiveForce;
-            PrimComp->AddImpulse(Impulse, NAME_None, true);
-            OnKnockbackReceived.Broadcast(Impulse, InstigatorActor);
+            if (CMC->IsFalling())
+            {
+                EffectiveForce *= AirborneMultiplier;
+            }
         }
     }
+
+    const FVector LaunchVelocity = Direction.GetSafeNormal() * EffectiveForce;
+    ExecuteLaunch(LaunchVelocity, true, true, InstigatorActor);
 }
 
 void UKnockbackComponent::ApplyKnockback(
@@ -76,69 +61,46 @@ void UKnockbackComponent::ApplyKnockback(
         return;
     }
 
-    FVector FinalVelocity = Velocity * ResistanceFactor;
-    FinalVelocity = FinalVelocity.GetClampedToMaxSize(MaxAllowedVelocity);
+    const FVector FinalVelocity = Velocity * ResistanceFactor;
+    ExecuteLaunch(FinalVelocity, bOverrideXY, bOverrideZ, InstigatorActor);
+}
 
+void UKnockbackComponent::ExecuteLaunch(
+    const FVector& Velocity,
+    bool bOverrideXY,
+    bool bOverrideZ,
+    AActor* InstigatorActor)
+{
     AActor* Owner = GetOwner();
     if (!Owner)
     {
         return;
     }
 
+    // Debounce / Cooldown chroniący przed wielokrotnym odrzutem w sąsiednich klatkach
+    if (const UWorld* World = GetWorld())
+    {
+        const double CurrentTime = World->GetTimeSeconds();
+        if ((CurrentTime - LastKnockbackTime) < KnockbackCooldown)
+        {
+            return;
+        }
+        LastKnockbackTime = CurrentTime;
+    }
+
+    const FVector ClampedVelocity = Velocity.GetClampedToMaxSize(MaxAllowedVelocity);
+
     if (ACharacter* Character = Cast<ACharacter>(Owner))
     {
-        Character->LaunchCharacter(FinalVelocity, bOverrideXY, bOverrideZ);
-        OnKnockbackReceived.Broadcast(FinalVelocity, InstigatorActor);
+        Character->LaunchCharacter(ClampedVelocity, bOverrideXY, bOverrideZ);
+        OnKnockbackReceived.Broadcast(ClampedVelocity, InstigatorActor);
     }
     else if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Owner->GetRootComponent()))
     {
         if (PrimComp->IsSimulatingPhysics())
         {
-            PrimComp->AddImpulse(FinalVelocity, NAME_None, true);
-            OnKnockbackReceived.Broadcast(FinalVelocity, InstigatorActor);
+            PrimComp->AddImpulse(ClampedVelocity, NAME_None, true);
+            OnKnockbackReceived.Broadcast(ClampedVelocity, InstigatorActor);
         }
     }
-}
-
-void UKnockbackComponent::ApplyRadialImpulse(
-    const FVector& Origin,
-    float Radius,
-    float Strength,
-    EKnockbackFalloff Falloff,
-    AActor* InstigatorActor)
-{
-    if (bIsImmune || Radius <= 0.0f || Strength == 0.0f)
-    {
-        return;
-    }
-
-    AActor* Owner = GetOwner();
-    if (!Owner)
-    {
-        return;
-    }
-
-    const FVector OwnerLocation = Owner->GetActorLocation();
-    const FVector Delta = OwnerLocation - Origin;
-    const float Distance = Delta.Size();
-
-    if (Distance > Radius)
-    {
-        return;
-    }
-
-    float FalloffFactor = 1.0f;
-    if (Falloff == EKnockbackFalloff::Linear && Radius > 0.0f)
-    {
-        FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.0f, 1.0f);
-    }
-
-    FVector Direction = Delta.GetSafeNormal();
-    if (Direction.IsNearlyZero())
-    {
-        Direction = FVector::UpVector;
-    }
-
-    const float CalculatedForce = Strength * FalloffFactor;
-    ApplyImpulseForce(Direction, CalculatedForce, InstigatorActor, false);
 }
