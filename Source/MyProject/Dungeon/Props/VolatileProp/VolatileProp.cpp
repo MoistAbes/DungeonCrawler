@@ -40,7 +40,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     // 2. Wymuszamy natychmiastowe wysłanie pakietu sieciowego zanim aktor zniknie ze świata gry
     ForceNetUpdate();
 
-    // 3. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer
+    // 3. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer z uwzględnieniem LoS Occlusion
     if (BaseDamage > 0.0f || (bApplyKnockback && KnockbackForce > 0.0f))
     {
         const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
@@ -55,7 +55,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             false /* serwer nie musi rysować debuga, zrobi to multicast */);
     }
 
-    // 4. Aplikowanie statusu żywiołowego w promieniu wybuchu (Tylko Serwer)
+    // 4. Aplikowanie statusu żywiołowego w promieniu wybuchu z geometrycznym ekranowaniem (LoS Occlusion)
     if (StatusToApply != EStatusEffectType::None && World)
     {
         TArray<FOverlapResult> Overlaps;
@@ -84,9 +84,17 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             {
                 continue;
             }
+
+            // Geometryczne ekranowanie przeszkodami (Line of Sight)
+            FHitResult LoSHit;
+            if (!UKineticForceLibrary::HasExplosionLineOfSight(World, DetonationCenter, HitActor, Overlap.GetComponent(), LoSHit, this))
+            {
+                continue; // Obiekt w cieniu wybuchu za ścianą/posadzką
+            }
+
             AffectedActors.Add(HitActor);
 
-            if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())\
+            if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
             {
                 StatusComp->ApplyStatus(StatusToApply, StatusDuration, this);
             }
@@ -102,7 +110,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
 void AVolatileProp::Multicast_PlayExplosionEffects_Implementation(const FVector& DetonationCenter)
 {
     // Odtwarzane u wszystkich połączonych klientów oraz na serwerze
-    if (bDrawDebugRadius && GetWorld())
+    if (bDrawDebugRadius && GetWorld())\
     {
         DrawDebugSphere(GetWorld(), DetonationCenter, EffectRadius, 24, FColor::Orange, false, 2.0f, 0, 1.5f);
     }

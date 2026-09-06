@@ -29,7 +29,22 @@ public:
         const FVector& HitNormal);
 
     /**
+     * Sprawdza widoczność celu z punktu wybuchu (Line of Sight / Occlusion).
+     * Zwraca true, jeśli promień wybuchu nie jest zablokowany przez litą geometrię (ściany, posadzki).
+     * Wypełnia OutHitResult punktem i wektorem normalnym trafienia.
+     */
+    UFUNCTION(BlueprintPure, Category = "Environment|Kinetic")
+    static bool HasExplosionLineOfSight(
+        const UWorld* World,
+        const FVector& Origin,
+        const AActor* TargetActor,
+        const UPrimitiveComponent* TargetComp,
+        FHitResult& OutHitResult,
+        const AActor* IgnoredActor = nullptr);
+
+    /**
      * Aplikuje wybuch radialny: zadaje obrażenia przez DamageableComponent i odrzuca przez KnockbackComponent.
+     * Uwzględnia geometryczne ekranowanie przeszkodami (LoS Occlusion).
      */
     UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic", meta = (WorldContext = "WorldContextObject"))
     static void ApplyExplosion(

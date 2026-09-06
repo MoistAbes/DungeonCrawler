@@ -81,6 +81,67 @@ float UKineticForceLibrary::CalculateImpactSpeed(
     return FMath::Max(0.0f, ClosingSpeed);
 }
 
+bool UKineticForceLibrary::HasExplosionLineOfSight(
+    const UWorld* World,
+    const FVector& Origin,
+    const AActor* TargetActor,
+    const UPrimitiveComponent* TargetComp,
+    FHitResult& OutHitResult,
+    const AActor* IgnoredActor)
+{
+    if (!World || !TargetActor)
+    {
+        return false;
+    }
+
+    FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(ExplosionLineOfSight), false);
+    if (IgnoredActor)
+    {
+        LoSParams.AddIgnoredActor(IgnoredActor);
+    }
+
+    // Wyznaczamy docelowy punkt uderzenia fali na powierzchni obiektu
+    FVector TargetPoint = TargetActor->GetActorLocation();
+    if (TargetComp)
+    {
+        TargetComp->GetClosestPointOnCollision(Origin, TargetPoint);
+    }
+
+    const FVector Dir = (TargetPoint - Origin).GetSafeNormal();
+    // Wysyłamy promień nieco za punkt kolizji, by uchwycić właściwy komponent
+    const FVector TraceEnd = TargetPoint + Dir * 15.0f;
+
+    if (World->LineTraceSingleByChannel(OutHitResult, Origin, TraceEnd, ECC_Visibility, LoSParams))
+    {
+        if (OutHitResult.GetActor() == TargetActor)
+        {
+            return true;
+        }
+    }
+    else
+    {
+        // Jeśli promień nie napotkał żadnego blokera, linia wzroku jest czysta
+        OutHitResult.ImpactPoint = TargetPoint;
+        OutHitResult.ImpactNormal = -Dir;
+        return true;
+    }
+
+    // Dodatkowy test dla postaci (APawn) - sprawdzamy środek tułowia, by krawędź posadzki nie blokowała wybuchu
+    if (TargetActor->IsA<APawn>())
+    {
+        const FVector PawnCenter = TargetActor->GetActorLocation();
+        if (World->LineTraceSingleByChannel(OutHitResult, Origin, PawnCenter, ECC_Visibility, LoSParams))
+        {
+            if (OutHitResult.GetActor() == TargetActor)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 void UKineticForceLibrary::ApplyExplosion(
     const UObject* WorldContextObject,
     const FVector& Origin,
@@ -144,10 +205,18 @@ void UKineticForceLibrary::ApplyExplosion(
         {
             continue;
         }
+
+        // Geometryczne ekranowanie przeszkodami (Line of Sight)
+        FHitResult LoSHit;
+        if (!HasExplosionLineOfSight(World, Origin, HitActor, Overlap.GetComponent(), LoSHit, InstigatorActor))
+        {
+            continue;
+        }
+
         DamagedActors.Add(HitActor);
 
-        // Obliczamy odległość od epicentrum do krawędzi obiektu
-        const FVector TargetLocation = HitActor->GetActorLocation();
+        // Obliczamy odległość od epicentrum do punktu uderzenia
+        const FVector TargetLocation = LoSHit.ImpactPoint.IsZero() ? HitActor->GetActorLocation() : LoSHit.ImpactPoint;
         const float Distance = FVector::Dist(Origin, TargetLocation);
         if (Distance > Radius)
         {
@@ -170,7 +239,7 @@ void UKineticForceLibrary::ApplyExplosion(
         // 2. Aplikowanie odrzutu przez KnockbackComponent lub bezpośrednio na bryłę fizyczną Chaos
         if (BaseKnockbackForce > 0.0f)
         {
-            FVector KnockbackDir = (TargetLocation - Origin).GetSafeNormal();
+            FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
             if (KnockbackDir.IsNearlyZero())
             {
                 KnockbackDir = FVector::UpVector;
