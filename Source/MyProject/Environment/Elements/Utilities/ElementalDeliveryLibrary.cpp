@@ -39,13 +39,16 @@ bool UElementalDeliveryLibrary::ApplyPointHit(
 		return true;
 	}
 
-	// 3. Architektura niszczalna (np. drewniana ściana)
+	// 3. Architektura niszczalna (wyłącznie drewniane elementy ulegają spaleniu)
 	if (ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(TargetActor))
 	{
 		if (StatusType == EStatusEffectType::Burning && Structure->IsDestructible() && Structure->GetDamageableComponent())
 		{
-			Structure->GetDamageableComponent()->ApplyDamage(25.0f);
-			return true;
+			if (Structure->GetMaterialType_Implementation() == EPhysicalMaterialType::Wood)
+			{
+				Structure->GetDamageableComponent()->ApplyDamage(25.0f);
+				return true;
+			}
 		}
 	}
 
@@ -175,13 +178,17 @@ void UElementalDeliveryLibrary::ApplyRadialBurst(
 				StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
 			}
 
+			// Niszczenie wyłącznie struktur drewnianych przez falę ognia
 			if (StatusType == EStatusEffectType::Burning)
 			{
 				if (ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(HitActor))
 				{
 					if (Structure->IsDestructible() && Structure->GetDamageableComponent())
 					{
-						Structure->GetDamageableComponent()->ApplyDamage(BaseDamage);
+						if (Structure->GetMaterialType_Implementation() == EPhysicalMaterialType::Wood)
+						{
+							Structure->GetDamageableComponent()->ApplyDamage(BaseDamage);
+						}
 					}
 				}
 			}

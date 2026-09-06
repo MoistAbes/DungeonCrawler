@@ -124,7 +124,7 @@ protected:
 	UPROPERTY(Replicated)
 	float ZoneCreationTime = 0.0f;
 
-	UPROPERTY(Replicated)
+	UPROPERTY(ReplicatedUsing = OnRep_SurfaceNormal)
 	FVector SurfaceNormal = FVector(0.0f, 0.0f, 1.0f);
 
 	UPROPERTY(Replicated)
@@ -138,6 +138,9 @@ protected:
 
 	UFUNCTION()
 	void OnRep_ServerEndTime();
+
+	UFUNCTION()
+	void OnRep_SurfaceNormal();
 
 	// -------------------------------------------------------------------------
 	// Logika wewnętrzna

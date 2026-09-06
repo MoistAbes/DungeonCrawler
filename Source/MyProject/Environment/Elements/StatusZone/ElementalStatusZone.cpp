@@ -232,8 +232,8 @@ void AElementalStatusZone::ApplyElementalHit(EStatusEffectType IncomingStatus, f
 			return;
 		}
 
-		// Ugaszenie ognia przez wodę: strefa staje się mokra
-		if (Reaction.ReactionTag == FName(TEXT("Steam_Extinguish")))
+		// Ugaszenie ognia przez wodę: strefa staje się mokra (wspiera uderzenie wody w ogień jak i ognia w wodę)
+		if (Reaction.ReactionTag == FName(TEXT("Steam_Extinguish")) || Reaction.ReactionTag == FName(TEXT("Fire_Extinguished")))
 		{
 			StatusType = EStatusEffectType::Wet;
 			ServerEndTime = GetWorld()->GetTimeSeconds() + 8.0f;
@@ -243,8 +243,8 @@ void AElementalStatusZone::ApplyElementalHit(EStatusEffectType IncomingStatus, f
 			return;
 		}
 
-		// Elektryzacja: woda staje się naelektryzowana
-		if (Reaction.ReactionTag == FName(TEXT("Electrocution")))
+		// Elektryzacja: woda staje się naelektryzowana (Conductive_Shock z rejestru definicji)
+		if (Reaction.ReactionTag == FName(TEXT("Conductive_Shock")))
 		{
 			StatusType = EStatusEffectType::Electrified;
 			ServerEndTime = GetWorld()->GetTimeSeconds() + 6.0f;
@@ -397,14 +397,17 @@ void AElementalStatusZone::ProcessActiveOverlaps()
 			StatusComp->ApplyStatus(StatusType, 2.5f, ZoneInstigator.Get());
 		}
 
-		// Obrażenia pożaru dla niszczalnych drewnianych ścian i struktur
+		// Obrażenia pożaru dla niszczalnych drewnianych ścian i struktur (kamień/metal nie ulegają spaleniu)
 		if (StatusType == EStatusEffectType::Burning)
 		{
 			if (ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(Actor))
 			{
 				if (Structure->IsDestructible() && Structure->GetDamageableComponent())
 				{
-					Structure->GetDamageableComponent()->ApplyDamage(BurnDamagePerSecond);
+					if (Structure->GetMaterialType_Implementation() == EPhysicalMaterialType::Wood)
+					{
+						Structure->GetDamageableComponent()->ApplyDamage(BurnDamagePerSecond);
+					}
 				}
 			}
 		}
@@ -460,6 +463,15 @@ void AElementalStatusZone::OnRep_Radius()
 
 void AElementalStatusZone::OnRep_ServerEndTime()
 {
+}
+
+void AElementalStatusZone::OnRep_SurfaceNormal()
+{
+	if (ZoneDecal)
+	{
+		ZoneDecal->SetWorldRotation(FRotationMatrix::MakeFromX(-SurfaceNormal).Rotator());
+	}
+	RebuildPerimeterPoints();
 }
 
 void AElementalStatusZone::DrawDebugVisuals() const
