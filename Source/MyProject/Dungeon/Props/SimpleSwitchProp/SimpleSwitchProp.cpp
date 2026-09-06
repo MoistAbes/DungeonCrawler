@@ -1,15 +1,9 @@
 ﻿#include "SimpleSwitchProp.h"
-#include "Components/StaticMeshComponent.h"
 
 ASimpleSwitchProp::ASimpleSwitchProp()
 {
-	PrimaryActorTick.bCanEverTick = false;
-
-	MeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("MeshComponent"));
-	RootComponent = MeshComponent;
-
-	MeshComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
-	MeshComponent->SetGenerateOverlapEvents(false);
+	// Domyślnie dźwignia lub przełącznik ścienny jest metalowy
+	MaterialType = EPhysicalMaterialType::Metal;
 }
 
 void ASimpleSwitchProp::Interact(AActor* Interactor)
@@ -19,18 +13,23 @@ void ASimpleSwitchProp::Interact(AActor* Interactor)
 		return;
 	}
 
-	bIsActive = !bIsActive;
-
-	UE_LOG(LogTemp, Warning, TEXT("[SwitchEntity] Toggled state: %s by Interactor: %s"), 
-		bIsActive ? TEXT("ON") : TEXT("OFF"), 
-		Interactor ? *Interactor->GetName() : TEXT("Unknown"));
-
-	OnSwitchToggled.Broadcast(bIsActive, Interactor);
+	SetActiveState(!bIsActive, Interactor);
 }
 
 bool ASimpleSwitchProp::CanInteract(const AActor* Interactor) const
 {
-	return bCanBeUsed;
+	if (!bCanBeUsed)
+	{
+		return false;
+	}
+
+	// Jeśli przełącznik jest jednokierunkowy i został już przestawiony, blokujemy ponowną interakcję
+	if (!bAllowSwitchBack && bHasBeenTriggered)
+	{
+		return false;
+	}
+
+	return true;
 }
 
 FText ASimpleSwitchProp::GetInteractionPrompt(const AActor* Interactor) const
@@ -38,6 +37,11 @@ FText ASimpleSwitchProp::GetInteractionPrompt(const AActor* Interactor) const
 	if (!bCanBeUsed)
 	{
 		return NSLOCTEXT("SwitchPrompt", "Inactive", "Locked");
+	}
+
+	if (!bAllowSwitchBack && bHasBeenTriggered)
+	{
+		return NSLOCTEXT("SwitchPrompt", "Activated", "Already Used");
 	}
 
 	return bIsActive 
