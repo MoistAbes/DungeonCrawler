@@ -1,12 +1,10 @@
 ﻿#include "VolatileProp.h"
 
 #include "DrawDebugHelpers.h"
-#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
-#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
-#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
-#include "MyProject/Dungeon/Structure/Components/SurfaceStatusComponent/SurfaceStatusComponent.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalDeliveryLibrary.h"
 
 AVolatileProp::AVolatileProp()
 {
@@ -33,79 +31,43 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     bHasDetonated = true;
 
     const FVector DetonationCenter = GetActorLocation();
-    UWorld* World = GetWorld();
 
     // 1. Rozsyłamy niezawodne powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich połączonych graczy
     Multicast_PlayExplosionEffects(DetonationCenter);
-
-    // 2. Wymuszamy natychmiastowe wysłanie pakietu sieciowego zanim aktor zniknie ze świata gry
     ForceNetUpdate();
 
-    // 3. Fizyczna eksplozja kinetyczna (obrażenia i odrzut) - tylko serwer z uwzględnieniem LoS Occlusion
-    if (BaseDamage > 0.0f || (bApplyKnockback && KnockbackForce > 0.0f))
+    // 2. Eksplozja kinetyczna i statusowa z Line of Sight (Archetyp: Radial Burst)
+    const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
+    UElementalDeliveryLibrary::ApplyRadialBurst(
+        this,
+        DetonationCenter,
+        EffectRadius,
+        StatusToApply,
+        StatusDuration,
+        this,
+        BaseDamage,
+        AppliedKnockback);
+
+    // 3. Dla substancji ciekłych lub ognia tworzymy jednolitą strefę kałuży/pożaru (Archetyp: Status Zone)
+    if (UElementalChemistryLibrary::IsLiquidStatus(StatusToApply) || StatusToApply == EStatusEffectType::Burning)
     {
-        const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
-        UKineticForceLibrary::ApplyExplosion(
-            this,
-            DetonationCenter,
-            EffectRadius,
-            BaseDamage,
-            AppliedKnockback,
-            this,
-            nullptr,
-            false /* serwer nie musi rysować debuga, zrobi to multicast */);
-    }
-
-    // 4. Aplikowanie statusu żywiołowego w promieniu wybuchu z geometrycznym ekranowaniem (LoS Occlusion)
-    if (StatusToApply != EStatusEffectType::None && World)
-    {
-        TArray<FOverlapResult> Overlaps;
-        FCollisionShape SphereShape = FCollisionShape::MakeSphere(EffectRadius);
-        FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(VolatileStatusDetonation), false, this);
-
-        World->OverlapMultiByChannel(Overlaps, DetonationCenter, FQuat::Identity, ECC_Pawn, SphereShape, QueryParams);
-
-        TArray<FOverlapResult> DynamicOverlaps;
-        World->OverlapMultiByChannel(DynamicOverlaps, DetonationCenter, FQuat::Identity, ECC_WorldDynamic, SphereShape, QueryParams);
-        Overlaps.Append(DynamicOverlaps);
-
-        TArray<FOverlapResult> PhysicsOverlaps;
-        World->OverlapMultiByChannel(PhysicsOverlaps, DetonationCenter, FQuat::Identity, ECC_PhysicsBody, SphereShape, QueryParams);
-        Overlaps.Append(PhysicsOverlaps);
-
-        TArray<FOverlapResult> StaticOverlaps;
-        World->OverlapMultiByChannel(StaticOverlaps, DetonationCenter, FQuat::Identity, ECC_WorldStatic, SphereShape, QueryParams);
-        Overlaps.Append(StaticOverlaps);
-
-        TSet<AActor*> AffectedActors;
-        for (const FOverlapResult& Overlap : Overlaps)
+        FVector GroundLocation = DetonationCenter;
+        FHitResult FloorHit;
+        FCollisionQueryParams FloorParams(SCENE_QUERY_STAT(HazardFloorTrace), false, this);
+        if (GetWorld() && GetWorld()->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, 500.0f), ECC_Visibility, FloorParams))
         {
-            AActor* HitActor = Overlap.GetActor();
-            if (!HitActor || HitActor == this || AffectedActors.Contains(HitActor))
-            {
-                continue;
-            }
-
-            // Geometryczne ekranowanie przeszkodami (Line of Sight)
-            FHitResult LoSHit;
-            if (!UKineticForceLibrary::HasExplosionLineOfSight(World, DetonationCenter, HitActor, Overlap.GetComponent(), LoSHit, this))
-            {
-                continue; // Obiekt w cieniu wybuchu za ścianą/posadzką
-            }
-
-            AffectedActors.Add(HitActor);
-
-            // Jeśli to modularna architektura lochu - aplikujemy precyzyjną plamę powierzchniową
-            if (USurfaceStatusComponent* SurfaceComp = HitActor->FindComponentByClass<USurfaceStatusComponent>())
-            {
-                SurfaceComp->ApplySurfaceStatus(StatusToApply, StatusDuration, LoSHit.ImpactPoint, LoSHit.ImpactNormal, 140.0f, this);
-            }
-            // Standardowy obiekt, gracz lub prop - status całościowy
-            else if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
-            {
-                StatusComp->ApplyStatus(StatusToApply, StatusDuration, this);
-            }
+            GroundLocation = FloorHit.ImpactPoint + FVector(0.0f, 0.0f, 3.0f);
         }
+
+        UElementalDeliveryLibrary::SpawnStatusZone(
+            this,
+            GroundLocation,
+            EffectRadius,
+            StatusToApply,
+            StatusDuration,
+            EStatusZoneShapeMode::SurfaceDisk,
+            FVector::UpVector,
+            this);
     }
 
     UE_LOG(LogTemp, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Status: %s)"),

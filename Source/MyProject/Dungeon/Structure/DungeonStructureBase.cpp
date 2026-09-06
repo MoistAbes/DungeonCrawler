@@ -7,7 +7,6 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Dungeon/Structure/Components/SurfaceStatusComponent/SurfaceStatusComponent.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
@@ -28,7 +27,6 @@ ADungeonStructureBase::ADungeonStructureBase()
 	StructureMesh->CanCharacterStepUpOn = ECB_Yes;
 
 	DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
-	SurfaceStatusComponent = CreateDefaultSubobject<USurfaceStatusComponent>(TEXT("SurfaceStatusComponent"));
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;

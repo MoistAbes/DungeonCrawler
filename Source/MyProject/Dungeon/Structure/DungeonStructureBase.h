@@ -8,12 +8,11 @@
 
 class UStaticMeshComponent;
 class UDamageableComponent;
-class USurfaceStatusComponent;
 
 /**
  * Bazowy aktor dla modularnych elementów architektury lochu (ściany, podłogi, sufity, filary).
  * Domyślnie jest stabilnym elementem statycznym (bez fizyki), ale może być zniszczalny.
- * Posiada UDamageableComponent oraz USurfaceStatusComponent do obsługi lokalnych plam żywiołowych na powierzchni.
+ * Posiada UDamageableComponent do obsługi punktów wytrzymałości i zniszczeń kinetycznych/żywiołowych.
  */
 UCLASS(Abstract)
 class MYPROJECT_API ADungeonStructureBase : public AActor, public IMaterialProviderInterface
@@ -40,10 +39,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
-	/** Zwraca komponent obsługujący lokalne plamy żywiołowe na powierzchni struktury */
-	UFUNCTION(BlueprintPure, Category = "Custom|Components")
-	USurfaceStatusComponent* GetSurfaceStatusComponent() const { return SurfaceStatusComponent; }
-
 protected:
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
@@ -59,10 +54,6 @@ protected:
 	/** Komponent wytrzymałości fizycznej ściany */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
-
-	/** Komponent zarządzający lokalnymi plamami żywiołów na powierzchni (np. plama oleju, ogień) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-	TObjectPtr<USurfaceStatusComponent> SurfaceStatusComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja
