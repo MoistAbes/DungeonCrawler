@@ -100,6 +100,14 @@ protected:
 	// Konfiguracja
 	// -------------------------------------------------------------------------
 
+	/** Maksymalna grubość/wysokość strefy cieczy od powierzchni (np. kałuża wody/oleju ma 35 cm) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Zone", meta = (ClampMin = "5.0"))
+	float LiquidSurfaceHeight = 35.0f;
+
+	/** Maksymalna wysokość płomieni od powierzchni dla strefy ognia (płomienie unoszą się wyżej, np. 85 cm) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Zone", meta = (ClampMin = "5.0"))
+	float FireSurfaceHeight = 85.0f;
+
 	/** Obrażenia na sekundę zadawane postaciom i niszczalnym drewnianym ścianom przez strefę Burning */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Damage", meta = (ClampMin = "0.0"))
 	float BurnDamagePerSecond = 10.0f;

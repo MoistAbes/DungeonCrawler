@@ -34,6 +34,8 @@ AElementalStatusZone::AElementalStatusZone()
 
 	StatusType = EStatusEffectType::None;
 	Radius = 300.0f;
+	LiquidSurfaceHeight = 35.0f;
+	FireSurfaceHeight = 85.0f;
 	BurnDamagePerSecond = 10.0f;
 	bDrawDebugZone = true;
 	SurfaceNormal = FVector::UpVector;
@@ -301,12 +303,46 @@ bool AElementalStatusZone::IsActorEligibleForZoneEffect(AActor* TargetActor, UPr
 
 	const FVector ZoneCenter = GetActorLocation();
 
-	// 1. Ochrona przed przenikaniem przez ściany w trybie powierzchniowym (Half-Space Check)
+	// 1. Ochrona przed przenikaniem przez ściany i lotem w powietrzu w trybie powierzchniowym (Surface Disk Thickness Check)
 	if (ShapeMode == EStatusZoneShapeMode::SurfaceDisk)
 	{
-		const FVector TargetLoc = TargetActor->GetActorLocation();
-		const float Projection = FVector::DotProduct(TargetLoc - ZoneCenter, SurfaceNormal);
-		if (Projection < -15.0f)
+		FBoxSphereBounds Bounds;
+		if (TargetComp)
+		{
+			Bounds = TargetComp->Bounds;
+		}
+		else if (const UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(TargetActor->GetRootComponent()))
+		{
+			Bounds = RootPrim->Bounds;
+		}
+		else
+		{
+			Bounds = TargetActor->GetComponentsBoundingBox(true);
+		}
+
+		const FVector BoundsOrigin = Bounds.BoxExtent.IsNearlyZero() ? TargetActor->GetActorLocation() : Bounds.Origin;
+		const FVector Extent = Bounds.BoxExtent;
+
+		// Rzut połowy wymiarów bryły na wektor normalny powierzchni
+		const float ProjectedHalfExtent = FMath::Abs(SurfaceNormal.X) * Extent.X +
+		                                  FMath::Abs(SurfaceNormal.Y) * Extent.Y +
+		                                  FMath::Abs(SurfaceNormal.Z) * Extent.Z;
+
+		const float DistCenter = FVector::DotProduct(BoundsOrigin - ZoneCenter, SurfaceNormal);
+		const float MinDist = DistCenter - ProjectedHalfExtent;
+		const float MaxDist = DistCenter + ProjectedHalfExtent;
+
+		// Cel znajduje się całkowicie za ścianą lub pod posadzką
+		if (MaxDist < -15.0f)
+		{
+			return false;
+		}
+
+		// Maksymalna grubość/wysokość strefy od płaszczyzny
+		const float MaxAllowedHeight = (StatusType == EStatusEffectType::Burning) ? FireSurfaceHeight : LiquidSurfaceHeight;
+
+		// Cel znajduje się w całości powyżej powierzchni (np. rzucony prop lecący w powietrzu, skaczący gracz)
+		if (MinDist > MaxAllowedHeight)
 		{
 			return false;
 		}
@@ -433,7 +469,7 @@ void AElementalStatusZone::Tick(float DeltaTime)
 			return;
 		}
 
-		if (CurrentTime - LastTickTime >= 0.75f)
+		if (CurrentTime - LastTickTime >= 0.25f)
 		{
 			LastTickTime = CurrentTime;
 			ProcessActiveOverlaps();
