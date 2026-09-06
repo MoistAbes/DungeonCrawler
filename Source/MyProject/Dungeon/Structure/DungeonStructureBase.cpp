@@ -7,7 +7,7 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Dungeon/Structure/Components/SurfaceStatusComponent/SurfaceStatusComponent.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
@@ -28,7 +28,7 @@ ADungeonStructureBase::ADungeonStructureBase()
 	StructureMesh->CanCharacterStepUpOn = ECB_Yes;
 
 	DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
-	StatusEffectComponent = CreateDefaultSubobject<UStatusEffectComponent>(TEXT("StatusEffectComponent"));
+	SurfaceStatusComponent = CreateDefaultSubobject<USurfaceStatusComponent>(TEXT("SurfaceStatusComponent"));
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;
@@ -138,11 +138,22 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 					// Przekazujemy pęd z redukcją oporu przebicia (Tylko Serwer zarządza LaunchCharacter)
 					const FVector CurrentVel = Character->GetVelocity();
 					Character->LaunchCharacter(CurrentVel * PunchThroughVelocityRetention, true, true);
+
+					UE_LOG(LogTemp, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
+						*Character->GetName(), *Character->GetVelocity().ToString());
 				}
 			}
 		}
 	}
 
-	// 3. Ostateczne usunięcie aktora - serwer usunie obiekt ze świata, a silnik zreplikuje zniszczenie do klientów
-	Destroy();
+	// 3. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
+	if (DestroyedDebrisClass && GetWorld())
+	{
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		GetWorld()->SpawnActor<AActor>(DestroyedDebrisClass, GetActorTransform(), SpawnParams);
+	}
+
+	// 4. Po krótkiej chwili (na dokończenie ewentualnych replikacji) niszczymy aktora
+	SetLifeSpan(0.1f);
 }

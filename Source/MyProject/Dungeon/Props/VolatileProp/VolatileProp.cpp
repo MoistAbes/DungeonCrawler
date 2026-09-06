@@ -6,6 +6,7 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Dungeon/Structure/Components/SurfaceStatusComponent/SurfaceStatusComponent.h"
 
 AVolatileProp::AVolatileProp()
 {
@@ -94,7 +95,13 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
 
             AffectedActors.Add(HitActor);
 
-            if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
+            // Jeśli to modularna architektura lochu - aplikujemy precyzyjną plamę powierzchniową
+            if (USurfaceStatusComponent* SurfaceComp = HitActor->FindComponentByClass<USurfaceStatusComponent>())
+            {
+                SurfaceComp->ApplySurfaceStatus(StatusToApply, StatusDuration, LoSHit.ImpactPoint, LoSHit.ImpactNormal, 140.0f, this);
+            }
+            // Standardowy obiekt, gracz lub prop - status całościowy
+            else if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
             {
                 StatusComp->ApplyStatus(StatusToApply, StatusDuration, this);
             }
@@ -110,7 +117,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
 void AVolatileProp::Multicast_PlayExplosionEffects_Implementation(const FVector& DetonationCenter)
 {
     // Odtwarzane u wszystkich połączonych klientów oraz na serwerze
-    if (bDrawDebugRadius && GetWorld())\
+    if (bDrawDebugRadius && GetWorld())
     {
         DrawDebugSphere(GetWorld(), DetonationCenter, EffectRadius, 24, FColor::Orange, false, 2.0f, 0, 1.5f);
     }

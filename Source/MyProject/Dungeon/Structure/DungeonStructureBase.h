@@ -8,12 +8,12 @@
 
 class UStaticMeshComponent;
 class UDamageableComponent;
-class UStatusEffectComponent;
+class USurfaceStatusComponent;
 
 /**
  * Bazowy aktor dla modularnych elementów architektury lochu (ściany, podłogi, sufity, filary).
  * Domyślnie jest stabilnym elementem statycznym (bez fizyki), ale może być zniszczalny.
- * Posiada UDamageableComponent oraz UStatusEffectComponent do reakcji na żywioły i DoT.
+ * Posiada UDamageableComponent oraz USurfaceStatusComponent do obsługi lokalnych plam żywiołowych na powierzchni.
  */
 UCLASS(Abstract)
 class MYPROJECT_API ADungeonStructureBase : public AActor, public IMaterialProviderInterface
@@ -40,9 +40,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
-	/** Zwraca komponent obsługujący statusy żywiołowe na strukturze */
+	/** Zwraca komponent obsługujący lokalne plamy żywiołowe na powierzchni struktury */
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
-	UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
+	USurfaceStatusComponent* GetSurfaceStatusComponent() const { return SurfaceStatusComponent; }
 
 protected:
 	virtual void PostInitializeComponents() override;
@@ -60,9 +60,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
 
-	/** Komponent obsługujący stany żywiołowe struktury (np. podpalenie drewnianej ściany) */
+	/** Komponent zarządzający lokalnymi plamami żywiołów na powierzchni (np. plama oleju, ogień) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-	TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
+	TObjectPtr<USurfaceStatusComponent> SurfaceStatusComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja
