@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "PlayerCharacter.generated.h"
 
@@ -18,7 +19,7 @@ class UStatusEffectComponent;
 struct FInputActionValue;
 
 UCLASS(Abstract)
-class MYPROJECT_API APlayerCharacter : public ACharacter, public IMaterialProviderInterface
+class MYPROJECT_API APlayerCharacter : public ACharacter, public IMaterialProviderInterface, public ICarryAnchorProviderInterface
 {
     GENERATED_BODY()
 
@@ -27,6 +28,12 @@ public:
 
     // --- IMaterialProviderInterface ---
     virtual EPhysicalMaterialType GetMaterialType_Implementation() const override;
+
+    // --- ICarryAnchorProviderInterface ---
+    virtual USceneComponent* GetHoldAnchorComponent() const override { return HoldAnchorComponent; }
+    virtual float GetCarryEyeHeightOffset() const override { return BaseEyeHeightOffset; }
+    virtual float GetMaxPushableMass() const override { return MaxPushableMass; }
+    virtual float GetPlayerPushForce() const override { return PlayerPushForce; }
 
     // -------------------------------------------------------------------------
     // Components

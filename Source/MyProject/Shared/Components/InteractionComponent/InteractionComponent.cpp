@@ -5,7 +5,7 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
-#include "MyProject/Player/PlayerCharacter.h"
+#include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/IInteractableInterface.h"
 
@@ -103,8 +103,11 @@ void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
     APawn* PawnOwner = Cast<APawn>(GetOwner());
     if (!PawnOwner) return;
 
-    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(PawnOwner);
-    if (!PlayerChar || !PlayerChar->HoldAnchorComponent) return;
+    ICarryAnchorProviderInterface* CarryProvider = Cast<ICarryAnchorProviderInterface>(PawnOwner);
+    if (!CarryProvider) return;
+
+    USceneComponent* HoldAnchor = CarryProvider->GetHoldAnchorComponent();
+    if (!HoldAnchor) return;
 
     // 1. Pobieramy kąt patrzenia (Aim Pitch)
     float AimPitch = 0.0f;
@@ -125,13 +128,13 @@ void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
     }
 
     // 2. Pozycja relatywna kotwicy wyliczona z czystej matematyki
-    const FVector TargetRelLoc = CalculateHoldAnchorRelativeOffset(AimPitch, PlayerChar->BaseEyeHeightOffset);
+    const FVector TargetRelLoc = CalculateHoldAnchorRelativeOffset(AimPitch, CarryProvider->GetCarryEyeHeightOffset());
 
     // 3. Płynna interpolacja pozycji kotwicy
-    const FVector CurrentRelLoc = PlayerChar->HoldAnchorComponent->GetRelativeLocation();
+    const FVector CurrentRelLoc = HoldAnchor->GetRelativeLocation();
     const FVector NewRelLoc = FMath::VInterpTo(CurrentRelLoc, TargetRelLoc, DeltaTime, 20.0f);
 
-    PlayerChar->HoldAnchorComponent->SetRelativeLocation(NewRelLoc);
+    HoldAnchor->SetRelativeLocation(NewRelLoc);
 }
 
 void UInteractionComponent::UpdateSwingVelocity(float DeltaTime)
@@ -156,15 +159,16 @@ void UInteractionComponent::UpdateSwingVelocity(float DeltaTime)
     PreviousCameraRotation = CamRot;
 }
 
-void UInteractionComponent::HandleSweepCollision(const FHitResult& SweepHit, APlayerCharacter* PlayerChar)
+void UInteractionComponent::HandleSweepCollision(const FHitResult& SweepHit, ICarryAnchorProviderInterface* CarryProvider, AActor* CarrierActor)
 {
-    if (!SweepHit.bBlockingHit || !PlayerChar) return;
+    if (!SweepHit.bBlockingHit || !CarryProvider || !CarrierActor) return;
 
     UPrimitiveComponent* HitComp = SweepHit.GetComponent();
     if (!HitComp || !HitComp->IsSimulatingPhysics()) return;
 
     const float HitMass = HitComp->GetMass();
-    if (HitMass <= PlayerChar->MaxPushableMass)
+    const float MaxMass = CarryProvider->GetMaxPushableMass();
+    if (HitMass <= MaxMass)
     {
         // Obiekt mieści się w limicie udźwigu gracza - przekazujemy fizyczną siłę pchania
         FVector PushDir = -SweepHit.ImpactNormal;
@@ -173,21 +177,21 @@ void UInteractionComponent::HandleSweepCollision(const FHitResult& SweepHit, APl
 
         if (PushDir.IsNearlyZero())
         {
-            PushDir = PlayerChar->GetActorForwardVector();
+            PushDir = CarrierActor->GetActorForwardVector();
         }
 
         HitComp->WakeRigidBody();
-        HitComp->AddForceAtLocation(PushDir * PlayerChar->PlayerPushForce, SweepHit.ImpactPoint, SweepHit.BoneName);
+        HitComp->AddForceAtLocation(PushDir * CarryProvider->GetPlayerPushForce(), SweepHit.ImpactPoint, SweepHit.BoneName);
     }
     else
     {
-        StopHeavyPhysicsObject(HitComp, PlayerChar->MaxPushableMass);
+        StopHeavyPhysicsObject(HitComp, MaxMass);
     }
 }
 
-void UInteractionComponent::SuppressOverlappingHeavyPhysics(APlayerCharacter* PlayerChar)
+void UInteractionComponent::SuppressOverlappingHeavyPhysics(ICarryAnchorProviderInterface* CarryProvider)
 {
-    if (!PlayerChar || !IsValid(GrabbedActor)) return;
+    if (!CarryProvider || !IsValid(GrabbedActor)) return;
 
     UPrimitiveComponent* PropPrim = GrabbedComponent ? GrabbedComponent.Get() : Cast<UPrimitiveComponent>(GrabbedActor->GetRootComponent());
     if (!PropPrim) return;
@@ -195,9 +199,10 @@ void UInteractionComponent::SuppressOverlappingHeavyPhysics(APlayerCharacter* Pl
     TArray<UPrimitiveComponent*> Overlaps;
     PropPrim->GetOverlappingComponents(Overlaps);
 
+    const float MaxMass = CarryProvider->GetMaxPushableMass();
     for (UPrimitiveComponent* OverlapComp : Overlaps)
     {
-        StopHeavyPhysicsObject(OverlapComp, PlayerChar->MaxPushableMass);
+        StopHeavyPhysicsObject(OverlapComp, MaxMass);
     }
 }
 
@@ -223,11 +228,15 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
 {
     if (!IsValid(GrabbedActor)) return;
 
-    APlayerCharacter* PlayerChar = Cast<APlayerCharacter>(GetOwner());
-    if (!PlayerChar || !PlayerChar->HoldAnchorComponent) return;
+    AActor* OwnerActor = GetOwner();
+    ICarryAnchorProviderInterface* CarryProvider = Cast<ICarryAnchorProviderInterface>(OwnerActor);
+    if (!CarryProvider) return;
 
-    const FVector TargetLocation = PlayerChar->HoldAnchorComponent->GetComponentLocation();
-    const FRotator TargetRotation = PlayerChar->HoldAnchorComponent->GetComponentRotation();
+    USceneComponent* HoldAnchor = CarryProvider->GetHoldAnchorComponent();
+    if (!HoldAnchor) return;
+
+    const FVector TargetLocation = HoldAnchor->GetComponentLocation();
+    const FRotator TargetRotation = HoldAnchor->GetComponentRotation();
 
     // Płynna interpolacja do punktu docelowego (daje naturalne wrażenie masy i płynność ruchu)
     const FVector CurrentLocation = GrabbedActor->GetActorLocation();
@@ -244,10 +253,10 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     UpdateSwingVelocity(DeltaTime);
 
     // 3. Reakcja na napotkane przeszkody fizyczne
-    HandleSweepCollision(SweepHit, PlayerChar);
+    HandleSweepCollision(SweepHit, CarryProvider, OwnerActor);
 
     // 4. Zabezpieczenie przed rotacją kamery i szturnięciami od boku
-    SuppressOverlappingHeavyPhysics(PlayerChar);
+    SuppressOverlappingHeavyPhysics(CarryProvider);
 
     // 5. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
     CheckGripBreakDistance(TargetLocation);

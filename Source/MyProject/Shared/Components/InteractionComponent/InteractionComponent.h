@@ -4,7 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "InteractionComponent.generated.h"
 
-class APlayerCharacter;
+class ICarryAnchorProviderInterface;
 
 /**
  * Formalna maszyna stanów niesienia i interakcji z obiektami fizycznymi.
@@ -145,7 +145,7 @@ private:
     void UpdateHoldAnchorTransform(float DeltaTime);
     void UpdateCarriedPropTransform(float DeltaTime);
     void UpdateSwingVelocity(float DeltaTime);
-    void HandleSweepCollision(const FHitResult& SweepHit, APlayerCharacter* PlayerChar);
-    void SuppressOverlappingHeavyPhysics(APlayerCharacter* PlayerChar);
+    void HandleSweepCollision(const FHitResult& SweepHit, ICarryAnchorProviderInterface* CarryProvider, AActor* CarrierActor);
+    void SuppressOverlappingHeavyPhysics(ICarryAnchorProviderInterface* CarryProvider);
     bool CheckGripBreakDistance(const FVector& TargetLocation);
 };
