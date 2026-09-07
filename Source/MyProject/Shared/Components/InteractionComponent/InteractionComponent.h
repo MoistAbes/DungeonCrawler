@@ -4,6 +4,27 @@
 #include "Components/ActorComponent.h"
 #include "InteractionComponent.generated.h"
 
+class APlayerCharacter;
+
+/**
+ * Formalna maszyna stanów niesienia i interakcji z obiektami fizycznymi.
+ */
+UENUM(BlueprintType)
+enum class ECarryState : uint8
+{
+    /** Brak interakcji, postać ma wolne ręce */
+    None            UMETA(DisplayName = "None"),
+
+    /** Klient wysłał żądanie podniesienia i oczekuje na autorytatywną zgodę serwera */
+    RequestingGrab  UMETA(DisplayName = "Requesting Grab"),
+
+    /** Obiekt jest aktywnie niesiony w rękach (prowadzony kinematycznie) */
+    Carrying        UMETA(DisplayName = "Carrying"),
+
+    /** W trakcie zwalniania/upuszczania lub rzutu */
+    Releasing       UMETA(DisplayName = "Releasing")
+};
+
 /**
  * Serwis domenowy odpowiedzialny za wykrywanie, chwytanie i rzucanie obiektów fizycznych
  * oraz interakcję logiczną (przełączniki, dźwignie, mechanizmy).
@@ -21,15 +42,19 @@ public:
 
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-    /** Główna akcja: podnieś lub upuść obiekt pod celownikiem / wektorem wzroku */
+    /** Główna akcja: podnieś lub upuść obiekt pod celownikiem / rzuć zamachem myszką (Klawisz E) */
     void PrimaryInteract();
 
-    /** Dedykowana akcja rzutu na wprost (LPM) */
+    /** Dedykowana akcja autorytatywnego rzutu na wprost (LPM) */
     void ThrowCurrentProp();
 
     /** Powiadamia komponent o podpięciu lub odpięciu niesionego propa (dla włączenia/wyłączenia On-Demand Tick) */
     void NotifyCarriedPropAttached(AActor* InProp);
     void NotifyCarriedPropDetached();
+
+    /** Zwraca aktualny stan maszyny stanów niesienia */
+    UFUNCTION(BlueprintPure, Category = "Custom|State")
+    ECarryState GetCarryState() const { return CarryState; }
 
 protected:
     /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
@@ -60,19 +85,35 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "500.0", ClampMax = "5000.0"))
     float MaxSwingThrowSpeed = 2200.0f;
 
+    /** Próg prędkości (cm/s), poniżej którego sztuczne mikroruchy ciężkich fizycznych propów są wygaszane */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.0"))
+    float VelocityStopThreshold = 60.0f;
+
+    /** Aktualny stan interakcji */
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|State")
+    ECarryState CarryState = ECarryState::None;
+
     // --- RPCs Sieciowe (Zarządzane przez Serwer) ---
 
     /** Żądanie klienta do serwera o podniesienie wskazanego propa */
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_RequestGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
 
-    /** Żądanie klienta do serwera o upuszczenie lub rzucenie trzymanym propem */
+    /** Żądanie klienta do serwera o dedykowany rzut na wprost (LPM) – wektor w 100% liczy serwer */
     UFUNCTION(Server, Reliable, WithValidation)
-    void Server_RequestReleaseOrThrow(bool bIsThrow, const FVector_NetQuantize& LaunchVelocity);
+    void Server_RequestForwardThrow();
+
+    /** Żądanie klienta do serwera o upuszczenie pod nogi (zero prędkości) LUB rzut pędem zamachu myszką */
+    UFUNCTION(Server, Reliable, WithValidation)
+    void Server_RequestDropOrSwing(const FVector_NetQuantize& SwingVelocity);
 
     /** Żądanie interakcji logicznej (dźwignia, przełącznik) na serwerze */
     UFUNCTION(Server, Reliable, WithValidation)
     void Server_RequestInteract(AActor* TargetActor);
+
+    /** Powiadomienie klienta przez serwer o odrzuceniu próby podniesienia (brak LoS, za daleko, obiekt zajęty) */
+    UFUNCTION(Client, Reliable)
+    void Client_GrabDenied();
 
 private:
     /** Aktualnie trzymany aktor */
@@ -89,13 +130,22 @@ private:
     /** Wyliczona prędkość kątowa zamachu myszką na promieniu trzymania propa (cm/s) */
     FVector TrackedCameraSwingVelocity = FVector::ZeroVector;
 
-    // --- Metody pomocnicze ---
+    // --- Metody pomocnicze ogólne ---
     void GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const;
     bool PerformTrace(FHitResult& OutHit) const;
+    bool CanGrabServer(const AActor* TargetActor, const UPrimitiveComponent* ComponentToGrab) const;
+    FVector CalculateServerThrowVelocity() const;
     void ExecuteGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab);
     void ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity);
-    void UpdateHoldAnchorTransform(float DeltaTime);
-    void UpdateCarriedPropTransform(float DeltaTime);
     void ResetGrabState();
     void StopHeavyPhysicsObject(UPrimitiveComponent* Comp, float MaxPushableMass);
+
+    // --- Metody pomocnicze kinematyki i fizyki niesionego obiektu ---
+    FVector CalculateHoldAnchorRelativeOffset(float AimPitch, float BaseEyeHeightOffset) const;
+    void UpdateHoldAnchorTransform(float DeltaTime);
+    void UpdateCarriedPropTransform(float DeltaTime);
+    void UpdateSwingVelocity(float DeltaTime);
+    void HandleSweepCollision(const FHitResult& SweepHit, APlayerCharacter* PlayerChar);
+    void SuppressOverlappingHeavyPhysics(APlayerCharacter* PlayerChar);
+    bool CheckGripBreakDistance(const FVector& TargetLocation);
 };
