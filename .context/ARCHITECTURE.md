@@ -1,212 +1,297 @@
-# Instrukcja Systemowa: Unreal Engine 5 C++ (Java & Enterprise Standards)
+# Architektura Systemowa i Standardy Projektowe: Dungeon Crawler Co-op
 
-Jesteś doświadczonym architektem oprogramowania Java/Spring Boot oraz ekspertem Unreal Engine 5 C++. Twoim celem jest projektowanie i implementowanie systemów gamedevowych z zachowaniem najwyższych standardów inżynierii oprogramowania, czystego kodu oraz wzorców projektowych. Wszystkie koncepcje silnika tłumaczysz przez pryzmat terminologii backendowej (Spring, REST, relacje bazodanowe, Event-Driven Architecture).
+Dokument stanowi **centralny i nadrzędny dokument architektoniczny projektu** *Dungeon Crawler* (Unreal Engine 5.8 C++, `MYPROJECT_API`).
+Definiuje wzorce inżynierii oprogramowania, modularność domeny, prawa fizyki i kinetyki, silnik chemii żywiołów, autorytatywną warstwę sieciową Co-op (1–6 graczy) oraz specyfikację struktur lochu zgodną z [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md) i [CORE_COOP_PRINCIPLES.md](file:///E:/UE_PROJECTS/MyProject/.context/CORE_COOP_PRINCIPLES.md).
 
 ---
 
-## 1. Architektura i Wzorce Projektowe (Java/Spring Style)
+## 1. Paradygmat Architektoniczny (Java/Spring & Clean Architecture Standards)
 
-* **Single Responsibility Principle (Kompozycja zamiast God Object):**
-  * Klasy `AActor` i `APawn`/`ACharacter` pełnią wyłącznie rolę punktów wejścia / agregatorów (odpowiednik `@RestController`).
-  * Cała logika domenowa (zdrowie, interakcja, walka, fizyka) musi być zamykana w dedykowanych komponentach `UActorComponent` (odpowiednik `@Service`).
-* **Dependency Inversion & Loose Coupling:**
-  * Komunikacja między odrębnymi obiektami w świecie odbywa się wyłącznie przez interfejsy `UInterface` / `IInterface` (odpowiednik interfejsów Javowych).
+Projekt implementuje rygorystyczne wzorce czystego kodu inspirowane wzorcami backendowymi (Java/Spring Boot, Event-Driven Architecture, REST/RPC):
+
+* **Single Responsibility Principle (Kompozycja ponad Dziedziczenie):**
+  * Klasy `AActor` oraz `ACharacter` pełnią wyłącznie rolę punktów styku / orkiestratorów (odpowiednik `@RestController`).
+  * Wszelka logika domenowa (integralność fizyczna, chemia żywiołów, interakcje, mechanizmy) jest hermetyzowana w dedykowanych komponentach `UActorComponent` (odpowiednik `@Service`).
+* **Dependency Inversion & Loose Coupling (Architektura Interfejsowa):**
+  * Komunikacja międzydomenowa i manipulacja obiektami w świecie gry odbywa się **wyłącznie za pośrednictwem interfejsów `UInterface` / `IInterface`**.
   * Całkowity zakaz twardego rzutowania (`Cast<T>`) w kodzie domenowym.
-* **Architektura Sterowana Zdarzeniami (Event-Driven):**
-  * Komunikacja w górę (komponent -> UI/Animacje/Efekty) realizowana jest przez delegaty dynamiczne (`DECLARE_DYNAMIC_MULTICAST_DELEGATE` – odpowiednik Spring Application Events).
-* **Separacja Logiki od Prezentacji (MVC / Layered Pattern):**
-  * **C++ (Backend / Domena):** Czysta logika biznesowa, matematyka, autorytatywna obsługa sieci, struktury danych (`USTRUCT`), serwisy i interfejsy.
-  * **Blueprints (Frontend / Widok / Prefaby):** Wyłącznie klasy pochodne służące do spinania assetów wizualnych (meshe, animacje, materiały, dźwięki, widgety). Obowiązuje zakaz implementowania złożonej logiki biznesowej w Blueprintach.
+  * Kluczowe kontrakty projektu:
+    - [`IMaterialProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MaterialProviderInterface.h) – tożsamość materiałowa (`Stone`, `Wood`, `Metal`, `Glass`, `Flesh`).
+    - [`IInteractableInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IInteractableInterface.h) – obsługa interakcji klawiszem `E` / AI.
+    - [`IGrabbableInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IGrabbableInterface.h) – kontrakt manipulacji propami fizycznymi.
+    - [`IMechanismReceiverInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MechanismReceiverInterface.h) – odbiór sygnałów logicznych ON/OFF z przełączników i płyt naciskowych.
+    - [`ICarryAnchorProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h) – odseparowanie logiki trzymania propa od konkretnej klasy postaci.
+    - [`IStatProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/StatProviderInterface.h) – ujednolicone zapytania o stan HP/durability dla UI.
+* **Architektura Sterowana Zdarzeniami (Event-Driven Architecture):**
+  * Komunikacja komponent -> UI / Prezentacja / Efekty VFX realizowana jest przez dynamiczne delegaty multicastowe (`DECLARE_DYNAMIC_MULTICAST_DELEGATE` – odpowiednik Spring Application Events).
+* **Ścisła Separacja Domeny od Prezentacji (MVC / Layered Pattern):**
+  * **C++ (Backend / Domena):** Czysta logika biznesowa, matematyka kinetyczna, autorytatywny kod sieciowy, ewaluacja chemiczna, struktury `USTRUCT`, komponenty i interfejsy.
+  * **Blueprints (Frontend / Widok / Prefaby):** Wyłącznie klasy pochodne służące do spinania assetów wizualnych (Static Meshe, animacje, materiały, dźwięki, widgety). Obowiązuje zakaz programowania logiki biznesowej w Blueprintach.
 * **Data-Driven Configuration:**
-  * Parametry fizyczne, mnożniki i progi definiowane są przez struktury konfiguracyjne (`UPROPERTY(EditDefaultsOnly)` – odpowiednik `@ConfigurationProperties`), eliminując sztywne rozgałęzienia warunkowe (`if-ology on type`).
+  * Parametry fizyczne, mnożniki i progi definiowane są w strukturach konfiguracyjnych (`UPROPERTY(EditDefaultsOnly)` – odpowiednik `@ConfigurationProperties`), eliminując sztywne if-ologie.
 
 ---
 
-## 2. Standardy Integracji Fizyki i Kinematyki (Chaos Physics & Event-Driven Movement)
+## 2. Mapa Architektury Kodu (`Source/MyProject/`)
 
-* **Zero-Tick Velocity Drive (Napęd Różnicowy):**
-  * Ruch fizycznego gracza realizowany w 100% przez wektorowe przyspieszenie różnicowe ($F = (V_{\text{target}} - V_{\text{current}}) \cdot K$) w handlerach Enhanced Input bez ciągłego `Tick()`.
-  * Hamowanie wyłącznie w płaszczyźnie poziomej ($XY$) – całkowity zakaz sztucznego dławienia grawitacji na osi $Z$ przez globalny `LinearDamping`.
-* **Trójwymiarowa Detekcja Podłoża (Sphere Sweep):**
-  * Bezwzględny zakaz jednopunktowych `LineTrace` dla detekcji uziemienia. Używamy sferycznego testu objętościowego `SweepSingleByChannel` o promieniu podstawy kapsuły oraz weryfikacji normalnej kąta nachylenia (`ImpactNormal.Z > 0.5f`), zapobiegając blokadom na krawędziach platform.
-* **Ujednolicone Obliczanie Energii Kinetycznej:**
-  * Odrzucenie surowych impulsów `NormalImpulse` na rzecz czystej prędkości względnej ($v_{\text{rel}}$ w $\text{cm/s}$) rzutowanej na wektor normalnej zderzenia (`DotProduct`).
-* **Separacja Kinematyki od Ciał Sztywnych:**
-  * Obiekty fizyczne (`Simulate Physics`) muszą blokować schodkowanie postaci (`CanCharacterStepUpOn = ECB_No`) oraz posiadać `FWalkableSlopeOverride`, zapobiegając konfliktom pozycjonowania i eksplozjom sił separujących (*Depenetration Explosions*).
-* **Stabilizacja Ciał Ciężkich:**
-  * Zastosowanie tłumienia kątowego (`AngularDamping >= 2.0f`, dla gracza `100.0f` z blokadą osi $X/Y/Z$) oraz ciągłej detekcji kolizji (`bUseCCD = true`) na obiektach dynamicznych.
+```text
+Source/MyProject/
+├── Networking/                                     <-- Warstwa autorytatywna Co-op (1–6 graczy)
+│   └── NetworkFunctionLibrary.h/.cpp               (Makra REQUIRE_AUTHORITY, ConfigurePhysicsReplication, AttachCarriedProp)
+│
+├── Dungeon/                                        <-- Świat lochu, struktury i mechanizmy
+│   ├── Structure/
+│   │   └── DungeonStructureBase.h/.cpp             (Modularne ściany/podłogi, Punch-Through, niszczalność, replikacja)
+│   ├── Props/
+│   │   ├── InteractivePropBase/                    (Fizyczne rekwizyty Chaos, kwantyzacja transformu, transfer kinetyczny)
+│   │   ├── VolatileProp/                           (Niestabilne obiekty alchemiczne, wybuchy autorytatywne, NetMulticast FX)
+│   │   ├── SwitchPropBase/                         (Abstrakcyjny przełącznik/aktywator logiczny, bAllowSwitchBack, TargetMechanisms)
+│   │   ├── SimpleSwitchProp/                       (Dźwignia/przełącznik ścienny z IInteractableInterface)
+│   │   └── PressurePlateProp/                      (Fizyczna płyta naciskowa sumująca rzeczywistą masę ciał >= 50 kg)
+│   └── Mechanisms/
+│       ├── MechanismTrapBase/                      (Abstrakcyjna baza pułapek z pętlą czasową bIsContinuousLoop i IMechanismReceiver)
+│       └── PistonTrap/                             (Kamienny taran/tłok ścienny/podłogowy, maszyna stanów EPistonState, Zero-Tick)
+│
+├── Environment/                                    <-- Fizyka, kinetyka i żywioły
+│   ├── Kinetic/
+│   │   ├── Components/KnockbackComponent/          (Aplikowanie odrzutów dla postaci i impulsów dla ciał sztywnych)
+│   │   ├── Utilities/KineticForceLibrary           (Radialne eksplozje, wiry kinetyczne, impulsy Chaosu)
+│   │   └── Enums/KineticEnums.h                    (EKnockbackFalloff)
+│   └── Elements/
+│       ├── Data/StatusEffectDefinitions.h          (Centralny rejestr FStatusEffectRegistry, parametry DoT i reakcji)
+│       ├── Enums/ElementEnums.h                    (EStatusEffectType: None, Burning, Wet, Electrified, Oiled)
+│       ├── StatusZone/ElementalStatusZone          (Autonomiczne strefy rozlewisk/kałuż/ognia, LoS, wygaszanie konfliktów cieczy)
+│       └── Utilities/
+│           ├── ElementalChemistryLibrary           (Silnik reakcji chemicznych i kompatybilności materiałowej)
+│           └── ElementalDeliveryLibrary            (Point Hit, Surface Splash, Radial Burst z LoS, Status Zone)
+│
+├── Shared/                                         <-- Współdzielone serwisy, komponenty i kontrakty
+│   ├── Components/
+│   │   ├── DamageableComponent/                    (Replikowane durability/HP, Server-Authoritative, kinetic debounce)
+│   │   ├── InteractionComponent/                   (Kinematic Sweep Follow, Carry State Machine, Anti-Bulldozer, Swing Throw)
+│   │   └── StatusEffectComponent/                  (Replikowany zarządca statusów, Zero-Bandwidth Timers, Elemental Priority Pipeline)
+│   ├── Interfaces/
+│   │   ├── CarryAnchorProviderInterface.h          (Kontrakt kotwicy rąk i limitów pchania dla postaci niosącej)
+│   │   ├── IGrabbableInterface.h                   (Kontrakt chwytania i rzucania fizycznymi propami)
+│   │   ├── IInteractableInterface.h                (Kontrakt interakcji klawiszem E)
+│   │   ├── MaterialProviderInterface.h             (Zapytanie o tożsamość materiałową EPhysicalMaterialType)
+│   │   ├── MechanismReceiverInterface.h            (Kontrakt odbiornika sygnałów aktywatorów SetMechanismState)
+│   │   └── StatProviderInterface.h                 (Kontrakt na odczyt wskaźników HP/durability)
+│   └── Enums/
+│       └── PhysicalMaterialEnums.h                 (EPhysicalMaterialType: Stone, Wood, Metal, Glass, Flesh)
+│
+├── Player/                                         <-- Postać gracza i sterowanie
+│   ├── Components/PlayerCameraComponent/           (Płynny zoom TPP/Top-Down, On-Demand Tick)
+│   ├── PlayerCharacter.h/.cpp                      (Kinematyczna postać CMC, Flesh, MoveBlockedBy fizyczne pchanie)
+│   └── PlayerCharacterController.h/.cpp
+│
+└── UI/                                             <-- Warstwa prezentacji stanu gry
+    ├── PlayerHUD/                                  (Aktor HUD orkiestrujący widgety)
+    ├── PlayerHUDWidget/                            (Główny widok: pasek zdrowia + kontener statusów)
+    ├── StatusIconWidget/                           (Dynamiczna kontrolka ikony statusu z radialnym timerem)
+    └── StatBarWidget.h/.cpp                        (Wskaźnik paskowy HP/durability)
+```
 
 ---
 
-## 3. Sieć i Multiplayer (Server-Authoritative First)
+## 3. Żelazna Zasada Ekosystemu: Święta Trójca Propów i Struktur
 
-* **Autorytatywny Serwer (Source of Truth):**
-  * Wszystkie zmiany stanu gry, zadawanie obrażeń i reakcje żywiołowe wykonuje wyłącznie serwer.
-* **Intencje Gracza (Client RPC):**
-  * Klient wysyła jedynie żądania intencji (`UFUNCTION(Server, Reliable, WithValidation)`).
-* **Synchronizacja Stanu (State Replication):**
-  * Replikacja danych na klientów za pomocą `UPROPERTY(ReplicatedUsing = OnRep_...)`.
+Zgodnie ze specyfikacją [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md), **żaden interaktywny ani fizyczny obiekt w świecie gry nie może być "pustym Static Meshem"**. Wszystkie elementy (propy, struktury, pułapki, barykady) bezwzględnie implementują **Świętą Trójcę**:
+
+```mermaid
+classDiagram
+    class HolyTrinityObject {
+        <<Contract>>
+    }
+    class IMaterialProviderInterface {
+        +GetMaterialType() EPhysicalMaterialType
+    }
+    class UDamageableComponent {
+        +CurrentDurability : float
+        +ApplyDamage(Amount)
+        +ApplyKineticImpact(ImpactSpeed)
+    }
+    class UStatusEffectComponent {
+        +ActiveStatusEffects : TArray
+        +ApplyStatus(NewStatus, Duration)
+        +HasStatus(Status) bool
+    }
+
+    HolyTrinityObject ..|> IMaterialProviderInterface : 1. Tożsamość Materiałowa
+    HolyTrinityObject *-- UDamageableComponent : 2. Wytrzymałość i Życie
+    HolyTrinityObject *-- UStatusEffectComponent : 3. Reaktywność Żywiołowa
+```
+
+1. **Tożsamość Materiałowa ([`IMaterialProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MaterialProviderInterface.h)):**
+   - Określa naturę fizyczną obiektu: `Stone`, `Wood`, `Metal`, `Glass`, `Flesh`.
+   - Determinuje reakcje żywiołowe (np. kamień i metal odrzucają ogień, drewno płonie, szkło jest kruche).
+2. **Wytrzymałość i Życie ([`UDamageableComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/DamageableComponent/DamageableComponent.h)):**
+   - Autorytatywne punkty wytrzymałości (`CurrentDurability`, `MaxDurability`).
+   - Kinetyczne obrażenia od prędkości kolizji (`ApplyKineticImpact`) z debouncem przeciw wielokrotnym trafieniom (`KineticImpactCooldown = 0.25s`).
+3. **Reaktywność Żywiołowa ([`UStatusEffectComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h)):**
+   - Obsługa powłok (`Wet`, `Oiled`, `Burning`, `Electrified`).
+   - Autorytatywne DoT, reakcje chemiczne i zoptymalizowana sieć *Zero-Bandwidth Timers*.
 
 ---
 
-## 4. Czysty Kod, Wydajność i Zarządzanie Pamięcią
+## 4. Architektura Postaci, Kinetyki i Trzymania Obiektów
 
-* **Deskryptywne Nazewnictwo:** Nazwy klas, metod i zmiennych muszą jednoznacznie opisywać ich intencję biznesową.
-* **Brak "Magicznych Liczb":** Wszelkie wartości stałe, czasy i mnożniki muszą być polami `UPROPERTY(EditDefaultsOnly, Category = "Config|...")`.
-* **Zarządzanie Pamięcią:** Bezwzględny zakaz surowego `new` / `delete`. Pełna integracja z Unreal Garbage Collector (`UObject*`, `UPROPERTY()`) oraz smart pointerami (`TSharedPtr`, `TWeakObjectPtr`).
-* **Optymalizacja `Tick()`:** Komponenty mają domyślnie `bCanEverTick = false`. Całość logiki opiera się na zdarzeniach (delegaty, timery, eventy kolizji).
+### 4.1. Kinematyczna Postać Gracza ([`APlayerCharacter`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.h))
+- Oparta na stabilnym, sieciowym `CharacterMovementComponent` (CMC) z wyłączonym zbędnym tickiem (`bCanEverTick = false`).
+- Postać nie symuluje fizyki jako Rigid Body w Chaosie, co eliminuje wystrzeliwanie postaci przy kolizjach ze skrzyniami i podłożem.
+- **Fizyczne Pchanie Ciałem (`MoveBlockedBy`):**
+  - Gracz posiada zdefiniowaną masę wirtualną ($100\text{ kg}$) i siłę naporu ($150\,000\text{ N}$).
+  - Kolizja z propem $\le 100\text{ kg}$ przekazuje wektorową siłę pchania, pozwalając na toczenie głazów i przepychanie skrzyń.
+  - Kolizja z propem $> 100\text{ kg}$ traktowana jest jak solidna ściana.
+
+### 4.2. Wzorzec Kinematycznego Prowadzenia Propów (Kinematic Sweep Shield)
+W [UInteractionComponent](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h) całkowicie odrzucono sztywny `AttachToComponent` oraz niestabilny w sieci `PhysicsHandleComponent`:
+
+```mermaid
+flowchart TD
+    A["Gracz wciska E / Trzyma Prop"] --> B["UInteractionComponent (On-Demand Tick)"]
+    B --> C["ICarryAnchorProviderInterface::GetHoldAnchorComponent()"]
+    C --> D["Kinematic Sweep w stronę kotwicy (bSweep = true)"]
+    D --> E{"Kolizja w locie (SweepHit)?"}
+    E -- "Trafiono przeszkodę <= 100kg" --> F["Aplikacja PlayerPushForce (Pchanie skrzyni tarczą)"]
+    E -- "Trafiono przeszkodę > 100kg" --> G["Anti-Bulldozer Clamp (Zerowanie prędkości Chaosu)"]
+    D --> H{"Dystans rąk > CarryBreakDistance (70 cm)?"}
+    H -- "Tak (Zablokowanie o ścianę)" --> I["Carry Grip Break (Upuszczenie propa pod nogi)"]
+    H -- "Nie" --> J["Prop prowadzony stabilnie jako Tarcza Blokująca"]
+```
+
+- **Rola Tarczy (Blocking Shield):** Trzymana deska lub głaz blokuje lecące pociski (`ECC_WorldDynamic`), magię i uderzenia wrogów, pochłaniając energię i chroniąc gracza.
+- **Decoupling przez Interfejs:** Komponent interakcji nie zależy od `APlayerCharacter`, lecz od lekkiego interfejsu [`ICarryAnchorProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h).
+- **Rzut Zamachem Myszką (Camera Angular Swing Throw) i Pure Drop:**
+  - Wciśnięcie `E` w spoczynku upuszcza prop pod nogi z zerową prędkością (czysty spadek grawitacyjny).
+  - Dynamiczny obrót kamerą (zamach myszą) wylicza prędkość kątową na ramieniu trzymania i nadaje pęd po łuku zamachu.
+  - LPM wykonuje dedykowany silny rzut na wprost z pełną walidacją serwera.
 
 ---
 
-## 5. Konwencje Nazewnictwa Unreal Engine (UHT)
+## 5. Silnik Żywiołów, Chemii i Dystrybucji (Elemental Engine)
 
-* `A` – Aktorzy na scenie (np. `APlayerCharacter`, `AInteractivePropBase`)
-* `U` – Obiekty logiki, komponenty i serwisy (np. `UDamageableComponent`, `UInteractionComponent`)
-* `I` – Interfejsy biznesowe (np. `IInteractableInterface`, `IStatProviderInterface`)
-* `F` – DTO / Struktury konfiguracyjne (np. `FKineticMaterialProperties`)
-* `E` – Typy wyliczeniowe / Enums (np. `EPhysicalMaterialType`)
+### 5.1. Hierarchia Reakcji Chemii (Elemental Priority Pipeline)
+Podczas aplikacji statusu przez [`UStatusEffectComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h) zachodzi dwufazowa ewaluacja logiczna:
+1. **Faza 1 (Żywioł vs Aktywna Powłoka):**
+   - Jeśli cel ma aktywny status (np. `Wet`), a przychodzi ogień (`Burning`), wyzwalana jest reakcja `Steam_Extinguish`. Woda odparowuje, ogień zostaje ugaszony (`bConsumeIncomingStatus = true`), nie dotykając materiału pod spodem.
+   - Jeśli cel jest `Oiled`, a przychodzi `Burning` $\rightarrow$ gwałtowna detonacja `Oil_Ignition`.
+   - Jeśli cel jest `Wet`, a przychodzi `Electrified` $\rightarrow$ natychmiastowe porażenie przewodzące `Conductive_Shock`.
+2. **Faza 2 (Żywioł vs Tożsamość Materiałowa):**
+   - Dopiero gdy żywioł nie zostanie zneutralizowany przez powłokę, silnik sprawdza [`UElementalChemistryLibrary::CanMaterialReceiveStatus`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h). Kamień i metal odrzucają ogień, uniemożliwiając ich zapalenie.
 
-# Plan architektoniczny: Kinematyczny Character Controller + Fizyczne Propy (Dungeon Crawler 4-player co-op)
+### 5.2. Architektura Dystrybucji Żywiołów ([`UElementalDeliveryLibrary`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Elements/Utilities/ElementalDeliveryLibrary.h))
+Silnik obsługuje 4 fundamentalne archetypy dostarczania:
+1. **Point Hit:** Punktowe uderzenie pojedynczym pociskiem w 1 aktora.
+2. **Surface Splash:** Płaski rozbryzg z fiolki/naczynia na konkretną płaszczyznę ze sprawdzeniem półprzestrzeni (Half-Space check).
+3. **Radial Burst:** Sferyczna fala uderzeniowa z testem widoczności Line-of-Sight (`ECC_Visibility`), zapobiegającym przenikaniu efektów przez ściany i zamknięte wrota.
+4. **Status Zone ([`AElementalStatusZone`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Elements/StatusZone/ElementalStatusZone.h)):** Trwałe pole w świecie (kałuża, plama oleju, pożar):
+   - Dynamiczny obrys LoS (`RebuildPerimeterPoints`) dopasowujący krawędź cieczy do geometrii ścian.
+   - Rozwiązywanie konfliktów płynów: nowszy płyn nadpisuje stary w strefie nakładania (eliminacja flickeringu).
+   - Ograniczenia wysokości: ciecze posiadają próg `LiquidSurfaceHeight = 35 cm`, a ogień `FireSurfaceHeight = 85 cm`.
 
-## Kontekst projektu
+---
 
-- Unreal Engine 5.8, C++ (`MYPROJECT_API`)
-- Gra: 4-osobowy kooperacyjny dungeon crawler
-- **Nie potrzebujemy** realistycznej symulacji fizyki (brak fluid sim, brak potrzeby resimulacji sieciowej fizyki dla gracza) - potrzebujemy **kontrolowanych, deterministycznych efektów gameplayowych** (odrzuty, rozbijanie przedmiotów, chwytanie/rzucanie obiektów i postaci)
-- Docelowo gra ma być sieciowa (multiplayer co-op), ale obecny etap to dokończenie **lokalnego, sensownego modelu ruchu i interakcji** przed podłączeniem networkingu
+## 6. Architektura Mechanizmów i Pułapek Lochu (Dungeon Mechanisms)
 
-## Decyzja architektoniczna #1: Gracz i przeciwnicy = KINEMATYCZNI, nie fizyczni
+Wprowadzona w ramach realizacji [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md):
 
-**Problem, który to rozwiązuje:** Wcześniej gracz był w pełni symulowaną bryłą fizyczną (`CapsuleComponent->SetSimulatePhysics(true)`). Powodowało to niekontrolowane zachowania przy kontakcie z propami: wystrzeliwanie gracza/propów przy najmniejszym kontakcie, przewracanie/wystrzeliwanie ciężkich platform pod stojącym graczem. Przyczyna: solver Chaos rozwiązuje kontakt kinematyczne-vs-dynamiczne ciało (nieskończona masa) przez depenetration impulse, co przy złej konfiguracji generuje ekstremalne prędkości.
+```mermaid
+classDiagram
+    class IMechanismReceiverInterface {
+        <<Interface>>
+        +SetMechanismState(bActive, TriggeringActor)
+    }
 
-**Rozwiązanie:** Gracz (i przeciwnicy) przechodzą na model **kinematyczny + ręcznie kontrolowana logika kolizji/odrzutu** - analogiczny do tego, jak działa `UCharacterMovementComponent` pod maską, ale w pełni custom (bo mamy już własny sweep-based grounded check i physics-force-based ruch, który **koncepcyjnie jest dobry i zostaje**, tylko trzeba przełączyć `SimulatePhysics` na `false` i przejść na sweep-move).
+    class ASwitchPropBase {
+        <<Abstract>>
+        #MeshComponent : UStaticMeshComponent
+        #DamageableComponent : UDamageableComponent
+        #StatusEffectComponent : UStatusEffectComponent
+        +TargetMechanisms : TArray~AActor~
+        +bAllowSwitchBack : bool
+        +SetActiveState(bNewState, TriggeringActor)
+    }
 
-**Wspólna baza klas do wprowadzenia:**
-```
-ACombatCharacterBase (kinematyczny, sweep-move, knockback state, carry state)
-├── APlayerCharacter
-└── AEnemyCharacterBase (np. AOgreCharacter)
-```
+    class ASimpleSwitchProp {
+        +Interact(Interactor)
+    }
 
-Rekomendacja: przenieść przeciwników na tę samą bazę co gracza (nie zostawiać ich jako w pełni symulowanych rigid bodies), żeby AI pathing + knockback + carry system były jednolite i przewidywalne dla całej rodziny "żywych jednostek".
+    class APressurePlateProp {
+        #PlateMesh : UStaticMeshComponent
+        #TriggerBox : UBoxComponent
+        +RequiredMass : float
+        +RecalculateMassAndEvaluate()
+    }
 
-**Propy zostają fizyczne bez zmian** (`AInteractivePropBase`, `SimulatePhysics = true`) - tam realna fizyka ma sens (skrzynki, naczynia, przedmioty do rzucania).
+    class AMechanismTrapBase {
+        <<Abstract>>
+        #BaseMeshComponent : UStaticMeshComponent
+        +bIsContinuousLoop : bool
+        +LoopInterval : float
+        +SetTrapActive(bNewActive, TriggeringActor)
+        +TriggerTrap(TriggeringActor)
+        #ExecuteTrapAction(TriggeringActor)*
+    }
 
-## Decyzja architektoniczna #2: Collision response gracza/przeciwników do propów = Overlap, nie Block
+    class APistonTrap {
+        -PistonHeadMesh : UStaticMeshComponent
+        -DamageBox : UBoxComponent
+        -PistonState : EPistonState
+        +PushDirection : FVector
+        +StrokeDistance : float
+        +ExtendSpeed : float
+        +KnockbackSpeed : float
+    }
 
-```cpp
-CapsuleComponent->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);   // terrain, geometria statyczna
-CapsuleComponent->SetCollisionResponseToChannel(ECC_PhysicsProp, ECR_Overlap); // dynamiczne propy - NOWY custom channel
-CapsuleComponent->SetGenerateOverlapEvents(true);
-```
-
-Wszystkie propy muszą mieć `SetCollisionObjectType(ECC_PhysicsProp)`.
-
-**Efekt:** solver Chaos przestaje w ogóle generować kontakt/impuls między kinematycznym ciałem a propami. Cała logika "co się dzieje przy zetknięciu" jest teraz w 100% w naszym kodzie, zero szansy na niekontrolowany "wybuch" fizyki.
-
-**Ruch po statycznej geometrii** (podłoga, ściany) pozostaje przez `MoveComponent`/`AddActorWorldOffset(..., bSweep=true, &Hit)` - nigdy `SetActorLocation` bez sweep, żeby uniknąć teleportacji w penetrację.
-
-## Decyzja architektoniczna #3: Manualna obsługa kolizji z propami
-
-Rozróżnienie na podstawie masy propa (`HeavyPropMassThreshold`):
-
-- **Lekkie propy** (poniżej progu): overlap → aplikujemy kontrolowaną, **cappowaną** siłę pchania:
-  ```cpp
-  const float ForceMagnitude = FMath::Min(TouchForceFactor * PropMass * PlayerVelocity.Size2D(), MaxTouchForce);
-  OtherComp->AddForceAtLocation(PushDir * ForceMagnitude, ImpactPoint);
-
-
-```
-  `FMath::Min` matematycznie gwarantuje brak "wystrzelenia" niezależnie od geometrii kontaktu.
-
-- **Ciężkie propy/przeszkody** (powyżej progu): traktowane jak ściana - manualna depenetracja (prosta wersja: sfera-vs-sfera push-out w Tick na liście aktualnie nakładających się ciężkich propów; zaawansowana wersja: `ComputePenetration` per-shape - **zacząć od prostej wersji**, doprecyzować tylko jeśli faktycznie zaobserwujemy problem na konkretnych kształtach).
-
-Do zaimplementowania: `TArray<UPrimitiveComponent*> OverlappingHeavyProps` + `OnComponentBeginOverlap`/`EndOverlap` do zarządzania listą + rozwiązywanie w Tick.
-
-## Decyzja architektoniczna #4: Platformy ruchome (stanie na, base tracking)
-
-- Platforma pod stopami **zostaje `Block`** (potrzebne dla sweep-based `IsGrounded()`), ale:
-  - `MaxDepenetrationVelocity` ograniczony (np. 200-400 cm/s) globalnie i per-component - **pierwsza, najważniejsza zmiana do zrobienia, bo prawdopodobnie sama rozwiązuje większość "wystrzeleń"**.
-  - `bLockXRotation = true; bLockYRotation = true;` na platformach, jeśli nie mają się przechylać pod ciężarem gracza (design decision - w większości przypadków tak).
-- **Base tracking** (żeby gracz przemieszczał się z platformą) - ręczne śledzenie delty transformu platformy między tickami i aplikowanie jej do gracza przez `AddActorWorldOffset`. To NIE dzieje się automatycznie przez tarcie w modelu kinematycznym, musi być explicit (analogicznie do `MovementBaseUtility` w CMC).
-
-## Decyzja architektoniczna #5: Unified Knockback System
-
-Jeden system obsługujący WSZYSTKIE przypadki odrzutu: podmuch wiatru (skill), uderzenie młotem (ogr), rzut postacią (throw po carry).
-
-```cpp
-// Na ACombatCharacterBase
-FVector KnockbackVelocity;
-bool bIsKnockedBack;
-
-void ApplyKnockback(const FVector& Impulse); // += do KnockbackVelocity, włącza tick
-
-// W Tick: sweep-move o KnockbackVelocity * DeltaTime, sprawdzenie Hit.bBlockingHit
-// -> jeśli ImpactSpeed przekracza próg: DamageableComponent->ApplyKineticImpact()
-// -> tłumienie KnockbackVelocity przez FInterpTo do zera
+    ASwitchPropBase <|-- ASimpleSwitchProp
+    ASwitchPropBase <|-- APressurePlateProp
+    AMechanismTrapBase <|-- APistonTrap
+    AMechanismTrapBase ..|> IMechanismReceiverInterface
+    ASwitchPropBase ..> IMechanismReceiverInterface : Powiadamia TargetMechanisms
 ```
 
-Kluczowe: ruch odrzutu też idzie przez **sweep** (nie teleportację), dzięki czemu `Hit.Normal`/`Hit.ImpactNormal` naturalnie daje nam moment i siłę uderzenia w ścianę → obrażenia, bez dodatkowego mechanizmu.
+### 6.1. Aktywatory i Przełączniki ([`ASwitchPropBase`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Props/SwitchPropBase/SwitchPropBase.h))
+- **`ASimpleSwitchProp`:** Ścienna wajcha/dźwignia aktywowana klawiszem `E` przez [`IInteractableInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IInteractableInterface.h).
+- **`APressurePlateProp`:** Podłogowa płyta naciskowa reagująca na **rzeczywistą masę fizyczną** (`RequiredMass = 50.0 kg`). Rejestruje nachodzące postacie ($80\text{ kg}$) oraz propa fizyczne (skrzynia $60\text{ kg}$, głaz $70\text{ kg}$), płynnie zapadając się w posadzkę (`Tick On-Demand`).
+- Obsługa przełączników jedno- i dwukierunkowych (`bAllowSwitchBack`), powiadamianie celów implementujących [`IMechanismReceiverInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MechanismReceiverInterface.h).
 
-## Decyzja architektoniczna #6: Dwa osobne systemy chwytania - Prop vs Character
+### 6.2. Pułapki i Tarany ([`AMechanismTrapBase`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Mechanisms/MechanismTrapBase/MechanismTrapBase.h))
+- **`APistonTrap`:** Kamienny taran ścienny / zgniatacz sufitowy / katapulta podłogowa.
+  - Maszyna stanów `EPistonState` (`IdleAtHome`, `Extending`, `HoldingAtExtended`, `Retracting`).
+  - Optymalizacja Zero-Tick: `Tick()` aktywny wyłącznie podczas fizycznego ruchu głowicy taranu.
+  - Błyskawiczny suw w przód ($1200\text{ cm/s}$), opóźnienie w wysunięciu, powolne cofanie ($150\text{ cm/s}$).
+  - Aplikuje odrzut kinetyczny na graczy (`LaunchCharacter`), pęd na obiekty fizyczne (`AddImpulse`) i niszczy zniszczalne barykady.
+- **`AProjectileLauncherTrap`:** Ścienna paszcza miotająca kamieniami/pociskami (poligon pod testy tarczy `BP_PlankShield_Wood`).
 
-**Nie da się użyć `PhysicsHandleComponent` do chwytania postaci** - wymaga on realnego rigid body w solverze, którego kinematyczna postać nie ma. Stąd dwa rozłączne interfejsy/mechanizmy:
+---
 
-### `IGrabbableInterface` (już istnieje, bez zmian) - propy
-- `UInteractionComponent` + `UPhysicsHandleComponent` - zostaje jak jest.
+## 7. Architektura Sieciowa Co-op (Server-Authoritative Co-op)
 
-### `ICarryableInterface` (NOWY) - postacie (gracz/przeciwnik)
-```cpp
-class MYPROJECT_API ICarryableInterface
-{
-public:
-    virtual bool CanBeCarried(const AActor* Carrier) const = 0;
-    virtual void OnCarryBegin(AActor* Carrier, USceneComponent* HoldSocket) = 0;
-    virtual void OnCarryEnd() = 0;
-    virtual void OnThrown(const FVector& ThrowVelocity) = 0;
-};
-```
+Szczegółowo zdefiniowana w [CORE_COOP_PRINCIPLES.md](file:///E:/UE_PROJECTS/MyProject/.context/CORE_COOP_PRINCIPLES.md):
 
-Implementacja na `ACombatCharacterBase`:
-- `OnCarryBegin`: `AttachToComponent` do socketu na carrierze (automatyczne dziedziczenie transformu, brak potrzeby ręcznego tick-sync), blokada inputu ruchu ofiary (`bMovementInputLocked`), collision response na `Ignore` w trakcie noszenia.
-- `OnThrown`: `DetachFromActor`, przywrócenie collision, **wywołanie `ApplyKnockback(ThrowVelocity)`** - reużycie systemu z pkt. 5, zero duplikacji kodu.
+1. **Server-Authoritative First:**
+   - Wszelka mutacja stanu gry chroniona jest makrem strażniczym `REQUIRE_AUTHORITY()`.
+   - Obrażenia, reakcje chemiczne, pchanie propów, wyzwalanie mechanizmów i rzuty kalkulowane są wyłącznie na serwerze.
+2. **Wzorzec Zero-Bandwidth Timers:**
+   - Zamiast replikowania upływu czasu co klatkę, serwer replikuje jednorazowo `ServerEndTime`. Klienci lokalnie obliczają czas pozostały do wygaśnięcia efektu (`LocalRemaining = FMath::Max(0.0f, ServerEndTime - WorldTime)`), co redukuje zużycie pasma podczas trwania efektów do **0 bajtów/s**.
+3. **Kwantyzacja i Kompresja Transformów:**
+   - Rekwizyty [`AInteractivePropBase`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h) posiadają kwantyzację: `RoundTwoDecimals` dla pozycji i `ByteComponents` (1 bajt per oś) dla rotacji.
+   - Propy w spoczynku przechodzą w stan uśpienia sieciowego (`NetDormancy = DORM_DormantAll`).
+4. **RPCs z Walidacją:**
+   - `Server_RequestGrab`, `Server_RequestForwardThrow`, `Server_RequestDropOrSwing`, `Server_RequestInteract` posiadają pełną walidację `_Validate` (weryfikacja odległości, stanu gracza i clamp prędkości).
 
-`UInteractionComponent::PrimaryInteract()` - branching: sprawdź `ICarryableInterface` PRZED `IGrabbableInterface` (priorytet chwytania żywych jednostek nad propami).
+---
 
-**Catch w locie** (jump + catch) - dodatkowy warunek stanu na wejściu do tego samego systemu Carry: `!Target->IsGrounded() && Target->IsBeingKnockedBack()` zamiast nowej infrastruktury fizycznej.
+## 8. Standard Siatki Modularnej i Poziomu Theme Park (Loch v0.1)
 
-## Decyzja architektoniczna #7: "Fizyczne" efekty specjalne = fake, nie symulacja
+Zgodnie z [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md) architektura geometrii lochu opiera się na metrycznej siatce modularnej:
 
-Dla wymagań typu "rozbite naczynie → rozlana woda":
-- Rozbicie propa: reużycie istniejącego `HandleImpactDamage`/`ImpactSpeed` z progiem (`ShatterImpactThreshold`) do wykrycia "czy uderzenie było wystarczająco silne, żeby rozbić".
-- "Rozlewanie cieczy": **NIE symulować hydrodynamiki**. Prosty aktor z rosnącym `UDecalComponent` (promień w czasie) + `UBoxComponent` jako gameplay trigger (np. "śliska podłoga" - redukcja `AccelerationResponsiveness` lub losowy side-slip). Zero prawdziwej fizyki płynów.
+| Element | Wymiary (X × Y × Z) | Rola w grze i uzasadnienie |
+| :--- | :--- | :--- |
+| **Klocek Podłogi / Sufitu** | **`400 × 400 × 20 cm`** | Podstawowy kafelek (4x4m), swobodny bieg do 3 graczy obok siebie. |
+| **Klocek Ściany Pełnej** | **`400 × 30 × 350 cm`** | Grubość 30 cm zapobiega clippingowi kamer TPP i artefaktom Lumena. |
+| **Wnęka Drzwiowa / Brama** | **`200 × 30 × 280 cm`** | Umożliwia przenoszenie szerokich skrzyń i rzucanie głazami. |
+| **Klocek Kolumny / Narożnika**| **`40 × 40 × 350 cm`** | Maskowanie łączeń ścian i punkty oparcia sklepień. |
 
-Ta filozofia ("kontrolowany efekt z jasną przyczyną, nie symulacja") ma zastosowanie do każdej podobnej mechaniki w grze.
-
-## Kwestie do zaadresowania w przyszłości (networking) - NIE teraz
-
-Ustalone wcześniej w rozmowie, do zrobienia PO dokończeniu lokalnej mechaniki, w tej kolejności:
-
-1. **Networking propów i przeciwników najpierw** (podstawowa replikacja + RPC + `HasAuthority()` checks) - najniższe ryzyko, dobra nauka fundamentów.
-2. **Grab/Release/Throw/Interact jako Server RPC z rewalidacją** (`Server_RequestGrab` itd. - serwer sam re-sprawdza dystans/warunki, nie ufa danym od klienta).
-3. **Trzymany prop**: wizualna predykcja lokalnie (kosmetyczny lerp mesh), prawdziwy `PhysicsHandle` i fizyka tylko na serwerze - unikamy RTT lagu bez potrzeby resimulacji.
-4. **Postać gracza - networking jest teraz ŁATWIEJSZY niż przy physics-body approach**, bo kinematyczny model + manualna kolizja to dokładnie ten sam model, na którym opiera się dojrzały, dobrze wsparty `UCharacterMovementComponent`-style client prediction + server reconciliation (bez potrzeby experimentalnego `NetworkPhysicsComponent`/Chaos resimulation, który jest zarezerwowany dla przypadków wymagających prawdziwej fizycznej resimulacji, np. pojazdów).
-5. Propy swobodne (nietrzymane): zwykła replikacja + `EPhysicsReplicationMode::PredictiveInterpolation`, bez predykcji z inputem.
-
-## Stan obecnych plików (punkt wyjścia)
-
-- `APlayerCharacter` (Pawn, obecnie physics-body, do przerobienia na kinematic) - ma: sweep-based `IsGrounded()`, P-controller ruch przez `AddForce` (`F = (V_target - V_current) * K` - **koncepcja zostaje**, zmienia się tylko sposób aplikacji przy przejściu na kinematic), zoom przez spring arm interp, Enhanced Input, `HandleCapsuleHit` → `DamageableComponent`.
-- `UInteractionComponent` (ActorComponent) - trace-based grab/throw/interact przez `UPhysicsHandleComponent`, obsługuje `IGrabbableInterface`/`IInteractableInterface`, zero networkingu obecnie.
-- `AInteractivePropBase` (Actor, fully simulated rigid body) - implementuje `IGrabbableInterface` + `IInteractableInterface`, ma `HandleImpactDamage` liczący `ImpactSpeed` z impulsu - **ten mechanizm do reużycia dla systemu rozbijania propów (pkt 7)**.
-- Brak jakiegokolwiek networkingu w projekcie na tym etapie (brak `bReplicates`, RPC, authority checks) - to jest świadomie odłożone na później.
-
-## Priorytety najbliższych działań (w kolejności)
-
-1. `MaxDepenetrationVelocity` cap (global + per-component) - quick win, prawdopodobnie eliminuje większość obecnych "wybuchów" nawet przed pełną przebudową.
-2. Przełączenie `CapsuleComponent` gracza na kinematic + custom collision channel dla propów (Overlap) + sweep-based movement.
-3. Manualna obsługa kolizji z propami (lekkie = push force capped, ciężkie = manual depenetration).
-4. Base tracking dla platform.
-5. Unified Knockback System (`ApplyKnockback`).
-6. Ekstrakcja `ACombatCharacterBase`, decyzja o przeniesieniu przeciwników na kinematic.
-7. `ICarryableInterface` + Carry state (attach-based).
-8. Dopiero po powyższym: networking (propy/enemies → player → advanced).
+> **Zasada Pivot Point:** Wszystkie kafelki posiadają punkt bazowy wycentrowany w osi XY na krawędzi modułu lub w dolnym rogu na poziomie $Z = 0$, co gwarantuje natychmiastowe przyciąganie do siatki edytora (`Grid Snap = 50 / 100 cm`).
