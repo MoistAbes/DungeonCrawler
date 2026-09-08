@@ -90,6 +90,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.0"))
     float VelocityStopThreshold = 60.0f;
 
+    /** Minimalny odstęp czasowy między kolejnymi akcjami interakcji (anty-spam/debounce w sekundach) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.05", ClampMax = "0.5"))
+    float MinInteractionInterval = 0.15f;
+
     /** Aktualny stan interakcji */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|State")
     ECarryState CarryState = ECarryState::None;
@@ -134,6 +138,12 @@ private:
     /** Obiekty fizyczne aktualnie kolidujące/nakładające się na niesiony prop (zarządzane zdarzeniowo bez broadphase co tick) */
     UPROPERTY(Transient)
     TArray<TWeakObjectPtr<UPrimitiveComponent>> OverlappingPhysicsComponents;
+
+    /** Timestamp ostatniej przetworzonej akcji interakcji na serwerze (ochrona przed spamem RPC) */
+    double LastServerInteractionTime = -100.0;
+
+    /** Timestamp ostatniej akcji interakcji u lokalnego klienta (debounce) */
+    double LastClientInteractionTime = -100.0;
 
     // --- Rejestracja i obsługa zdarzeń kolizji (Event-Driven Overlaps) ---
     void BindPropOverlapEvents(UPrimitiveComponent* PropComp);

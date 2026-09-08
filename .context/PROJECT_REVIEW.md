@@ -23,7 +23,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 | **12**| Line Trace można poprawić UX-owo (Sphere Trace) | 🟡 **P2** | UX / Interakcja | **[ ] Do zrobienia** |
 | **13**| `DrawDebugLine()` bezpośrednio w gameplay code | 🟡 **P2** | Profiling / Debug | **[x] Rozwiązane** |
 | **14**| `LogTemp` jest używany za szeroko | 🟡 **P2** | Logging / Telemetria | **[ ] Do zrobienia** |
-| **15**| Reliable RPC potrzebują rate limitu / cooldownu | 🟠 **P1** | Sieć / Anti-Spam | **[~] Częściowo zrobione** |
+| **15**| Reliable RPC potrzebują rate limitu / cooldownu | 🟠 **P1** | Sieć / Anti-Spam | **[x] Rozwiązane** |
 | **16**| `_Validate()` a Gameplay Validation (2 warstwy) | 🟠 **P1** | Architektura Sieciowa | **[x] Rozwiązane** |
 | **17**| `NetworkFunctionLibrary` – pilnować, by nie stała się God Class | 🟡 **P2** | Higiena Kodu | **[x] Rozwiązane** |
 | **18**| Architektura komponentowa (Component Design) | 🟢 **Zaleta** | Architektura | **[x] Utrzymywane** |
@@ -171,7 +171,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 * **Pliki:** [`InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp), [`PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp)
 * **Status:** `[~] Częściowo zrobione`
 * **Stan faktyczny:**
-  Większość kluczowych wartości (`TraceDistance`, `MaxCarryMass`, `ThrowImpulseStrength`, `CarryBreakDistance`, `MaxSwingThrowSpeed`, `VelocityStopThreshold`, `MaxPushableMass`, `PlayerPushForce`) została wyciągnięta do pól `UPROPERTY(EditDefaultsOnly)`.
+  Większość kluczowych wartości (`TraceDistance`, `MaxCarryMass`, `ThrowImpulseStrength`, `CarryBreakDistance`, `MaxSwingThrowSpeed`, `VelocityStopThreshold`, `MinInteractionInterval`, `MaxPushableMass`, `PlayerPushForce`) została wyciągnięta do pól `UPROPERTY(EditDefaultsOnly)`.
 * **Do zrobienia:**
   W kodzie pozostały drobne stałe geometryczne (np. `constexpr float HoldRadius = 110.0f;`, `PitchRad`, offset Z). Warto przenieść je do struktury konfiguracyjnej `FCarrySocketConfig`.
 
@@ -236,16 +236,12 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 ---
 
 ### 15. Rate Limiting i ochrona przed spamem RPC
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L326)
-* **Status:** `[~] Częściowo zrobione`
-* **Stan faktyczny:**
-  - W `PrimaryInteract()` klient sprawdza:
-    ```cpp
-    if (CarryState != ECarryState::None) return;
-    ```
-    co uniemożliwia wielokrotne wysłanie `Server_RequestGrab` przed otrzymaniem odpowiedzi z serwera.
-* **Do zrobienia:**
-  Dodać po stronie serwera znacznik `double LastInteractionServerTime` i odrzucać żądania przychodzące częściej niż co np. $0.15\text{ s}$ na wypadek zmodyfikowanego klienta sieciowego.
+* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny po optymalizacji:**
+  - Wprowadzono konfigurowalny `MinInteractionInterval = 0.15f` (150 ms) jako techniczny debounce.
+  - **Po stronie klienta:** Sprawdzany w `PrimaryInteract()` oraz `ThrowCurrentProp()` z użyciem `LastClientInteractionTime`, eliminując nieintencjonalne podwójne kliknięcia myszką.
+  - **Po stronie serwera:** Zabezpieczono wszystkie RPC interakcji (`Server_RequestGrab_Implementation`, `Server_RequestForwardThrow_Implementation`, `Server_RequestDropOrSwing_Implementation`, `Server_RequestInteract_Implementation`). W przypadku `Server_RequestGrab` weryfikacja następuje natychmiast na wejściu, **przed** jakimikolwiek raycastami LoS lub operacjami na fizyce (`Client_GrabDenied()`), w pełni chroniąc CPU serwera.
 
 ---
 
@@ -316,7 +312,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 ```mermaid
 graph TD
     subgraph "Sprint 1: Dokończenie Bezpieczeństwa Sieciowego (P0/P1)"
-        S1_1["Wprowadzenie server cooldown na RPC interakcji (pkt 15)"]
+        S1_1["Wprowadzenie server cooldown na RPC interakcji (pkt 15) [Zrobione]"]
         S1_2["Event-driven overlap dla SuppressOverlappingHeavyPhysics (pkt 8) [Zrobione]"]
     end
 

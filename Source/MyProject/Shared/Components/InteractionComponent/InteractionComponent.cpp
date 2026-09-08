@@ -461,12 +461,23 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
 
 void UInteractionComponent::PrimaryInteract()
 {
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastClientInteractionTime < MinInteractionInterval)
+    {
+        return;
+    }
+
     UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered (State: %d)."), 
         *NetUtils::GetNetRolePrefix(this), static_cast<int32>(CarryState));
 
     // Jeśli aktywnie niesiemy obiekt: upuszczenie pod nogi LUB rzut zamachem myszką (Klawisz E)
     if (CarryState == ECarryState::Carrying && IsValid(GrabbedActor))
     {
+        LastClientInteractionTime = CurrentTime;
+
         const float SwingSpeed = TrackedCameraSwingVelocity.Size();
         const bool bIsThrow = (SwingSpeed >= MinSwingSpeedToThrow);
         FVector ReleaseVelocity = FVector::ZeroVector;
@@ -525,6 +536,8 @@ void UInteractionComponent::PrimaryInteract()
                 return;
             }
 
+            LastClientInteractionTime = CurrentTime;
+
             if (NetUtils::HasAuthority(this))
             {
                 ExecuteGrab(HitActor, HitResult.GetComponent());
@@ -544,6 +557,8 @@ void UInteractionComponent::PrimaryInteract()
     {
         if (Interactable->CanInteract(GetOwner()))
         {
+            LastClientInteractionTime = CurrentTime;
+
             if (NetUtils::HasAuthority(this))
             {
                 Interactable->Interact(GetOwner());
@@ -565,6 +580,16 @@ void UInteractionComponent::ThrowCurrentProp()
     {
         return;
     }
+
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastClientInteractionTime < MinInteractionInterval)
+    {
+        return;
+    }
+    LastClientInteractionTime = CurrentTime;
 
     if (NetUtils::HasAuthority(this))
     {
@@ -622,6 +647,11 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
 {
     if (!TargetActor || !ComponentToGrab) return;
 
+    if (const UWorld* World = GetWorld())
+    {
+        LastServerInteractionTime = World->GetTimeSeconds();
+    }
+
     GrabbedActor = TargetActor;
     GrabbedComponent = ComponentToGrab;
     CarryState = ECarryState::Carrying;
@@ -657,6 +687,11 @@ void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchV
 {
     if (!GrabbedActor) return;
 
+    if (const UWorld* World = GetWorld())
+    {
+        LastServerInteractionTime = World->GetTimeSeconds();
+    }
+
     AActor* ReleasedActor = GrabbedActor;
     const FVector AppliedVelocity = bIsThrow ? LaunchVelocity : FVector::ZeroVector;
 
@@ -683,6 +718,19 @@ bool UInteractionComponent::Server_RequestGrab_Validate(AActor* TargetActor, UPr
 
 void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
 {
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastServerInteractionTime < MinInteractionInterval)
+    {
+        UE_LOG(LogTemp, Verbose, TEXT("[InteractionService][Server] Denied Grab: Rate limit exceeded (Delta: %.3f s < %.3f s)."),
+            CurrentTime - LastServerInteractionTime, MinInteractionInterval);
+        Client_GrabDenied();
+        return;
+    }
+    LastServerInteractionTime = CurrentTime;
+
     // Gameplay Validation: Dystans, LoS, Masa, Stan obiektu i zajętość
     if (!CanGrabServer(TargetActor, ComponentToGrab))
     {
@@ -713,6 +761,16 @@ void UInteractionComponent::Server_RequestForwardThrow_Implementation()
         return;
     }
 
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastServerInteractionTime < MinInteractionInterval)
+    {
+        return;
+    }
+    LastServerInteractionTime = CurrentTime;
+
     const FVector LaunchVelocity = CalculateServerThrowVelocity();
     ExecuteRelease(true, LaunchVelocity);
 }
@@ -728,6 +786,16 @@ void UInteractionComponent::Server_RequestDropOrSwing_Implementation(const FVect
     {
         return;
     }
+
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastServerInteractionTime < MinInteractionInterval)
+    {
+        return;
+    }
+    LastServerInteractionTime = CurrentTime;
 
     const float Speed = SwingVelocity.Size();
     if (Speed < MinSwingSpeedToThrow)
@@ -752,6 +820,16 @@ bool UInteractionComponent::Server_RequestInteract_Validate(AActor* TargetActor)
 void UInteractionComponent::Server_RequestInteract_Implementation(AActor* TargetActor)
 {
     if (!TargetActor) return;
+
+    const UWorld* World = GetWorld();
+    if (!World) return;
+
+    const double CurrentTime = World->GetTimeSeconds();
+    if (CurrentTime - LastServerInteractionTime < MinInteractionInterval)
+    {
+        return;
+    }
+    LastServerInteractionTime = CurrentTime;
 
     if (IInteractableInterface* Interactable = Cast<IInteractableInterface>(TargetActor))
     {
