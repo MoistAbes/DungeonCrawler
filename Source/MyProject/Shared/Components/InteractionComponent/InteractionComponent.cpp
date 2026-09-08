@@ -26,6 +26,17 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         return;
     }
 
+    const APawn* PawnOwner = Cast<APawn>(GetOwner());
+    const bool bIsLocalOwner = PawnOwner && PawnOwner->IsLocallyControlled();
+    const bool bHasAuthority = NetUtils::HasAuthority(this);
+
+    // Zdalni gracze (Remote Proxies) nie wykonują lokalnego sweepa ani fizyki.
+    // Otrzymują oni zreplikowany i wygładzony ruch propa bezpośrednio z silnika (ReplicatedMovement).
+    if (!bHasAuthority && !bIsLocalOwner)
+    {
+        return;
+    }
+
     UpdateHoldAnchorTransform(DeltaTime);
     UpdateCarriedPropTransform(DeltaTime);
 }
@@ -39,12 +50,20 @@ void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
     }
     CarryState = ECarryState::Carrying;
 
-    FVector CamLoc;
-    FRotator CamRot;
-    GetCameraViewPoint(CamLoc, CamRot);
-    PreviousCameraRotation = CamRot;
-    TrackedCameraSwingVelocity = FVector::ZeroVector;
-    SetComponentTickEnabled(true);
+    const APawn* PawnOwner = Cast<APawn>(GetOwner());
+    const bool bIsLocalOwner = PawnOwner && PawnOwner->IsLocallyControlled();
+    const bool bHasAuthority = NetUtils::HasAuthority(this);
+
+    // Włączamy On-Demand Tick wyłącznie na Serwerze oraz u lokalnie kontrolującego gracza
+    if (bHasAuthority || bIsLocalOwner)
+    {
+        FVector CamLoc;
+        FRotator CamRot;
+        GetCameraViewPoint(CamLoc, CamRot);
+        PreviousCameraRotation = CamRot;
+        TrackedCameraSwingVelocity = FVector::ZeroVector;
+        SetComponentTickEnabled(true);
+    }
 }
 
 void UInteractionComponent::NotifyCarriedPropDetached()
@@ -267,18 +286,18 @@ void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& O
     const AActor* Owner = GetOwner();
     if (!Owner) return;
 
-    if (const APawn* PawnOwner = Cast<APawn>(Owner))
-    {
-        if (const APlayerController* PC = Cast<APlayerController>(PawnOwner->GetController()))
-        {
-            if (PC->PlayerCameraManager)
-            {
-                OutLocation = PC->PlayerCameraManager->GetCameraLocation();
-                OutRotation = PC->PlayerCameraManager->GetCameraRotation();
-                return;
-            }
-        }
-    }
+    if (const APawn* PawnOwner = Cast<APawn>(Owner))\
+    {\
+        if (const APlayerController* PC = Cast<APlayerController>(PawnOwner->GetController()))\
+        {\
+            if (PC->PlayerCameraManager)\
+            {\
+                OutLocation = PC->PlayerCameraManager->GetCameraLocation();\
+                OutRotation = PC->PlayerCameraManager->GetCameraRotation();\
+                return;\
+            }\
+        }\
+    }\
 
     Owner->GetActorEyesViewPoint(OutLocation, OutRotation);
 }
@@ -573,18 +592,24 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
     GrabbedComponent = ComponentToGrab;
     CarryState = ECarryState::Carrying;
 
-    FVector CamLoc;
-    FRotator CamRot;
-    GetCameraViewPoint(CamLoc, CamRot);
-    PreviousCameraRotation = CamRot;
-    TrackedCameraSwingVelocity = FVector::ZeroVector;
+    const APawn* PawnOwner = Cast<APawn>(GetOwner());
+    const bool bIsLocalOwner = PawnOwner && PawnOwner->IsLocallyControlled();
+    const bool bHasAuthority = NetUtils::HasAuthority(this);
+
+    if (bHasAuthority || bIsLocalOwner)
+    {
+        FVector CamLoc;
+        FRotator CamRot;
+        GetCameraViewPoint(CamLoc, CamRot);
+        PreviousCameraRotation = CamRot;
+        TrackedCameraSwingVelocity = FVector::ZeroVector;
+        SetComponentTickEnabled(true);
+    }
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))
     {
         Grabbable->OnGrabbed(GetOwner());
     }
-
-    SetComponentTickEnabled(true);
 
     UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GetNameSafe(GrabbedActor));
 }
