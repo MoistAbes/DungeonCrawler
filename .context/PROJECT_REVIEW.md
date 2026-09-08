@@ -19,8 +19,8 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 | **8** | Dużo pracy wykonywanej co klatkę w `InteractionComponent` | 🟠 **P1** | Optymalizacja / CPU | **[x] Rozwiązane** |
 | **9** | Magic numbers w kodzie | 🟡 **P2** | Clean Code / Tuning | **[~] Częściowo zrobione** |
 | **10**| Hardcoded velocity stop (`VelocityStopThreshold`) | 🟡 **P2** | Fizyka / Chaos | **[~] Częściowo zrobione** |
-| **11**| Interakcja korzysta z `ECC_Visibility` zamiast dedykowanego kanału | 🟡 **P2** | Kolizje / Semantyka | **[ ] Do zrobienia** |
-| **12**| Line Trace można poprawić UX-owo (Sphere Trace) | 🟡 **P2** | UX / Interakcja | **[ ] Do zrobienia** |
+| **11**| Interakcja korzysta z `ECC_Visibility` zamiast dedykowanego kanału | 🟡 **P2** | Kolizje / Semantyka | **[x] Rozwiązane** |
+| **12**| Line Trace można poprawić UX-owo (Sphere Trace) | 🟡 **P2** | UX / Interakcja | **[x] Rozwiązane** |
 | **13**| `DrawDebugLine()` bezpośrednio w gameplay code | 🟡 **P2** | Profiling / Debug | **[x] Rozwiązane** |
 | **14**| `LogTemp` jest używany za szeroko | 🟡 **P2** | Logging / Telemetria | **[ ] Do zrobienia** |
 | **15**| Reliable RPC potrzebują rate limitu / cooldownu | 🟠 **P1** | Sieć / Anti-Spam | **[x] Rozwiązane** |
@@ -66,7 +66,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
   4. Kontrakt [`IGrabbableInterface::CanGrab(Owner)`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IGrabbableInterface.h) (czy obiekt nie jest zajęty, czy żyje).
   5. Weryfikacja masy: `Grabbable->GetMass() <= MaxCarryMass` (35 kg).
   6. Weryfikacja odległości z uwzględnieniem promienia kolizji propa (`AllowedDist = TraceDistance + BoundsRadius + 100.0f`).
-  7. Test Line of Sight (`LineTraceSingleByChannel` na kanale `ECC_Visibility` z ignorowaniem gracza i celu, celowany w `Component->Bounds.Origin`).
+  7. Test Line of Sight (`LineTraceSingleByChannel` na skonfigurowanym kanale interakcji z ignorowaniem gracza i celu, celowany w `Component->Bounds.Origin`).
 
 ---
 
@@ -79,7 +79,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
   Przepływ został w pełni przestawiony na model asynchroniczny:
   ```text
   CLIENT:
-    1. Wykrycie propa w celowniku (LineTrace)
+    1. Wykrycie propa w celowniku (Sphere Trace)
     2. CarryState = ECarryState::RequestingGrab (blokada wysyłania kolejnych żądań)
     3. Server_RequestGrab(HitActor, Component)
   SERVER:
@@ -171,7 +171,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 * **Pliki:** [`InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp), [`PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp)
 * **Status:** `[~] Częściowo zrobione`
 * **Stan faktyczny:**
-  Większość kluczowych wartości (`TraceDistance`, `MaxCarryMass`, `ThrowImpulseStrength`, `CarryBreakDistance`, `MaxSwingThrowSpeed`, `VelocityStopThreshold`, `MinInteractionInterval`, `MaxPushableMass`, `PlayerPushForce`) została wyciągnięta do pól `UPROPERTY(EditDefaultsOnly)`.
+  Większość kluczowych wartości (`TraceDistance`, `InteractionTraceRadius`, `MaxCarryMass`, `ThrowImpulseStrength`, `CarryBreakDistance`, `MaxSwingThrowSpeed`, `VelocityStopThreshold`, `MinInteractionInterval`, `MaxPushableMass`, `PlayerPushForce`) została wyciągnięta do pól `UPROPERTY(EditDefaultsOnly)`.
 * **Do zrobienia:**
   W kodzie pozostały drobne stałe geometryczne (np. `constexpr float HoldRadius = 110.0f;`, `PitchRad`, offset Z). Warto przenieść je do struktury konfiguracyjnej `FCarrySocketConfig`.
 
@@ -188,36 +188,48 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 ---
 
 ### 11. Dedykowany kanał kolizji interakcji (`ECC_Interaction`)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L396)
-* **Status:** `[ ] Do zrobienia`
-* **Problem:**
-  Interakcja korzysta z `ECC_Visibility`. Może to powodować problemy, gdy przezroczyste szyby blokują interakcję z przedmiotem za nimi lub odwrotnie.
-* **Do zrobienia:**
-  Skonfigurować w `DefaultEngine.ini` własny kanał kolizji (np. `ECC_GameTraceChannel1` jako `ECC_Interaction`) i przestawić `PerformTrace`.
+* **Pliki:**
+  - [`Config/DefaultEngine.ini`](file:///E:/UE_PROJECTS/MyProject/Config/DefaultEngine.ini)
+  - [`Source/MyProject/MyProject.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/MyProject.h)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny po wdrożeniu:**
+  - W `DefaultEngine.ini` zarejestrowano kanał kolizji `Interaction` mapowany na `ECC_GameTraceChannel2`.
+  - W `MyProject.h` dodano definicję `#define ECC_Interaction ECC_GameTraceChannel2`.
+  - W `UInteractionComponent` wprowadzono pole:
+    ```cpp
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
+    TEnumAsByte<ECollisionChannel> InteractionChannel = ECC_Visibility;
+    ```
+  - Dzięki temu kod zachowuje 100% kompatybilności wstecznej ze wszystkimi istniejącymi propami w świecie (działa od ręki na `ECC_Visibility`), a w edytorze po restarcie jest dostępny natywny profil `Interaction`, na który można w dowolnej chwili przestawić kanał testu.
+  - Weryfikacja serwera w `CanGrabServer` (LoS) korzysta ze spójnego kanału `InteractionChannel`.
 
 ---
 
 ### 12. Ulepszenie UX detekcji interakcji (Sphere Trace zamiast Line Trace)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L390)
-* **Status:** `[ ] Do zrobienia`
-* **Problem:**
-  Czysty `LineTraceSingleByChannel` utrudnia wycelowanie w małe obiekty (np. monety, klucze, małe flakoniki).
-* **Do zrobienia:**
-  Zastąpić pojedynczy promień testem `SweepSingleByChannel` ze sferą o promieniu np. $10–15\text{ cm}$.
+* **Pliki:**
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny po wdrożeniu:**
+  - W `UInteractionComponent` dodano konfigurowalną właściwość:
+    ```cpp
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.0", ClampMax = "50.0"))
+    float InteractionTraceRadius = 12.0f;
+    ```
+  - W `PerformTrace()` zastosowano dynamiczny wybór kształtu:
+    - Dla `InteractionTraceRadius > 0.0f` wykonywany jest sweep sferyczny `World->SweepSingleByChannel` ze sferą o promieniu $12\text{ cm}$. Celowanie w drobne przedmioty, flakony i małe dźwignie w lochu jest teraz intuicyjne i wybacza drobne przesunięcia celownika.
+    - Dla `InteractionTraceRadius == 0.0f` kod zachowuje tryb klasycznego, idealnie cienkiego promienia `LineTraceSingleByChannel`.
+  - W trybie debugowania (`ENABLE_DRAW_DEBUG`) rysowana jest zielona sfera kolizyjna `DrawDebugSphere`.
 
 ---
 
-### 13. Zabezpieczenie debugowania rysunkowego (`DrawDebugLine`)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L411)
+### 13. Zabezpieczenie debugowania rysunkowego (`DrawDebugLine` / `DrawDebugSphere`)
+* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
 * **Status:** `[x] Rozwiązane`
 * **Stan faktyczny:**
-  Wszelkie wywołania `DrawDebugLine` zostały otoczone dyrektywą preprocesora:
-  ```cpp
-  #if ENABLE_DRAW_DEBUG
-      DrawDebugLine(GetWorld(), CameraLocation, OutHit.ImpactPoint, FColor::Green, false, 2.0f, 0, 2.0f);
-  #endif
-  ```
-  W buildach produkcyjnych (Shipping) kod ten jest całkowicie usuwany przez kompilator.
+  Wszelkie wywołania debugowe są objęte dyrektywą `#if ENABLE_DRAW_DEBUG`. W buildach Shipping nie trafiają do skompilowanej binarki.
 
 ---
 
@@ -318,7 +330,7 @@ graph TD
 
     subgraph "Sprint 2: Refaktoryzacja Fizyki Postaci (P1)"
         S2_1["Wydzielenie pchania fizyki z PlayerCharacter do komponentu (pkt 7) [Zrobione]"]
-        S2_2["Wprowadzenie kanału ECC_Interaction i Sphere Trace (pkt 11, 12)"]
+        S2_2["Wprowadzenie kanału ECC_Interaction i Sphere Trace (pkt 11, 12) [Zrobione]"]
     end
 
     subgraph "Sprint 3: Clean Code & Telemetria (P2)"

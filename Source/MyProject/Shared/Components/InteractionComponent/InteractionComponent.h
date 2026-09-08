@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/HitResult.h"
 #include "InteractionComponent.generated.h"
 
@@ -61,6 +62,14 @@ protected:
     /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float TraceDistance = 300.0f;
+
+    /** Promień sfery testu kolizji (cm) przy wykrywaniu interakcji. Wartość > 0 zamienia cienki promień w Sphere Trace (dużo łatwiejsze celowanie) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.0", ClampMax = "50.0"))
+    float InteractionTraceRadius = 12.0f;
+
+    /** Kanał kolizji używany do wykrywania obiektów interaktywnych */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
+    TEnumAsByte<ECollisionChannel> InteractionChannel = ECC_Visibility;
 
     /** Maksymalna masa obiektu, jaką postać może unieść (kg). Cięższe obiekty nie mogą być podniesione */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")

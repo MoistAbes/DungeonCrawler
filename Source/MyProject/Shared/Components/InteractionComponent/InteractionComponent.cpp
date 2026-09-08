@@ -4,6 +4,8 @@
 #include "Camera/PlayerCameraManager.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "CollisionQueryParams.h"
+#include "CollisionShape.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
@@ -444,7 +446,7 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
             LoSHit,
             EyesLoc,
             TargetCenter,
-            ECC_Visibility,
+            InteractionChannel,
             LoSParams
         );
 
@@ -608,6 +610,9 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     const AActor* Owner = GetOwner();
     if (!Owner) return false;
 
+    const UWorld* World = GetWorld();
+    if (!World) return false;
+
     FVector CameraLocation;
     FRotator CameraRotation;
     GetCameraViewPoint(CameraLocation, CameraRotation);
@@ -615,16 +620,33 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     const float ExtendedTraceDistance = TraceDistance + 1000.0f;
     const FVector TraceEnd = CameraLocation + (CameraRotation.Vector() * ExtendedTraceDistance);
 
-    FCollisionQueryParams Params;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(InteractionTrace), false, Owner);
     Params.AddIgnoredActor(Owner);
 
-    const bool bHit = GetWorld()->LineTraceSingleByChannel(
-        OutHit,
-        CameraLocation,
-        TraceEnd,
-        ECC_Visibility,
-        Params
-    );
+    bool bHit = false;
+    if (InteractionTraceRadius > 0.0f)
+    {
+        const FCollisionShape SphereShape = FCollisionShape::MakeSphere(InteractionTraceRadius);
+        bHit = World->SweepSingleByChannel(
+            OutHit,
+            CameraLocation,
+            TraceEnd,
+            FQuat::Identity,
+            InteractionChannel,
+            SphereShape,
+            Params
+        );
+    }
+    else
+    {
+        bHit = World->LineTraceSingleByChannel(
+            OutHit,
+            CameraLocation,
+            TraceEnd,
+            InteractionChannel,
+            Params
+        );
+    }
 
     if (!bHit)
     {
@@ -638,7 +660,14 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     }
 
 #if ENABLE_DRAW_DEBUG
-    DrawDebugLine(GetWorld(), CameraLocation, OutHit.ImpactPoint, FColor::Green, false, 2.0f, 0, 2.0f);
+    if (InteractionTraceRadius > 0.0f)
+    {
+        DrawDebugSphere(World, OutHit.ImpactPoint, InteractionTraceRadius, 12, FColor::Green, false, 2.0f, 0, 1.5f);
+    }
+    else
+    {
+        DrawDebugLine(World, CameraLocation, OutHit.ImpactPoint, FColor::Green, false, 2.0f, 0, 2.0f);
+    }
 #endif
     return true;
 }
