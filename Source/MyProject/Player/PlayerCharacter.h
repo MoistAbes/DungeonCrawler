@@ -13,6 +13,7 @@ class UCameraComponent;
 class USpringArmComponent;
 class UPlayerCameraComponent;
 class UInteractionComponent;
+class UPhysicsCarryComponent;
 class UDamageableComponent;
 class UKnockbackComponent;
 class UStatusEffectComponent;
@@ -32,8 +33,8 @@ public:
     // --- ICarryAnchorProviderInterface ---
     virtual USceneComponent* GetHoldAnchorComponent() const override { return HoldAnchorComponent; }
     virtual float GetCarryEyeHeightOffset() const override { return BaseEyeHeightOffset; }
-    virtual float GetMaxPushableMass() const override { return MaxPushableMass; }
     virtual float GetPlayerPushForce() const override { return PlayerPushForce; }
+    virtual float GetMaxPushableMass() const override { return MaxPushableMass; }
 
     // -------------------------------------------------------------------------
     // Components
@@ -47,9 +48,13 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<USceneComponent> HoldAnchorComponent;
 
-    /** Komponent odpowiedzialny za detekcję i logikę interakcji z propami i przełącznikami */
+    /** Komponent odpowiedzialny za detekcję wzrokiem i logikę interakcji z mechanizmami lochu */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UInteractionComponent> InteractionComponent;
+
+    /** Komponent odpowiedzialny za manipulację fizyczną, noszenie i rzucanie obiektami (Chaos) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
+    TObjectPtr<UPhysicsCarryComponent> PhysicsCarryComponent;
 
     /** Komponent zarządzający punktami zdrowia i uszkodzeniami fizycznymi gracza */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
@@ -107,7 +112,7 @@ public:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> InteractAction;
 
-    /** Akcja rzutu aktualnie trzymanym przedmiotem (LPM) */
+    /** Akcja rzutu aktualnie trzymanym przedmiotem (Klawisz R / LPM) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Input")
     TObjectPtr<UInputAction> ThrowAction;
 
@@ -116,7 +121,7 @@ public:
     TObjectPtr<UInputAction> JumpAction;
 
     // -------------------------------------------------------------------------
-    // Physics Prop Pushing (Opcja B: Kontrolowane pchanie fizyczne z zachowaniem praw pędu)
+    // Physics Prop Pushing
     // -------------------------------------------------------------------------
 
     /** Maksymalna masa pojedynczego propa (w kg), którą postać podejmuje próbę przepchnąć */
@@ -143,7 +148,6 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Material")
     EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Flesh;
 
-private:
     // -------------------------------------------------------------------------
     // Input Handlers
     // -------------------------------------------------------------------------
@@ -151,7 +155,6 @@ private:
     void Move(const FInputActionValue& Value);
     void Look(const FInputActionValue& Value);
     void Zoom(const FInputActionValue& Value);
-
     void HandleInteract();
     void HandleThrow();
 };

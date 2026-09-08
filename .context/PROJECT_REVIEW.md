@@ -17,16 +17,16 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 | **6** | `InteractionComponent` za mocno powiązany z `APlayerCharacter` | 🟠 **P1** | Loose Coupling | **[x] Rozwiązane** |
 | **7** | Logika pushowania fizyki siedzi w `PlayerCharacter` | 🟠 **P1** | Single Responsibility | **[x] Rozwiązane** |
 | **8** | Dużo pracy wykonywanej co klatkę w `InteractionComponent` | 🟠 **P1** | Optymalizacja / CPU | **[x] Rozwiązane** |
-| **9** | Magic numbers w kodzie | 🟡 **P2** | Clean Code / Tuning | **[~] Częściowo zrobione** |
-| **10**| Hardcoded velocity stop (`VelocityStopThreshold`) | 🟡 **P2** | Fizyka / Chaos | **[~] Częściowo zrobione** |
+| **9** | Magic numbers w kodzie (`FCarrySocketConfig`) | 🟡 **P2** | Clean Code / Tuning | **[x] Rozwiązane** |
+| **10**| Hardcoded velocity stop (`VelocityStopThreshold`) | 🟡 **P2** | Fizyka / Chaos | **[x] Rozwiązane** |
 | **11**| Interakcja korzysta z `ECC_Visibility` zamiast dedykowanego kanału | 🟡 **P2** | Kolizje / Semantyka | **[x] Rozwiązane** |
 | **12**| Line Trace można poprawić UX-owo (Sphere Trace) | 🟡 **P2** | UX / Interakcja | **[x] Rozwiązane** |
 | **13**| `DrawDebugLine()` bezpośrednio w gameplay code | 🟡 **P2** | Profiling / Debug | **[x] Rozwiązane** |
-| **14**| `LogTemp` jest używany za szeroko | 🟡 **P2** | Logging / Telemetria | **[ ] Do zrobienia** |
+| **14**| `LogTemp` jest używany za szeroko (Dedykowane kategorie) | 🟡 **P2** | Logging / Telemetria | **[x] Rozwiązane** |
 | **15**| Reliable RPC potrzebują rate limitu / cooldownu | 🟠 **P1** | Sieć / Anti-Spam | **[x] Rozwiązane** |
 | **16**| `_Validate()` a Gameplay Validation (2 warstwy) | 🟠 **P1** | Architektura Sieciowa | **[x] Rozwiązane** |
 | **17**| `NetworkFunctionLibrary` – pilnować, by nie stała się God Class | 🟡 **P2** | Higiena Kodu | **[x] Rozwiązane** |
-| **18**| Architektura komponentowa (Component Design) | 🟢 **Zaleta** | Architektura | **[x] Utrzymywane** |
+| **18**| Architektura komponentowa (Wydzielenie `UPhysicsCarryComponent`) | 🟢 **Zaleta** | Architektura | **[x] Utrzymywane i Rozbudowane** |
 | **19**| Replikowany `StatusEffectComponent` | 🟢 **Zaleta** | Architektura | **[x] Utrzymywane** |
 | **20**| Kamera jako osobny komponent (`PlayerCameraComponent`) | 🟢 **Zaleta** | Architektura | **[x] Utrzymywane** |
 | **21**| Dokumentacja nie odpowiada w pełni aktualnemu kodowi | 🟠 **P1** | Dokumentacja | **[x] Rozwiązane** |
@@ -37,266 +37,125 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 ## 🔴 P0 — Krytyczne dla Multiplayera i Bezpieczeństwa Sieci
 
 ### 1. Walidacja `Server_RequestReleaseOrThrow` i prędkości rzutu
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Plik:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp)
 * **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  Serwer bezkrytycznie przyjmował `LaunchVelocity` podane przez klienta (`return true;`), co pozwalało klientowi wymuszać dowolną prędkość rzutu w świecie gry.
 * **Stan faktyczny w kodzie:**
   1. Podzielono rzut na dwa dedykowane RPC:
-     - `Server_RequestForwardThrow()`: Klient wysyła **wyłącznie intencję rzutu na wprost (LPM)**. Serwer w 100% samodzielnie wylicza wektor prędkości w metodzie [`CalculateServerThrowVelocity()`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L236) (uwzględnia kąt patrzenia, impuls bazowy oraz dziedziczenie pędu biegu gracza).
-     - `Server_RequestDropOrSwing(SwingVelocity)`: Klient przesyła wyliczony pęd zamachu kamery przy klawiszu `E`. Serwer waliduje NaN (`!SwingVelocity.ContainsNaN()`), a w ciele metody sztywno ucina prędkość do bezpiecznego limitu:
-       ```cpp
-       const float ClampedSpeed = FMath::Min(Speed, MaxSwingThrowSpeed);
-       const FVector ValidatedVelocity = SwingVelocity.GetSafeNormal() * ClampedSpeed;
-       ```
-* **Wnioski / Co ewentualnie poprawić:** Można w przyszłości całkowicie przenieść wyliczanie `TrackedCameraSwingVelocity` na serwer na podstawie replikowanego rotatora ControlRotation, eliminując przesyłanie wektora z klienta.
+     - `Server_RequestForwardThrow()`: Klient wysyła **wyłącznie intencję rzutu na wprost (R / LPM)**. Serwer w 100% samodzielnie wylicza wektor prędkości w metodzie `CalculateServerThrowVelocity()` (uwzględnia kąt patrzenia, impuls bazowy oraz dziedziczenie pędu biegu gracza).
+     - `Server_RequestDropOrSwing(SwingVelocity)`: Klient przesyła wyliczony pęd zamachu kamery przy klawiszu `E`. Serwer waliduje NaN (`!SwingVelocity.ContainsNaN()`), a w ciele metody sztywno ucina prędkość do bezpiecznego limitu (`MaxSwingThrowSpeed`).
 
 ---
 
 ### 2. Kompleksowa walidacja serwerowa `Server_RequestGrab`
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
-* **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  `Server_RequestGrab_Validate()` sprawdzał jedynie `TargetActor != nullptr`. Brak weryfikacji odległości, widoczności (LoS), masy, zniszczenia obiektu czy przynależności komponentu.
-* **Stan faktyczny w kodzie:**
-  Wprowadzono 2-warstwową weryfikację. W metodzie serwerowej wywoływana jest kompleksowa funkcja [`CanGrabServer(TargetActor, ComponentToGrab)`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L265):
-  1. Walidacja poprawności wskaźników (`IsValid(TargetActor)`, `IsValid(ComponentToGrab)`).
-  2. Weryfikacja przynależności: `ComponentToGrab->GetOwner() == TargetActor`.
-  3. Sprawdzenie stanu gracza: `CarryState == ECarryState::None || CarryState == ECarryState::RequestingGrab`.
-  4. Kontrakt [`IGrabbableInterface::CanGrab(Owner)`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IGrabbableInterface.h) (czy obiekt nie jest zajęty, czy żyje).
-  5. Weryfikacja masy: `Grabbable->GetMass() <= MaxCarryMass` (35 kg).
-  6. Weryfikacja odległości z uwzględnieniem promienia kolizji propa (`AllowedDist = TraceDistance + BoundsRadius + 100.0f`).
-  7. Test Line of Sight (`LineTraceSingleByChannel` na skonfigurowanym kanale interakcji z ignorowaniem gracza i celu, celowany w `Component->Bounds.Origin`).
-
----
-
-### 3. Asynchroniczny przepływ `PrimaryInteract()` (Eliminacja Desynchronizacji)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
-* **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  Klient lokalnie przypisywał `GrabbedActor = HitActor` i włączał `Tick` przed wysłaniem RPC do serwera. W przypadku odrzucenia przez serwer klient pozostawał w stanie desynchronizacji.
-* **Stan faktyczny w kodzie:**
-  Przepływ został w pełni przestawiony na model asynchroniczny:
-  ```text
-  CLIENT:
-    1. Wykrycie propa w celowniku (Sphere Trace)
-    2. CarryState = ECarryState::RequestingGrab (blokada wysyłania kolejnych żądań)
-    3. Server_RequestGrab(HitActor, Component)
-  SERVER:
-    4. Walidacja w CanGrabServer()
-    5a. Jeśli SUKCES -> ExecuteGrab(...) -> Prop przechodzi w Carrying
-    5b. Jeśli ODMOWA -> Client_GrabDenied() -> Klient woła ResetGrabState()
-  ```
-  Klient **nie mutuje już** wskaźnika `GrabbedActor` ani nie uruchamia interpolacji przed autorytatywną zgodą serwera.
-
----
-
-## 🟠 P1 — Architektura Interakcji, Stanu i Kinetyki
-
-### 4. Formalna maszyna stanów niesienia (`ECarryState`)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h#L11-L24)
+* **Plik:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp)
 * **Status:** `[x] Rozwiązane`
 * **Stan faktyczny w kodzie:**
-  Wprowadzono dedykowany typ wyliczeniowy `ECarryState`:
-  - `ECarryState::None` – brak interakcji, ręce wolne.
-  - `ECarryState::RequestingGrab` – klient wysłał żądanie i oczekuje na decyzję serwera.
-  - `ECarryState::Carrying` – obiekt jest aktywnie niesiony i prowadzony sweepem.
-  - `ECarryState::Releasing` – faza upuszczania lub wyrzutu (zapobiega ponownemu chwytaniu w tej samej klatce).
+  1. Dwupoziomowa walidacja RPC (strukturalna w `_Validate`, domenowa w `_Implementation` z `CanGrabServer`).
+  2. Weryfikacja odległości z uwzględnieniem promienia propa, weryfikacja Line of Sight, masy (`MaxCarryMass`) oraz stanu gotowości obiektu (`IGrabbable::CanGrab`).
 
 ---
 
-### 5. Reprezentacja Transformu Niesionego Obiektu (Server vs Client)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L198)
+### 3. Asynchroniczna autorytatywność `TryGrab` (Zero lokalnego desyncu)
+* **Plik:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp)
 * **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  `UpdateCarriedPropTransform()` wykonywał lokalny sweep i interpolację dla wszystkich klientów, w tym zdalnych (Remote Proxies).
-* **Stan faktyczny po optymalizacji:**
-  - Prowadzenie propa sweepem (`UpdateHoldAnchorTransform`, `UpdateCarriedPropTransform`) jest uruchamiane **wyłącznie** u lokalnie kontrolującego gracza (`IsLocallyControlled()`) oraz na serwerze (`bHasAuthority`).
-  - Zdalni gracze (Remote Proxies) nie zużywają cykli CPU na testy sweep i fizykę – transform niesionego propa otrzymują automatycznie poprzez wbudowaną replikację i wygładzanie ruchu silnika (`ReplicatedMovement`, 60 Hz).
-  - W `TickComponent`, `NotifyCarriedPropAttached` oraz `ExecuteGrab` dodano wczesne wyjście oraz ograniczenie aktywacji ticku dla `Remote Proxies`.
+* **Stan faktyczny w kodzie:**
+  1. Klient po wykryciu obiektu ustawia stan przejściowy `ECarryState::RequestingGrab` i wysyła `Server_RequestGrab`.
+  2. Dopiero gdy serwer zatwierdzi chwyt i nada autorytet, obiekt przechodzi w stan trzymania (`ECarryState::Carrying`).
+  3. W przypadku odmowy serwera wywoływany jest `Client_GrabDenied()`, który czyści stan bez artefaktów wizualnych.
 
 ---
 
-### 6. Rozłączenie (Decoupling) `InteractionComponent` od `APlayerCharacter`
+### 4. Maszyna Stanów Niesienia (`ECarryState`)
+* **Plik:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny:**
+  Stan maszyny stanów: `None`, `RequestingGrab`, `Carrying`, `Releasing`.
+
+---
+
+### 5. Kinematyczny Sweep i Replikacja Niesienia
+* **Plik:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.cpp)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny:**
+  Kinematyczny sweep ze śledzeniem kolizji prowadzony jest wyłącznie na Serwerze oraz u gracza lokalnego (`IsLocallyControlled`). Pozostali gracze odbierają ruch wygładzony przez replikację ruchu aktora (`ReplicatedMovement`).
+
+---
+
+### 6 & 7. Loose Coupling i Single Responsibility (Wydzielenie Komponentów)
 * **Pliki:**
-  - [`Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L79-L86)
-* **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  Bezpośrednie rzutowanie `Cast<APlayerCharacter>(PawnOwner)` łamało zasady warstwy `Shared`.
-* **Stan faktyczny w kodzie:**
-  Stworzono interfejs [`ICarryAnchorProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h):
-  - `GetHoldAnchorComponent()`
-  - `GetCarryEyeHeightOffset()`
-  - `GetMaxPushableMass()`
-  - `GetPlayerPushForce()`
-  `UInteractionComponent` nie zawiera ani jednej linijki odwołującej się do `APlayerCharacter`. Może być przypięty do dowolnego humanoida AI, potwora czy alternatywnej klasy postaci.
-
----
-
-### 7. Wydzielenie logiki pchania fizyki z `PlayerCharacter`
-* **Pliki:**
-  - [`Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h)
-  - [`Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.cpp)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
+  - [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h)
   - [`Source/MyProject/Player/PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
 * **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  W `APlayerCharacter::MoveBlockedBy()` oraz `UInteractionComponent::HandleSweepCollision()` powielona była bezpośrednia logika fizycznego pchania (`IsSimulatingPhysics`, weryfikacja masy `MaxPushableMass`, rzutowanie wektora normalnej na XY, `AddForceAtLocation`, tłumienie mikroruchów ciężkich brył Chaos).
-* **Stan faktyczny po optymalizacji:**
-  - Zunifikowano logikę pchania w [`UKineticForceLibrary::TryApplyPhysicsPush()`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h#L73) oraz [`UKineticForceLibrary::SuppressHeavyPhysicsJitter()`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h#L89).
-  - Zarówno `APlayerCharacter::MoveBlockedBy`, jak i `UInteractionComponent::HandleSweepCollision` oraz `StopHeavyPhysicsObject` delegują całą fizykę kontaktową do tej jednej biblioteki utility.
+* **Stan faktyczny:**
+  - `UInteractionComponent`: Odchudzony do czystego wykrywania (Sphere/Line Trace), obsługi `IInteractable` (dźwignie, przyciski) oraz wsparcia dla akcji natychmiastowych i przytrzymania (Hold/Channeling 5s z delegatem postępu dla UI).
+  - `UPhysicsCarryComponent`: Samodzielny podsystem fizyczny do noszenia, rzucania (Klawisz R / LPM), zamachu myszką (Klawisz E) i tłumienia jitteru Chaos.
 
 ---
 
 ### 8. Optymalizacja operacji wykonywanych w `TickComponent`
-* **Pliki:**
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
 * **Status:** `[x] Rozwiązane`
-* **Problem zgłoszony:**
-  `TickComponent` wykonywał co klatkę m.in. kosztowne zapytanie do sceny fizycznej `PropPrim->GetOverlappingComponents(Overlaps)` w metodzie `SuppressOverlappingHeavyPhysics`.
-* **Stan faktyczny po optymalizacji:**
-  - Zastąpiono odpytywanie sceny co klatkę podejściem **Event-Driven Overlap Tracking**:
-    - Przy podniesieniu propa dynamicznie rejestrowane są delegaty `OnComponentBeginOverlap` i `OnComponentEndOverlap` na `GrabbedComponent` (metoda `BindPropOverlapEvents`).
-    - Obiekty fizyczne kolidujące z propem są przechowywane w buforze `TArray<TWeakObjectPtr<UPrimitiveComponent>> OverlappingPhysicsComponents`.
-    - W `SuppressOverlappingHeavyPhysics` sprawdzany jest warunek `OverlappingPhysicsComponents.IsEmpty()` ($O(1)$) – jeśli brak ciał w kontakcie, następuje natychmiastowe wyjście bez żadnych alokacji ani zapytań do silnika fizyki.
-    - Przy upuszczeniu propa (`UnbindPropOverlapEvents`) delegaty są natychmiast wyrejestrowywane, a bufor czyszczony.
+* **Stan faktyczny:**
+  Zastosowano Event-Driven Overlaps zamiast kosztownych zapytań `GetOverlappingComponents` co klatkę.
 
 ---
 
-## 🟡 P2 — Tuning, Fizyka, Kolizje i Konwencje
-
-### 9. Eliminacja Magic Numbers
-* **Pliki:** [`InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp), [`PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp)
-* **Status:** `[~] Częściowo zrobione`
-* **Stan faktyczny:**
-  Większość kluczowych wartości (`TraceDistance`, `InteractionTraceRadius`, `MaxCarryMass`, `ThrowImpulseStrength`, `CarryBreakDistance`, `MaxSwingThrowSpeed`, `VelocityStopThreshold`, `MinInteractionInterval`, `MaxPushableMass`, `PlayerPushForce`) została wyciągnięta do pól `UPROPERTY(EditDefaultsOnly)`.
-* **Do zrobienia:**
-  W kodzie pozostały drobne stałe geometryczne (np. `constexpr float HoldRadius = 110.0f;`, `PitchRad`, offset Z). Warto przenieść je do struktury konfiguracyjnej `FCarrySocketConfig`.
+### 9. Eliminacja Magic Numbers (`FCarrySocketConfig`)
+* **Pliki:** [`Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h)
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny po wdrożeniu:**
+  Wprowadzono konfigurowalną strukturę `FCarrySocketConfig` zawierającą:
+  - `HoldDistance = 110.0f`
+  - `EyeHeightOffsetZ = -15.0f`
+  - `MinPitch = -50.0f` oraz `MaxPitch = 50.0f`
+  - `AnchorInterpSpeed = 20.0f`
+  - `PropInterpSpeed = 25.0f`
+  - `SwingInterpSpeed = 16.0f`
 
 ---
 
 ### 10. Bezpieczeństwo tłumienia prędkości (`VelocityStopThreshold`)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L64)
-* **Status:** `[~] Częściowo zrobione`
+* **Status:** `[x] Rozwiązane`
 * **Stan faktyczny:**
-  Wartość `60.0f` została wyciągnięta do konfigurowalnego pola `VelocityStopThreshold`. Służy wyłącznie jako zabezpieczenie przed drżeniem obiektów o masie $> 100\text{ kg}$ w kontakcie z graczem.
-* **Rekomendacja:**
-  Utrzymać jako ostateczny bezpiecznik (safety net), jednocześnie dbając o odpowiedni `LinearDamping` i `AngularDamping` w materiałach fizycznych `PhysicalMaterial`.
+  Wyciągnięte do konfigurowalnego pola `VelocityStopThreshold = 60.0f`, zintegrowane w `UKineticForceLibrary::SuppressHeavyPhysicsJitter()`. Służy jako bezpiecznik programowy przed mikro-drżeniem ciężkich brył Chaos.
 
 ---
 
-### 11. Dedykowany kanał kolizji interakcji (`ECC_Interaction`)
-* **Pliki:**
-  - [`Config/DefaultEngine.ini`](file:///E:/UE_PROJECTS/MyProject/Config/DefaultEngine.ini)
-  - [`Source/MyProject/MyProject.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/MyProject.h)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+### 11 & 12. Dedykowany kanał kolizji i Sphere Trace UX
+* **Status:** `[x] Rozwiązane`
+* **Stan faktyczny:**
+  Zarejestrowano kanał `Interaction` w `DefaultEngine.ini`, dodano wsparcie dla Sphere Trace ze sferą $12\text{ cm}$.
+
+---
+
+### 13. Zabezpieczenie debugowania rysunkowego (`#if ENABLE_DRAW_DEBUG`)
+* **Status:** `[x] Rozwiązane`
+
+---
+
+### 14. Dedykowane kategorie logowania (`LogDungeon*`)
+* **Pliki:** [`Source/MyProject/Logging/DungeonLogCategories.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Logging/DungeonLogCategories.h) & [`.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Logging/DungeonLogCategories.cpp)
 * **Status:** `[x] Rozwiązane`
 * **Stan faktyczny po wdrożeniu:**
-  - W `DefaultEngine.ini` zarejestrowano kanał kolizji `Interaction` mapowany na `ECC_GameTraceChannel2`.
-  - W `MyProject.h` dodano definicję `#define ECC_Interaction ECC_GameTraceChannel2`.
-  - W `UInteractionComponent` wprowadzono pole:
-    ```cpp
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
-    TEnumAsByte<ECollisionChannel> InteractionChannel = ECC_Visibility;
-    ```
-  - Dzięki temu kod zachowuje 100% kompatybilności wstecznej ze wszystkimi istniejącymi propami w świecie (działa od ręki na `ECC_Visibility`), a w edytorze po restarcie jest dostępny natywny profil `Interaction`, na który można w dowolnej chwili przestawić kanał testu.
-  - Weryfikacja serwera w `CanGrabServer` (LoS) korzysta ze spójnego kanału `InteractionChannel`.
+  Utworzono i podpięto kategorie:
+  - `LogDungeonInteraction`
+  - `LogDungeonPhysics`
+  - `LogDungeonNetwork`
+  - `LogDungeonMechanisms`
+  - `LogDungeonElements`
+  Wszystkie wywołania `LogTemp` w projekcie zostały wyeliminowane.
 
 ---
 
-### 12. Ulepszenie UX detekcji interakcji (Sphere Trace zamiast Line Trace)
-* **Pliki:**
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
-  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
-* **Status:** `[x] Rozwiązane`
-* **Stan faktyczny po wdrożeniu:**
-  - W `UInteractionComponent` dodano konfigurowalną właściwość:
-    ```cpp
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction", meta = (ClampMin = "0.0", ClampMax = "50.0"))
-    float InteractionTraceRadius = 12.0f;
-    ```
-  - W `PerformTrace()` zastosowano dynamiczny wybór kształtu:
-    - Dla `InteractionTraceRadius > 0.0f` wykonywany jest sweep sferyczny `World->SweepSingleByChannel` ze sferą o promieniu $12\text{ cm}$. Celowanie w drobne przedmioty, flakony i małe dźwignie w lochu jest teraz intuicyjne i wybacza drobne przesunięcia celownika.
-    - Dla `InteractionTraceRadius == 0.0f` kod zachowuje tryb klasycznego, idealnie cienkiego promienia `LineTraceSingleByChannel`.
-  - W trybie debugowania (`ENABLE_DRAW_DEBUG`) rysowana jest zielona sfera kolizyjna `DrawDebugSphere`.
-
----
-
-### 13. Zabezpieczenie debugowania rysunkowego (`DrawDebugLine` / `DrawDebugSphere`)
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+### 15 & 16. Rate Limiting i 2-Warstwowa Walidacja RPC
 * **Status:** `[x] Rozwiązane`
 * **Stan faktyczny:**
-  Wszelkie wywołania debugowe są objęte dyrektywą `#if ENABLE_DRAW_DEBUG`. W buildach Shipping nie trafiają do skompilowanej binarki.
+  Wprowadzono `MinInteractionInterval = 0.15f` zarówno po stronie klienta (debounce), jak i serwera (rate limit).
 
 ---
 
-### 14. Dedykowane kategorie logowania zamiast `LogTemp`
-* **Pliki:** Cały projekt `Source/MyProject/`
-* **Status:** `[ ] Do zrobienia`
-* **Problem:**
-  Nadużywanie ogólnego `LogTemp` utrudnia filtrowanie komunikatów na serwerze i kliencie.
-* **Do zrobienia:**
-  Zdefiniować w nagłówku dedykowane kategorie logowania:
-  - `DECLARE_LOG_CATEGORY_EXTERN(LogDungeonInteraction, Log, All);`
-  - `DECLARE_LOG_CATEGORY_EXTERN(LogDungeonPhysics, Log, All);`
-  - `DECLARE_LOG_CATEGORY_EXTERN(LogDungeonNetwork, Log, All);`
-  - `DECLARE_LOG_CATEGORY_EXTERN(LogDungeonElements, Log, All);`
-
----
-
-### 15. Rate Limiting i ochrona przed spamem RPC
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
-* **Status:** `[x] Rozwiązane`
-* **Stan faktyczny po optymalizacji:**
-  - Wprowadzono konfigurowalny `MinInteractionInterval = 0.15f` (150 ms) jako techniczny debounce.
-  - **Po stronie klienta:** Sprawdzany w `PrimaryInteract()` oraz `ThrowCurrentProp()` z użyciem `LastClientInteractionTime`, eliminując nieintencjonalne podwójne kliknięcia myszką.
-  - **Po stronie serwera:** Zabezpieczono wszystkie RPC interakcji (`Server_RequestGrab_Implementation`, `Server_RequestForwardThrow_Implementation`, `Server_RequestDropOrSwing_Implementation`, `Server_RequestInteract_Implementation`). W przypadku `Server_RequestGrab` weryfikacja następuje natychmiast na wejściu, **przed** jakimikolwiek raycastami LoS lub operacjami na fizyce (`Client_GrabDenied()`), w pełni chroniąc CPU serwera.
-
----
-
-### 16. Rozdział Walidacji: RPC Validation vs Gameplay Validation
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L446)
-* **Status:** `[x] Rozwiązane`
-* **Stan faktyczny:**
-  Zgodnie z najlepszymi praktykami Unreal Engine:
-  - `_Validate()` weryfikuje jedynie poprawność strukturalną pakietu sieciowego (brak `nullptr`, brak `NaN`).
-  - Logika biznesowa (zasięg, masa, LoS, cooldown) została oddelegowana do metody domenowej `CanGrabServer()`. Błąd biznesowy nie rozłącza gracza błędem sieciowym, lecz zwraca elegancką odmowę `Client_GrabDenied()`.
-
----
-
-### 17. Higiena `NetworkFunctionLibrary` (Zapobieganie God Class)
-* **Plik:** [`Source/MyProject/Networking/NetworkFunctionLibrary.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Networking/NetworkFunctionLibrary.h)
-* **Status:** `[x] Rozwiązane`
-* **Stan faktyczny:**
-  Biblioteka zawiera wyłącznie czyste utility sieciowe (`REQUIRE_AUTHORITY`, `HasAuthority`, `GetNetRolePrefix`, konfigurację kwantyzacji). Nie zawiera ani jednej metody związanej z logiką gry czy walidacją poszczególnych mechanik.
-
----
-
-## 🟢 Zidentyfikowane Mocne Strony Architektury
-
-### 18. Modułowa Architektura Komponentowa (Component-Driven Design)
-- Wyraźny podział odpowiedzialności: brak monolitycznych klas typu "God Actor".
-- Logika rozdzielona na wyspecjalizowane serwisy: [`DamageableComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/DamageableComponent/DamageableComponent.h), [`StatusEffectComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h), [`InteractionComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h), [`KnockbackComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h).
-
-### 19. Wydajny Silnik Statusów i Reakcji Chemii (`StatusEffectComponent`)
-- Replikowana tablica instancji o wielkości zaledwie 9 bajtów per status.
-- Wzorzec *Zero-Bandwidth Timers* (`ServerEndTime`) eliminujący obciążenie łącza.
-- Rejestr danych `FStatusEffectRegistry` i dwufazowa ewaluacja (`ElementalPriorityPipeline`).
-
-### 20. Izolacja Kamery (`PlayerCameraComponent`)
-- Sterowanie zoomem, wygładzanie i perspektywa są całkowicie odseparowane od logiki postaci i poruszania się.
-
----
-
-## 🟠 21. Synchronizacja Dokumentacji z Kodem Źródłowym
-
-* **Status:** `[x] Rozwiązane`
-* **Stan po aktualizacji:**
-  Zaktualizowano pliki [ARCHITECTURE.md](file:///E:/UE_PROJECTS/MyProject/.context/ARCHITECTURE.md) oraz [MEMORY.md](file:///E:/UE_PROJECTS/MyProject/.context/MEMORY.md).
-  Wyeliminowano wszelkie nieaktualne wzmianki o `ACombatCharacterBase` oraz o "braku networkingu". Dokumentacja wiernie odzwierciedla obecny stan `main`: kinematyczny model oparty o stabilny `CharacterMovementComponent` (CMC), autorytatywną sieć Co-op, mechanizmy pułapek (`APistonTrap`, `APressurePlateProp`) oraz specyfikację [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md).
+### 17, 18, 19, 20, 21. Higiena Architektury i Dokumentacja
+* **Status:** `[x] Rozwiązane / Utrzymywane`
 
 ---
 
@@ -316,35 +175,3 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
      - Obiekt zostaje zniszczony w trakcie niesienia (oczekiwane: reset stanu gracza bez awarii silnika).
   3. **Testy Integralności Fizyki:**
      - Stabilność 4 graczy i kilkunastu ciał sztywnych przy opóźnieniach sieciowych (Ping $100–150\text{ ms}$, packet loss $2\%$).
-
----
-
-## 🚀 Plan Wdrożenia i Kolejność Prac (Action Plan)
-
-```mermaid
-graph TD
-    subgraph "Sprint 1: Dokończenie Bezpieczeństwa Sieciowego (P0/P1)"
-        S1_1["Wprowadzenie server cooldown na RPC interakcji (pkt 15) [Zrobione]"]
-        S1_2["Event-driven overlap dla SuppressOverlappingHeavyPhysics (pkt 8) [Zrobione]"]
-    end
-
-    subgraph "Sprint 2: Refaktoryzacja Fizyki Postaci (P1)"
-        S2_1["Wydzielenie pchania fizyki z PlayerCharacter do komponentu (pkt 7) [Zrobione]"]
-        S2_2["Wprowadzenie kanału ECC_Interaction i Sphere Trace (pkt 11, 12) [Zrobione]"]
-    end
-
-    subgraph "Sprint 3: Clean Code & Telemetria (P2)"
-        S3_1["Własne kategorie logowania LogDungeon* (pkt 14)"]
-        S3_2["Struktura FCarrySocketConfig dla stałych matematycznych (pkt 9)"]
-    end
-
-    subgraph "Sprint 4: Theme Park Loch v0.1 & Testy (P0/P1)"
-        S4_1["Implementacja C++ AProjectileLauncherTrap"]
-        S4_2["Blueprinty: BP_PlankShield_Wood i BP_GlassOrb_*"]
-        S4_3["Stworzenie testów automatycznych Automation Tests (pkt 22)"]
-    end
-
-    Sprint 1 --> Sprint 2
-    Sprint 2 --> Sprint 3
-    Sprint 3 --> Sprint 4
-```

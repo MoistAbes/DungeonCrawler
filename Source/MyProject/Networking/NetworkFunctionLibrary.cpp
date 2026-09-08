@@ -1,15 +1,10 @@
 #include "NetworkFunctionLibrary.h"
 
-#include "GameFramework/Actor.h"
-#include "GameFramework/Pawn.h"
-#include "GameFramework/Character.h"
-#include "Components/CapsuleComponent.h"
-#include "Components/ActorComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
-#include "MyProject/Player/PlayerCharacter.h"
-#include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
+#include "GameFramework/Actor.h"
+#include "GameFramework/Pawn.h"
+#include "MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h"
 
 bool UNetworkFunctionLibrary::HasAuthority(const UObject* Context)
 {
@@ -60,7 +55,7 @@ bool UNetworkFunctionLibrary::IsLocallyControlled(const AActor* Actor)
         return Pawn->IsLocallyControlled();
     }
 
-    return Actor->HasAuthority();
+    return false;
 }
 
 FString UNetworkFunctionLibrary::GetNetRolePrefix(const UObject* Context)
@@ -82,12 +77,27 @@ FString UNetworkFunctionLibrary::GetNetRolePrefix(const UObject* Context)
         return TEXT("[Standalone]");
     }
 
-    if (HasAuthority(Context))
+    if (NetMode == NM_DedicatedServer || NetMode == NM_ListenServer)
     {
         return TEXT("[Server]");
     }
 
-    return TEXT("[Client]");
+    // Dla klienta ustalamy lokalny numer/status gracza
+    const AActor* ContextActor = Cast<AActor>(Context);
+    if (!ContextActor)
+    {
+        if (const UActorComponent* Comp = Cast<UActorComponent>(Context))
+        {
+            ContextActor = Comp->GetOwner();
+        }
+    }
+
+    if (ContextActor && IsLocallyControlled(ContextActor))
+    {
+        return TEXT("[Client (Local)]");
+    }
+
+    return TEXT("[Client (Remote)]");
 }
 
 void UNetworkFunctionLibrary::ConfigurePhysicsReplication(AActor* Actor)
@@ -122,7 +132,7 @@ void UNetworkFunctionLibrary::AttachCarriedProp(AActor* PropActor, UPrimitiveCom
 
     // 1. Odpinamy od wszelkich rodziców w świecie.
     // Prop nie jest przyczepiany "na sztywno" (AttachToComponent), lecz prowadzony kinematycznie
-    // ze sweepem w InteractionComponent. Zapobiega to efektowi nieskończenie silnego spychacza.
+    // ze sweepem w PhysicsCarryComponent. Zapobiega to efektowi nieskończenie silnego spychacza.
     FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
     PropActor->DetachFromActor(DetachRules);
 
@@ -153,10 +163,10 @@ void UNetworkFunctionLibrary::AttachCarriedProp(AActor* PropActor, UPrimitiveCom
         PropActor->SetNetUpdateFrequency(60.0f);
     }
 
-    // 4. Włączamy On-Demand Tick komponentu interakcji na postaci niosącej propa
-    if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
+    // 4. Włączamy On-Demand Tick komponentu PhysicsCarryComponent na postaci niosącej propa
+    if (UPhysicsCarryComponent* CarryComp = CarrierActor->FindComponentByClass<UPhysicsCarryComponent>())
     {
-        InterComp->NotifyCarriedPropAttached(PropActor);
+        CarryComp->NotifyCarriedPropAttached(PropActor);
     }
 }
 
@@ -196,12 +206,12 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         }
     }
 
-    // 6. Powiadamiamy InteractionComponent postaci o zakończeniu niesienia
+    // 6. Powiadamiamy PhysicsCarryComponent postaci o zakończeniu niesienia
     if (CarrierActor)
     {
-        if (UInteractionComponent* InterComp = CarrierActor->FindComponentByClass<UInteractionComponent>())
+        if (UPhysicsCarryComponent* CarryComp = CarrierActor->FindComponentByClass<UPhysicsCarryComponent>())
         {
-            InterComp->NotifyCarriedPropDetached();
+            CarryComp->NotifyCarriedPropDetached();
         }
     }
 

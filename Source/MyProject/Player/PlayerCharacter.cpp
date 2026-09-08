@@ -15,58 +15,71 @@
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
+#include "MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
+#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
+#include "MyProject/Shared/Interfaces/IInteractableInterface.h"
 
 
 APlayerCharacter::APlayerCharacter()
 {
     /*
      * ACharacter already provides:
-     * - CapsuleComponent
-     * - Mesh
-     * - CharacterMovementComponent
+     * - RootComponent = CapsuleComponent
+     * - GetMesh()     = SkeletalMeshComponent
+     * - GetCharacterMovement() = CharacterMovementComponent
      */
 
+    bReplicates = true;
+
     // -------------------------------------------------------------------------
-    // Collision
+    // Capsule Component (Collision)
     // -------------------------------------------------------------------------
 
-    GetCapsuleComponent()->InitCapsuleSize(35.0f, 90.0f);
-    GetCapsuleComponent()->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
+    GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+    GetCapsuleComponent()->SetCollisionProfileName(
+        UCollisionProfile::Pawn_ProfileName);
     GetCapsuleComponent()->SetHiddenInGame(false);
 
 
     // -------------------------------------------------------------------------
-    // Mesh
+    // Skeletal Mesh
     // -------------------------------------------------------------------------
 
-    GetMesh()->SetRelativeLocation(
-        FVector(0.0f, 0.0f, -90.0f));
-
-    GetMesh()->SetRelativeRotation(
-        FRotator(0.0f, -90.0f, 0.0f));
-
-    GetMesh()->SetCollisionProfileName(TEXT("NoCollision"));
-    GetMesh()->SetGenerateOverlapEvents(false);
+    if (GetMesh())
+    {
+        GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -96.0f));
+        GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+    }
 
 
     // -------------------------------------------------------------------------
-    // Character Movement Component
+    // Character Movement
     // -------------------------------------------------------------------------
 
-    UCharacterMovementComponent* MovementComponent =
+    UCharacterMovementComponent* MoveComp =
         GetCharacterMovement();
 
-    if (MovementComponent)
+    if (MoveComp)
     {
-        MovementComponent->MaxWalkSpeed = 600.0f;
-        MovementComponent->GravityScale = 1.8f;
-        MovementComponent->JumpZVelocity = 600.0f;
-        MovementComponent->SetWalkableFloorZ(0.7f);
+        MoveComp->bOrientRotationToMovement = true;
+        MoveComp->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
 
-        // Wyłączamy natywne, nieskalowane pchanie silnika - przejmujemy pełną fizyczną kontrolę w MoveBlockedBy
-        MovementComponent->bEnablePhysicsInteraction = false;
+        MoveComp->JumpZVelocity = 600.0f;
+        MoveComp->AirControl    = 0.2f;
+
+        MoveComp->MaxWalkSpeed = 600.0f;
+
+        /*
+         * Enable physics interaction in CharacterMovementComponent.
+         * We keep the engine system enabled because it provides useful
+         * built-in behaviors (like push downward on standing).
+         *
+         * However, for directional pushing we intercept the event in
+         * MoveBlockedBy and calculate the physical impulse ourselves.
+         */
+        MoveComp->bEnablePhysicsInteraction = true;
     }
 
 
@@ -125,6 +138,10 @@ APlayerCharacter::APlayerCharacter()
         CreateDefaultSubobject<UInteractionComponent>(
             TEXT("InteractionComponent"));
 
+    PhysicsCarryComponent =
+        CreateDefaultSubobject<UPhysicsCarryComponent>(
+            TEXT("PhysicsCarryComponent"));
+
     DamageableComponent =
         CreateDefaultSubobject<UDamageableComponent>(
             TEXT("DamageableComponent"));
@@ -140,8 +157,6 @@ APlayerCharacter::APlayerCharacter()
 
     // -------------------------------------------------------------------------
     // Tick
-    //
-    // Character has NO actor tick now. All components manage their own on-demand ticks.
     // -------------------------------------------------------------------------
 
     PrimaryActorTick.bCanEverTick = false;
@@ -149,40 +164,23 @@ APlayerCharacter::APlayerCharacter()
 }
 
 
+EPhysicalMaterialType
+APlayerCharacter::GetMaterialType_Implementation() const
+{
+    return MaterialType;
+}
+
+
 void APlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-
-    // -------------------------------------------------------------------------
-    // Camera
-    // -------------------------------------------------------------------------
-
-    if (SpringArmComponent)
-    {
-        SpringArmComponent->SetRelativeLocation(
-            FVector(0.0f, 0.0f, BaseEyeHeightOffset));
-    }
-
-    if (PlayerCameraComponent && SpringArmComponent && CameraComponent)
-    {
-        PlayerCameraComponent->SetupCameraReferences(
-            SpringArmComponent,
-            CameraComponent);
-    }
-
-
-    // -------------------------------------------------------------------------
-    // Enhanced Input
-    // -------------------------------------------------------------------------
-
-    if (APlayerController* PlayerController =
-        Cast<APlayerController>(Controller))
+    if (const APlayerController* PC =
+        Cast<APlayerController>(GetController()))
     {
         if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-            ULocalPlayer::GetSubsystem<
-                UEnhancedInputLocalPlayerSubsystem>(
-                    PlayerController->GetLocalPlayer()))
+            ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(
+                PC->GetLocalPlayer()))
         {
             if (DefaultMappingContext)
             {
@@ -195,21 +193,13 @@ void APlayerCharacter::BeginPlay()
 }
 
 
-EPhysicalMaterialType APlayerCharacter::GetMaterialType_Implementation() const
-{
-    return MaterialType;
-}
-
-
 void APlayerCharacter::SetupPlayerInputComponent(
     UInputComponent* PlayerInputComponent)
 {
-    Super::SetupPlayerInputComponent(
-        PlayerInputComponent);
+    Super::SetupPlayerInputComponent(PlayerInputComponent);
 
     UEnhancedInputComponent* EnhancedInputComponent =
-        Cast<UEnhancedInputComponent>(
-            PlayerInputComponent);
+        Cast<UEnhancedInputComponent>(PlayerInputComponent);
 
     if (!EnhancedInputComponent)
     {
@@ -218,7 +208,7 @@ void APlayerCharacter::SetupPlayerInputComponent(
 
 
     // -------------------------------------------------------------------------
-    // Movement
+    // Move
     // -------------------------------------------------------------------------
 
     if (MoveAction)
@@ -260,7 +250,7 @@ void APlayerCharacter::SetupPlayerInputComponent(
 
 
     // -------------------------------------------------------------------------
-    // Interaction
+    // Interact (Klawisz E)
     // -------------------------------------------------------------------------
 
     if (InteractAction)
@@ -274,7 +264,7 @@ void APlayerCharacter::SetupPlayerInputComponent(
 
 
     // -------------------------------------------------------------------------
-    // Throw
+    // Throw (Klawisz R / LPM)
     // -------------------------------------------------------------------------
 
     if (ThrowAction)
@@ -304,22 +294,32 @@ void APlayerCharacter::SetupPlayerInputComponent(
             ETriggerEvent::Completed,
             this,
             &ACharacter::StopJumping);
-
-        EnhancedInputComponent->BindAction(
-            JumpAction,
-            ETriggerEvent::Canceled,
-            this,
-            &ACharacter::StopJumping);
     }
 }
 
 
-void APlayerCharacter::MoveBlockedBy(const FHitResult& Impact)
+void APlayerCharacter::MoveBlockedBy(
+    const FHitResult& Impact)
 {
     Super::MoveBlockedBy(Impact);
 
+    UPrimitiveComponent* HitComp = Impact.GetComponent();
+    if (!HitComp || !HitComp->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    /*
+     * We calculate push physics using the kinetic library.
+     * The library will:
+     * 1. Validate the component
+     * 2. Check if the mass is within pushable limits
+     * 3. Apply the force with proper physics damping
+     *
+     * We use the character forward vector as push direction.
+     */
     UKineticForceLibrary::TryApplyPhysicsPush(
-        Impact.GetComponent(),
+        HitComp,
         Impact,
         GetActorForwardVector(),
         PlayerPushForce,
@@ -333,26 +333,24 @@ void APlayerCharacter::Move(
     const FVector2D MovementVector =
         Value.Get<FVector2D>();
 
-    if (!Controller)
+    if (Controller == nullptr)
     {
         return;
     }
 
-    const FRotator ControlRotation =
+    const FRotator Rotation =
         Controller->GetControlRotation();
 
     const FRotator YawRotation(
         0.0f,
-        ControlRotation.Yaw,
+        Rotation.Yaw,
         0.0f);
 
     const FVector ForwardDirection =
-        FRotationMatrix(YawRotation)
-            .GetUnitAxis(EAxis::X);
+        FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 
     const FVector RightDirection =
-        FRotationMatrix(YawRotation)
-            .GetUnitAxis(EAxis::Y);
+        FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
     AddMovementInput(
         ForwardDirection,
@@ -370,7 +368,7 @@ void APlayerCharacter::Look(
     const FVector2D LookAxisVector =
         Value.Get<FVector2D>();
 
-    if (!Controller)
+    if (Controller == nullptr)
     {
         return;
     }
@@ -396,17 +394,49 @@ void APlayerCharacter::Zoom(
 
 void APlayerCharacter::HandleInteract()
 {
-    if (InteractionComponent)
+    // 1. Jeśli postać już coś trzyma w rękach -> E oznacza upuszczenie / rzut zamachem
+    if (PhysicsCarryComponent && PhysicsCarryComponent->IsCarrying())
     {
-        InteractionComponent->PrimaryInteract();
+        PhysicsCarryComponent->DropOrSwing();
+        return;
+    }
+
+    // 2. Jeśli mamy wolne ręce -> badamy celownik przez InteractionComponent
+    if (!InteractionComponent)
+    {
+        return;
+    }
+
+    FHitResult HitResult;
+    if (InteractionComponent->PerformTrace(HitResult))
+    {
+        AActor* HitActor = HitResult.GetActor();
+        if (!HitActor) return;
+
+        // Priorytet A: Obiekt fizyczny do podniesienia (IGrabbable)
+        if (HitActor->Implements<UGrabbableInterface>())
+        {
+            if (PhysicsCarryComponent)
+            {
+                PhysicsCarryComponent->TryGrab(HitActor, HitResult.GetComponent());
+            }
+            return;
+        }
+
+        // Priorytet B: Logiczny mechanizm lochu (IInteractable) - dźwignia, przełącznik
+        if (HitActor->Implements<UInteractableInterface>())
+        {
+            InteractionComponent->InteractWith(HitActor);
+            return;
+        }
     }
 }
 
 
 void APlayerCharacter::HandleThrow()
 {
-    if (InteractionComponent)
+    if (PhysicsCarryComponent)
     {
-        InteractionComponent->ThrowCurrentProp();
+        PhysicsCarryComponent->ThrowCurrentProp();
     }
 }
