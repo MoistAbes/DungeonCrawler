@@ -2,23 +2,29 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
-#include "MyProject/Logging/DungeonLogCategories.h"
+#include "Net/UnrealNetwork.h"
+
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
-#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
-#include "MyProject/Environment/Elements/Utilities/ElementalDeliveryLibrary.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
+#include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
 
 AVolatileProp::AVolatileProp()
 {
-    MaterialType = EPhysicalMaterialType::Wood;
-    bCanBeGrabbed = true;
-
+    // Konfiguracja domyślna
     EffectRadius = 600.0f;
-    BaseDamage = 25.0f;
-    KnockbackForce = 1800.0f;
-    bApplyKnockback = true;
-    StatusToApply = EStatusEffectType::Burning;
-    StatusDuration = 6.0f;
+    ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceSplash;
+    ZoneDuration = 8.0f;
+    SurfaceSplashHeight = 25.0f;
+
+    // Zunifikowana konfiguracja efektu i wybuchu
+    ZoneEffectConfig.AppliedStatus = EStatusEffectType::Burning;
+    ZoneEffectConfig.InstantDamage = 25.0f;
+    ZoneEffectConfig.KnockbackForce = 1800.0f;
+    ZoneEffectConfig.ContinuousDamagePerSec = 10.0f;
+    ZoneEffectConfig.MovementSpeedMultiplier = 1.0f;
+
     bDrawDebugRadius = true;
+    bHasDetonated = false;
 }
 
 void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
@@ -31,48 +37,74 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     }
     bHasDetonated = true;
 
+    // Wyłączamy kolizję umierającego propa natychmiast, by fizycznie nie blokował promieni LoS nowo tworzonej strefy
+    if (MeshComponent)
+    {
+        MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    }
+
     const FVector DetonationCenter = GetActorLocation();
 
-    // 1. Rozsyłamy niezawodne powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich połączonych graczy
+    // 1. Rozsyłamy powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich graczy
     Multicast_PlayExplosionEffects(DetonationCenter);
     ForceNetUpdate();
 
-    // 2. Eksplozja kinetyczna i statusowa z Line of Sight (Archetyp: Radial Burst)
-    const float AppliedKnockback = bApplyKnockback ? KnockbackForce : 0.0f;
-    UElementalDeliveryLibrary::ApplyRadialBurst(
-        this,
-        DetonationCenter,
-        EffectRadius,
-        StatusToApply,
-        StatusDuration,
-        this,
-        BaseDamage,
-        AppliedKnockback);
-
-    // 3. Dla substancji ciekłych lub ognia tworzymy jednolitą strefę kałuży/pożaru (Archetyp: Status Zone)
-    if (UElementalChemistryLibrary::IsLiquidStatus(StatusToApply) || StatusToApply == EStatusEffectType::Burning)
+    // 2. Wykonanie dokładnie jednego wybranego trybu strefy (czyste testowanie pojedynczych form)
+    switch (ZoneSpawnMode)
     {
-        FVector GroundLocation = DetonationCenter;
-        FHitResult FloorHit;
-        FCollisionQueryParams FloorParams(SCENE_QUERY_STAT(HazardFloorTrace), false, this);
-        if (GetWorld() && GetWorld()->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, 500.0f), ECC_Visibility, FloorParams))
+    case EVolatileZoneSpawnMode::InstantBurstOnly:
         {
-            GroundLocation = FloorHit.ImpactPoint + FVector(0.0f, 0.0f, 3.0f);
+            // Tryb 1: Jednorazowy wybuch z LoS w klatce t0 (brak trwałego aktora)
+            UStatusZoneLibrary::ApplyInstantBurst(
+                this,
+                DetonationCenter,
+                EffectRadius,
+                ZoneEffectConfig,
+                this);
         }
+        break;
 
-        UElementalDeliveryLibrary::SpawnStatusZone(
-            this,
-            GroundLocation,
-            EffectRadius,
-            StatusToApply,
-            StatusDuration,
-            EStatusZoneShapeMode::SurfaceDisk,
-            FVector::UpVector,
-            this);
+    case EVolatileZoneSpawnMode::SurfaceSplash:
+        {
+            // Tryb 2: Powłoka powierzchniowa (10-30 cm) na podłodze/ścianie podpięta pod geometrię
+            FHitResult SurfaceHit;
+            FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(VolatilePropFloorTrace), false, this);
+            if (GetWorld() && GetWorld()->LineTraceSingleByChannel(SurfaceHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, 500.0f), ECC_Visibility, TraceParams))
+            {
+                UStatusZoneLibrary::ApplySurfaceSplash(
+                    this,
+                    SurfaceHit,
+                    EffectRadius,
+                    SurfaceSplashHeight,
+                    ZoneEffectConfig,
+                    ZoneDuration,
+                    this);
+            }
+        }
+        break;
+
+    case EVolatileZoneSpawnMode::VolumetricZone:
+        {
+            // Tryb 3: Trójwymiarowa strefa zawieszona w powietrzu (chmura 3D, dym, gaz)
+            UStatusZoneLibrary::SpawnVolumetricZone(
+                this,
+                DetonationCenter,
+                EffectRadius,
+                ZoneEffectConfig,
+                ZoneDuration,
+                this);
+        }
+        break;
+
+    default:
+        break;
     }
 
-    UE_LOG(LogDungeonElements, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Status: %s)"),
-        *NetUtils::GetNetRolePrefix(this), *GetName(), *DetonationCenter.ToString(), *UEnum::GetValueAsString(StatusToApply));
+    UE_LOG(LogDungeonElements, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Mode: %s | Status: %s, InstantDmg: %.1f, ContinuousDmg: %.1f, Knockback: %.1f)"),
+        *NetUtils::GetNetRolePrefix(this), *GetName(), *DetonationCenter.ToString(),
+        *UEnum::GetValueAsString(ZoneSpawnMode),
+        *UEnum::GetValueAsString(ZoneEffectConfig.AppliedStatus),
+        ZoneEffectConfig.InstantDamage, ZoneEffectConfig.ContinuousDamagePerSec, ZoneEffectConfig.KnockbackForce);
 
     Super::HandleOnDestroyed(DestroyedActor);
 }
