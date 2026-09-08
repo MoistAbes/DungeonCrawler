@@ -28,6 +28,44 @@ enum class ECarryState : uint8
 };
 
 /**
+ * Konfiguracja parametrów przestrzennych i kinematycznych gniazda niesienia propa.
+ * Zastępuje sztywne wartości (Magic Numbers) w matematyce pozycjonowania i interpolacji.
+ */
+USTRUCT(BlueprintType)
+struct FCarrySocketConfig
+{
+    GENERATED_BODY()
+
+    /** Dystans niesienia przedmiotu przed postacią w centymetrach */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "50.0", ClampMax = "200.0"))
+    float HoldDistance = 110.0f;
+
+    /** Obniżenie punktu trzymania w osi Z względem oczu postaci (cm) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "-50.0", ClampMax = "50.0"))
+    float EyeHeightOffsetZ = -15.0f;
+
+    /** Minimalny kąt pochylenia kamery w dół (stopnie) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "-80.0", ClampMax = "0.0"))
+    float MinPitch = -50.0f;
+
+    /** Maksymalny kąt pochylenia kamery w górę (stopnie) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "0.0", ClampMax = "80.0"))
+    float MaxPitch = 50.0f;
+
+    /** Szybkość interpolacji kotwicy rąk za kamerą (VInterpTo speed) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "5.0", ClampMax = "50.0"))
+    float AnchorInterpSpeed = 20.0f;
+
+    /** Szybkość dociągania fizycznego propa do rąk (daje wrażenie bezwładności/masy) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "5.0", ClampMax = "50.0"))
+    float PropInterpSpeed = 25.0f;
+
+    /** Szybkość wygładzania prędkości kątowej przy zamachu myszką */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Carry", meta = (ClampMin = "5.0", ClampMax = "30.0"))
+    float SwingInterpSpeed = 16.0f;
+};
+
+/**
  * Serwis domenowy odpowiedzialny za wykrywanie, chwytanie i rzucanie obiektów fizycznych
  * oraz interakcję logiczną (przełączniki, dźwignie, mechanizmy).
  * W pełni zsynchronizowany w sieci: Client-Request -> Server-Authoritative Execution.
@@ -59,6 +97,10 @@ public:
     ECarryState GetCarryState() const { return CarryState; }
 
 protected:
+    /** Parametry przestrzenne i interpolacji gniazda trzymania propa */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction|CarryConfig")
+    FCarrySocketConfig CarrySocketConfig;
+
     /** Maksymalny dystans interakcji w jednostkach silnika (cm) liczony od postaci */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")
     float TraceDistance = 300.0f;

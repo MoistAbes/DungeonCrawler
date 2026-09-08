@@ -159,11 +159,11 @@ void UInteractionComponent::StopHeavyPhysicsObject(UPrimitiveComponent* Comp, fl
 FVector UInteractionComponent::CalculateHoldAnchorRelativeOffset(float AimPitch, float BaseEyeHeightOffset) const
 {
     const float NormalizedPitch = FRotator::NormalizeAxis(AimPitch);
-    const float ClampedPitch = FMath::Clamp(NormalizedPitch, -50.0f, 50.0f);
+    const float ClampedPitch = FMath::Clamp(NormalizedPitch, CarrySocketConfig.MinPitch, CarrySocketConfig.MaxPitch);
     const float PitchRad = FMath::DegreesToRadians(ClampedPitch);
 
-    constexpr float HoldDistance = 110.0f;
-    const float BaseZ = BaseEyeHeightOffset - 15.0f;
+    const float HoldDistance = CarrySocketConfig.HoldDistance;
+    const float BaseZ = BaseEyeHeightOffset + CarrySocketConfig.EyeHeightOffsetZ;
     const float TargetX = HoldDistance * FMath::Cos(PitchRad);
     const float TargetZ = BaseZ + (HoldDistance * FMath::Sin(PitchRad));
 
@@ -204,7 +204,7 @@ void UInteractionComponent::UpdateHoldAnchorTransform(float DeltaTime)
 
     // 3. Płynna interpolacja pozycji kotwicy
     const FVector CurrentRelLoc = HoldAnchor->GetRelativeLocation();
-    const FVector NewRelLoc = FMath::VInterpTo(CurrentRelLoc, TargetRelLoc, DeltaTime, 20.0f);
+    const FVector NewRelLoc = FMath::VInterpTo(CurrentRelLoc, TargetRelLoc, DeltaTime, CarrySocketConfig.AnchorInterpSpeed);
 
     HoldAnchor->SetRelativeLocation(NewRelLoc);
 }
@@ -221,12 +221,12 @@ void UInteractionComponent::UpdateSwingVelocity(float DeltaTime)
         const float YawRateRad = FMath::DegreesToRadians(DeltaRot.Yaw / DeltaTime);
         const float PitchRateRad = FMath::DegreesToRadians(DeltaRot.Pitch / DeltaTime);
 
-        // Obliczamy prędkość liniową na ramieniu trzymania (ok. 110 cm)
-        constexpr float HoldRadius = 110.0f;
+        // Obliczamy prędkość liniową na ramieniu trzymania (zgodnie z konfiguracją dystansu)
+        const float HoldRadius = CarrySocketConfig.HoldDistance;
         const FVector TangentialVelocity = (CamRot.RotateVector(FVector::RightVector) * (YawRateRad * HoldRadius))
                                          + (CamRot.RotateVector(FVector::UpVector) * (PitchRateRad * HoldRadius));
 
-        TrackedCameraSwingVelocity = FMath::VInterpTo(TrackedCameraSwingVelocity, TangentialVelocity, DeltaTime, 16.0f);
+        TrackedCameraSwingVelocity = FMath::VInterpTo(TrackedCameraSwingVelocity, TangentialVelocity, DeltaTime, CarrySocketConfig.SwingInterpSpeed);
     }
     PreviousCameraRotation = CamRot;
 }
@@ -298,8 +298,8 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     const FVector CurrentLocation = GrabbedActor->GetActorLocation();
     const FRotator CurrentRotation = GrabbedActor->GetActorRotation();
 
-    const FVector DesiredLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, 25.0f);
-    const FRotator DesiredRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, 25.0f);
+    const FVector DesiredLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, CarrySocketConfig.PropInterpSpeed);
+    const FRotator DesiredRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, CarrySocketConfig.PropInterpSpeed);
 
     // 1. Kinematyczny Sweep z testem kolizji
     FHitResult SweepHit;
@@ -311,7 +311,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     // 3. Reakcja na napotkane przeszkody fizyczne
     HandleSweepCollision(SweepHit, CarryProvider, OwnerActor);
 
-    // 4. Zabezpieczenie przed rotacją kamery i szturnięciami od boku (zdarzeniowe bez broadphase co klatkę)
+    // 4. Zabezpieczenie przed rotacją kamery i szturchnięciami od boku (zdarzeniowe bez broadphase co klatkę)
     SuppressOverlappingHeavyPhysics(CarryProvider);
 
     // 5. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
