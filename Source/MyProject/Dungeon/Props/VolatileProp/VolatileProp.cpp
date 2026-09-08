@@ -2,6 +2,7 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalDeliveryLibrary.h"
@@ -70,7 +71,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
             this);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Status: %s)"),
+    UE_LOG(LogDungeonElements, Warning, TEXT("[VolatileProp]%s %s detonated at %s (Status: %s)"),
         *NetUtils::GetNetRolePrefix(this), *GetName(), *DetonationCenter.ToString(), *UEnum::GetValueAsString(StatusToApply));
 
     Super::HandleOnDestroyed(DestroyedActor);

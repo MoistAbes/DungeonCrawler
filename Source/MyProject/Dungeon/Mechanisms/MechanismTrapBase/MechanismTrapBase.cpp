@@ -3,6 +3,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
@@ -105,7 +106,7 @@ void AMechanismTrapBase::SetTrapActive(bool bNewActive, AActor* TriggeringActor)
 
 	bIsTrapActive = bNewActive;
 
-	UE_LOG(LogTemp, Log, TEXT("[MechanismTrap]%s %s active state set to: %s by TriggeringActor: %s"),
+	UE_LOG(LogDungeonMechanisms, Log, TEXT("[MechanismTrap]%s %s active state set to: %s by TriggeringActor: %s"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(),
 		bIsTrapActive ? TEXT("ACTIVE") : TEXT("INACTIVE"),
 		TriggeringActor ? *TriggeringActor->GetName() : TEXT("None"));
@@ -130,7 +131,7 @@ void AMechanismTrapBase::TriggerTrap(AActor* TriggeringActor)
 {
 	REQUIRE_AUTHORITY();
 
-	UE_LOG(LogTemp, Verbose, TEXT("[MechanismTrap]%s %s triggered action by: %s"),
+	UE_LOG(LogDungeonMechanisms, Verbose, TEXT("[MechanismTrap]%s %s triggered action by: %s"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(),
 		TriggeringActor ? *TriggeringActor->GetName() : TEXT("Timer/Auto"));
 
@@ -192,7 +193,7 @@ void AMechanismTrapBase::HandleOnDestroyed(AActor* DestroyedActor)
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[MechanismTrap]%s %s physically destroyed!"),
+	UE_LOG(LogDungeonMechanisms, Warning, TEXT("[MechanismTrap]%s %s physically destroyed!"),
 		*NetUtils::GetNetRolePrefix(this), *GetName());
 
 	StopLoopTimer();

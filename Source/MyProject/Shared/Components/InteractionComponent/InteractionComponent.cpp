@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
@@ -134,7 +135,7 @@ void UInteractionComponent::OnPropBeginOverlap(UPrimitiveComponent* OverlappedCo
         return;
     }
 
-    if (OtherComp->IsSimulatingPhysics())
+    if (OtherComp->IsSimulatingPhysics() || (OtherComp->GetOwner() && OtherComp->GetOwner()->IsRootComponentMovable()))
     {
         OverlappingPhysicsComponents.AddUnique(OtherComp);
     }
@@ -268,7 +269,7 @@ bool UInteractionComponent::CheckGripBreakDistance(const FVector& TargetLocation
     const float DistanceFromHands = FVector::Dist(GrabbedActor->GetActorLocation(), TargetLocation);
     if (DistanceFromHands > CarryBreakDistance)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s Carry grip broken! Distance (%.1f cm) exceeded limit (%.1f cm)."),
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService]%s Carry grip broken! Distance (%.1f cm) exceeded limit (%.1f cm)."),
             *NetUtils::GetNetRolePrefix(this), DistanceFromHands, CarryBreakDistance);
 
         // Zerwanie chwytu – upuszczenie przedmiotu
@@ -374,21 +375,21 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
     // 1. Walidacja wskaźników
     if (!IsValid(TargetActor) || !IsValid(ComponentToGrab))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Invalid TargetActor or ComponentToGrab."));
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Invalid TargetActor or ComponentToGrab."));
         return false;
     }
 
     // 2. Komponent musi należeć do wskazanego aktora
     if (ComponentToGrab->GetOwner() != TargetActor)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Component does not belong to TargetActor."));
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Component does not belong to TargetActor."));
         return false;
     }
 
     // 3. Stan komponentu gracza: wolne ręce lub aktywne zapytanie o ten obiekt
     if (CarryState != ECarryState::None && CarryState != ECarryState::RequestingGrab)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: CarryState is not None/RequestingGrab (Current: %d)."),
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: CarryState is not None/RequestingGrab (Current: %d)."),
             static_cast<int32>(CarryState));
         return false;
     }
@@ -403,7 +404,7 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
     const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(TargetActor);
     if (!Grabbable || !Grabbable->CanGrab(Owner))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: IGrabbable::CanGrab returned false for %s."),
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: IGrabbable::CanGrab returned false for %s."),
             *GetNameSafe(TargetActor));
         return false;
     }
@@ -411,7 +412,7 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
     // 5. Weryfikacja udźwigu
     if (Grabbable->GetMass() > MaxCarryMass)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Mass (%.1f kg) exceeds MaxCarryMass (%.1f kg)."),
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Mass (%.1f kg) exceeds MaxCarryMass (%.1f kg)."),
             Grabbable->GetMass(), MaxCarryMass);
         return false;
     }
@@ -422,7 +423,7 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
     const float DistSq = FVector::DistSquared(Owner->GetActorLocation(), TargetActor->GetActorLocation());
     if (DistSq > FMath::Square(AllowedDist))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Distance (%.1f cm > allowed %.1f cm)."),
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: Distance (%.1f cm > allowed %.1f cm)."),
             FMath::Sqrt(DistSq), AllowedDist);
         return false;
     }
@@ -452,7 +453,7 @@ bool UInteractionComponent::CanGrabServer(const AActor* TargetActor, const UPrim
 
         if (bHit && LoSHit.bBlockingHit)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: LoS blocked by actor %s (component: %s)."),
+            UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService][Server] CanGrabServer Denied: LoS blocked by actor %s (component: %s)."),
                 *GetNameSafe(LoSHit.GetActor()), *GetNameSafe(LoSHit.GetComponent()));
             return false;
         }
@@ -472,7 +473,7 @@ void UInteractionComponent::PrimaryInteract()
         return;
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered (State: %d)."), 
+    UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService]%s PrimaryInteract triggered (State: %d)."), 
         *NetUtils::GetNetRolePrefix(this), static_cast<int32>(CarryState));
 
     // Jeśli aktywnie niesiemy obiekt: upuszczenie pod nogi LUB rzut zamachem myszką (Klawisz E)
@@ -489,12 +490,12 @@ void UInteractionComponent::PrimaryInteract()
             const float ScaledSpeed = FMath::Clamp(SwingSpeed * SwingVelocityMultiplier, 0.0f, MaxSwingThrowSpeed);
             ReleaseVelocity = TrackedCameraSwingVelocity.GetSafeNormal() * ScaledSpeed;
 
-            UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Mouse Swing Throw! Swing Speed: %.1f cm/s"),
+            UE_LOG(LogDungeonInteraction, Log, TEXT("[InteractionService]%s Mouse Swing Throw! Swing Speed: %.1f cm/s"),
                 *NetUtils::GetNetRolePrefix(this), ScaledSpeed);
         }
         else
         {
-            UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Pure drop under feet (Zero launch velocity)."),
+            UE_LOG(LogDungeonInteraction, Log, TEXT("[InteractionService]%s Pure drop under feet (Zero launch velocity)."),
                 *NetUtils::GetNetRolePrefix(this));
         }
 
@@ -533,7 +534,7 @@ void UInteractionComponent::PrimaryInteract()
         {
             if (Grabbable->GetMass() > MaxCarryMass)
             {
-                UE_LOG(LogTemp, Warning, TEXT("[InteractionService] Prop mass (%.1f kg) exceeds limit (%.1f kg)."), 
+                UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService] Prop mass (%.1f kg) exceeds limit (%.1f kg)."), 
                     Grabbable->GetMass(), MaxCarryMass);
                 return;
             }
@@ -573,7 +574,7 @@ void UInteractionComponent::PrimaryInteract()
         }
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[InteractionService] Actor %s has no actionable contract."), *HitActor->GetName());
+    UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionService] Actor %s has no actionable contract."), *HitActor->GetName());
 }
 
 void UInteractionComponent::ThrowCurrentProp()
@@ -709,7 +710,7 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
         Grabbable->OnGrabbed(GetOwner());
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GetNameSafe(GrabbedActor));
+    UE_LOG(LogDungeonInteraction, Log, TEXT("[InteractionService]%s Grabbed: %s"), *NetUtils::GetNetRolePrefix(this), *GetNameSafe(GrabbedActor));
 }
 
 void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchVelocity)
@@ -731,7 +732,7 @@ void UInteractionComponent::ExecuteRelease(bool bIsThrow, const FVector& LaunchV
         Grabbable->OnDropped(GetOwner(), AppliedVelocity);
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[InteractionService]%s Released/Thrown: %s (Velocity: %s)"), 
+    UE_LOG(LogDungeonInteraction, Log, TEXT("[InteractionService]%s Released/Thrown: %s (Velocity: %s)"), 
         *NetUtils::GetNetRolePrefix(this), *GetNameSafe(ReleasedActor), *AppliedVelocity.ToString());
 }
 
@@ -753,7 +754,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
     const double CurrentTime = World->GetTimeSeconds();
     if (CurrentTime - LastServerInteractionTime < MinInteractionInterval)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("[InteractionService][Server] Denied Grab: Rate limit exceeded (Delta: %.3f s < %.3f s)."),
+        UE_LOG(LogDungeonNetwork, Verbose, TEXT("[InteractionService][Server] Denied Grab: Rate limit exceeded (Delta: %.3f s < %.3f s)."),
             CurrentTime - LastServerInteractionTime, MinInteractionInterval);
         Client_GrabDenied();
         return;
@@ -763,7 +764,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
     // Gameplay Validation: Dystans, LoS, Masa, Stan obiektu i zajętość
     if (!CanGrabServer(TargetActor, ComponentToGrab))
     {
-        UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Server] Denied Grab: Target %s failed gameplay validation."), 
+        UE_LOG(LogDungeonNetwork, Warning, TEXT("[InteractionService][Server] Denied Grab: Target %s failed gameplay validation."), 
             *GetNameSafe(TargetActor));
         Client_GrabDenied();
         return;
@@ -774,7 +775,7 @@ void UInteractionComponent::Server_RequestGrab_Implementation(AActor* TargetActo
 
 void UInteractionComponent::Client_GrabDenied_Implementation()
 {
-    UE_LOG(LogTemp, Warning, TEXT("[InteractionService][Client] Grab request was denied by server."));
+    UE_LOG(LogDungeonNetwork, Warning, TEXT("[InteractionService][Client] Grab request was denied by server."));
     ResetGrabState();
 }
 

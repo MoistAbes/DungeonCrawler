@@ -4,6 +4,7 @@
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
@@ -84,7 +85,7 @@ void ADungeonStructureBase::HandleComponentHit(
 	// 2. Obliczamy prędkość uderzenia prostopadłego przez zunifikowaną bibliotekę kinetyczną
 	const float ImpactSpeed = UKineticForceLibrary::CalculateImpactSpeed(StructureMesh, OtherActor, OtherComp, Hit.ImpactNormal);
 
-	UE_LOG(LogTemp, Log, TEXT("[DungeonStructure]%s %s hit by %s | ImpactSpeed: %.1f cm/s"),
+	UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure]%s %s hit by %s | ImpactSpeed: %.1f cm/s"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(), OtherActor ? *OtherActor->GetName() : TEXT("None"), ImpactSpeed);
 
 	// 3. Jeśli obiekt faktycznie uderza w strukturę prostopadle z prędkością powyżej progu
@@ -103,7 +104,7 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[DungeonStructure]%s %s has collapsed and been destroyed!"),
+	UE_LOG(LogDungeonPhysics, Warning, TEXT("[DungeonStructure]%s %s has collapsed and been destroyed!"),
 		*NetUtils::GetNetRolePrefix(this), *GetName());
 
 	// -------------------------------------------------------------------------------------------------
@@ -137,7 +138,7 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 					const FVector CurrentVel = Character->GetVelocity();
 					Character->LaunchCharacter(CurrentVel * PunchThroughVelocityRetention, true, true);
 
-					UE_LOG(LogTemp, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
+					UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
 						*Character->GetName(), *Character->GetVelocity().ToString());
 				}
 			}

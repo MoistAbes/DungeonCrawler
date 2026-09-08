@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Logging/DungeonLogCategories.h"
 
 /** Custom Collision Channels */
 #define ECC_PhysicsProp ECC_GameTraceChannel1

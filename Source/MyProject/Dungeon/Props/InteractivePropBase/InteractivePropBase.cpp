@@ -2,6 +2,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
@@ -213,7 +214,7 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
                     TargetDamageable->ApplyKineticImpact(EffectivePropSpeed * MassFactor);
                 }
 
-                UE_LOG(LogTemp, Warning, TEXT("[PropKineticTransfer]%s %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
+                UE_LOG(LogDungeonPhysics, Warning, TEXT("[PropKineticTransfer]%s %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
                     *NetUtils::GetNetRolePrefix(this), *GetName(), *OtherActor->GetName(), EffectivePropSpeed, KnockbackForce, Mass);
             }
         }
@@ -224,7 +225,7 @@ void AInteractivePropBase::HandleOnDestroyed(AActor* DestroyedActor)
 {
     REQUIRE_AUTHORITY();
 
-    UE_LOG(LogTemp, Error, TEXT("[PropEntity]%s Object destroyed via Event: %s"), 
+    UE_LOG(LogDungeonPhysics, Error, TEXT("[PropEntity]%s Object destroyed via Event: %s"), 
         *NetUtils::GetNetRolePrefix(this), *GetName());
 
     Destroy();

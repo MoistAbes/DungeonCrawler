@@ -4,6 +4,7 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 
 UDamageableComponent::UDamageableComponent()
@@ -35,7 +36,7 @@ void UDamageableComponent::BeginPlay()
         {
             Character->LandedDelegate.AddDynamic(this, &UDamageableComponent::HandleCharacterLanded);
 
-            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())\
+            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
             {
                 Capsule->SetNotifyRigidBodyCollision(true);
                 Capsule->OnComponentHit.AddDynamic(this, &UDamageableComponent::HandleCharacterHit);
@@ -58,7 +59,7 @@ void UDamageableComponent::ApplyDamage(float Amount)
     OnHealthChanged.Broadcast(CurrentDurability);
     OnDurabilityChanged.Broadcast(CurrentDurability, MaxDurability);
 
-    UE_LOG(LogTemp, Warning, TEXT("[DamageableService]%s %s received %.1f dmg | Remaining: %.1f/%.1f"), 
+    UE_LOG(LogDungeonPhysics, Warning, TEXT("[DamageableService]%s %s received %.1f dmg | Remaining: %.1f/%.1f"), 
        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), Amount, CurrentDurability, MaxDurability);
 
     if (IsDestroyed())
@@ -92,7 +93,7 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
 
     if (CalculatedDamage >= 1.0f)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[KineticService]%s %s registered impact at Speed: %.1f cm/s | Damage: %.1f"),
+        UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticService]%s %s registered impact at Speed: %.1f cm/s | Damage: %.1f"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), ImpactSpeed, CalculatedDamage);
 
         ApplyDamage(CalculatedDamage);

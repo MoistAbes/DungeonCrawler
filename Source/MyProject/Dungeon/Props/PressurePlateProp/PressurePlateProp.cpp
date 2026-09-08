@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 
 APressurePlateProp::APressurePlateProp()
@@ -144,7 +145,7 @@ void APressurePlateProp::RecalculateMassAndEvaluate()
 
 	CurrentTotalMass = NewTotalMass;
 
-	UE_LOG(LogTemp, Verbose, TEXT("[PressurePlate]%s %s current total mass: %.1f / %.1f kg"),
+	UE_LOG(LogDungeonMechanisms, Verbose, TEXT("[PressurePlate]%s %s current total mass: %.1f / %.1f kg"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(), CurrentTotalMass, RequiredMass);
 
 	const bool bShouldBeActive = (CurrentTotalMass >= RequiredMass);

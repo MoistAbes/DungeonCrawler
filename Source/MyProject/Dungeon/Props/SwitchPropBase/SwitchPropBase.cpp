@@ -2,6 +2,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
@@ -85,7 +86,7 @@ bool ASwitchPropBase::SetActiveState(bool bNewState, AActor* TriggeringActor)
 	// nie pozwalamy na powrót do stanu wyjściowego
 	if (!bAllowSwitchBack && bHasBeenTriggered)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[SwitchProp]%s %s cannot be switched back (bAllowSwitchBack = false, already triggered)"),
+		UE_LOG(LogDungeonMechanisms, Log, TEXT("[SwitchProp]%s %s cannot be switched back (bAllowSwitchBack = false, already triggered)"),
 			*NetUtils::GetNetRolePrefix(this), *GetName());
 		return false;
 	}
@@ -93,7 +94,7 @@ bool ASwitchPropBase::SetActiveState(bool bNewState, AActor* TriggeringActor)
 	bIsActive = bNewState;
 	bHasBeenTriggered = true;
 
-	UE_LOG(LogTemp, Log, TEXT("[SwitchProp]%s %s toggled state to: %s by TriggeringActor: %s"),
+	UE_LOG(LogDungeonMechanisms, Log, TEXT("[SwitchProp]%s %s toggled state to: %s by TriggeringActor: %s"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(),
 		bIsActive ? TEXT("ON") : TEXT("OFF"),
 		TriggeringActor ? *TriggeringActor->GetName() : TEXT("None"));
@@ -144,7 +145,7 @@ void ASwitchPropBase::HandleOnDestroyed(AActor* DestroyedActor)
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[SwitchProp]%s %s has been physically destroyed!"),
+	UE_LOG(LogDungeonMechanisms, Warning, TEXT("[SwitchProp]%s %s has been physically destroyed!"),
 		*NetUtils::GetNetRolePrefix(this), *GetName());
 
 	// W momencie zniszczenia dezaktywujemy przełącznik i niszczymy aktora

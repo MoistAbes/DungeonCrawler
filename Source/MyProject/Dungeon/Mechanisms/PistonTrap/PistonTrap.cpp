@@ -5,6 +5,7 @@
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 
@@ -189,7 +190,7 @@ void APistonTrap::ApplyKineticHit(AActor* HitActor, UPrimitiveComponent* HitComp
 
 	const FVector WorldPushDir = GetActorTransform().TransformVectorNoScale(NormalizedPushDirection).GetSafeNormal();
 
-	UE_LOG(LogTemp, Log, TEXT("[PistonTrap]%s %s rammed actor: %s"),
+	UE_LOG(LogDungeonMechanisms, Log, TEXT("[PistonTrap]%s %s rammed actor: %s"),
 		*NetUtils::GetNetRolePrefix(this), *GetName(), *HitActor->GetName());
 
 	// 1. Postać gracza / AI (Kinematyczna CMC)

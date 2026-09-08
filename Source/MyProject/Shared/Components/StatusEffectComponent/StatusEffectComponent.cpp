@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
+#include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
@@ -112,7 +113,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     // Przekazujemy listę powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
     if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
     {
-        UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
+        UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
         return false;
     }
@@ -152,7 +153,7 @@ bool UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatu
         DamageableComponent->ApplyDamage(Reaction.BonusInstantDamage);
     }
 
-    UE_LOG(LogTemp, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
+    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -189,7 +190,7 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
         Existing.InstigatorActor = InstigatorActor;
     }
 
-    UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
+    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), GetRemainingDuration(Existing.EffectType));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -218,7 +219,7 @@ void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, f
     ActiveStatusEffects.Add(NewInstance);
     UpdateTickState();
 
-    UE_LOG(LogTemp, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Duration: %.1fs)"),
+    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Duration: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
@@ -249,7 +250,7 @@ bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
     ActiveStatusEffects.RemoveAt(Index);
     UpdateTickState();
 
-    UE_LOG(LogTemp, Log, TEXT("[StatusEffect]%s %s LOST status: %s"),
+    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s LOST status: %s"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
