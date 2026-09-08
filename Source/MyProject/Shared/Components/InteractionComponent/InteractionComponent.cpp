@@ -4,6 +4,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
@@ -63,6 +64,11 @@ void UInteractionComponent::NotifyCarriedPropAttached(AActor* InProp)
         PreviousCameraRotation = CamRot;
         TrackedCameraSwingVelocity = FVector::ZeroVector;
         SetComponentTickEnabled(true);
+
+        if (GrabbedComponent)
+        {
+            BindPropOverlapEvents(GrabbedComponent.Get());
+        }
     }
 }
 
@@ -77,6 +83,8 @@ void UInteractionComponent::NotifyCarriedPropDetached()
 
 void UInteractionComponent::ResetGrabState()
 {
+    UnbindPropOverlapEvents();
+
     GrabbedActor = nullptr;
     GrabbedComponent = nullptr;
     CarryState = ECarryState::None;
@@ -85,22 +93,64 @@ void UInteractionComponent::ResetGrabState()
     SetComponentTickEnabled(false);
 }
 
-void UInteractionComponent::StopHeavyPhysicsObject(UPrimitiveComponent* Comp, float MaxPushableMass)
+void UInteractionComponent::BindPropOverlapEvents(UPrimitiveComponent* PropComp)
 {
-    if (!Comp || !Comp->IsSimulatingPhysics())
+    UnbindPropOverlapEvents();
+
+    if (!IsValid(PropComp)) return;
+
+    PropComp->SetGenerateOverlapEvents(true);
+    PropComp->OnComponentBeginOverlap.AddDynamic(this, &UInteractionComponent::OnPropBeginOverlap);
+    PropComp->OnComponentEndOverlap.AddDynamic(this, &UInteractionComponent::OnPropEndOverlap);
+
+    // Wstępne pobranie overlapów na moment chwytu (jednorazowo)
+    TArray<UPrimitiveComponent*> InitialOverlaps;
+    PropComp->GetOverlappingComponents(InitialOverlaps);
+    for (UPrimitiveComponent* OverlapComp : InitialOverlaps)
+    {
+        if (IsValid(OverlapComp) && OverlapComp->IsSimulatingPhysics() && OverlapComp->GetOwner() != GetOwner() && OverlapComp->GetOwner() != GrabbedActor)
+        {
+            OverlappingPhysicsComponents.AddUnique(OverlapComp);
+        }
+    }
+}
+
+void UInteractionComponent::UnbindPropOverlapEvents()
+{
+    if (GrabbedComponent)
+    {
+        GrabbedComponent->OnComponentBeginOverlap.RemoveDynamic(this, &UInteractionComponent::OnPropBeginOverlap);
+        GrabbedComponent->OnComponentEndOverlap.RemoveDynamic(this, &UInteractionComponent::OnPropEndOverlap);
+    }
+    OverlappingPhysicsComponents.Reset();
+}
+
+void UInteractionComponent::OnPropBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+    if (!IsValid(OtherComp) || OtherActor == GetOwner() || OtherActor == GrabbedActor)
     {
         return;
     }
 
-    if (Comp->GetMass() > MaxPushableMass)
+    if (OtherComp->IsSimulatingPhysics())
     {
-        // Zerujemy mikroruchy i sztuczne impulsy kontaktowe solvera Chaos dla obiektów ciężkich (np. beczki 177-200 kg)
-        if (Comp->GetPhysicsLinearVelocity().Size() < VelocityStopThreshold)
-        {
-            Comp->SetPhysicsLinearVelocity(FVector::ZeroVector);
-            Comp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
-        }
+        OverlappingPhysicsComponents.AddUnique(OtherComp);
     }
+}
+
+void UInteractionComponent::OnPropEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+    if (!IsValid(OtherComp))
+    {
+        return;
+    }
+
+    OverlappingPhysicsComponents.Remove(OtherComp);
+}
+
+void UInteractionComponent::StopHeavyPhysicsObject(UPrimitiveComponent* Comp, float MaxPushableMass)
+{
+    UKineticForceLibrary::SuppressHeavyPhysicsJitter(Comp, MaxPushableMass, VelocityStopThreshold);
 }
 
 FVector UInteractionComponent::CalculateHoldAnchorRelativeOffset(float AimPitch, float BaseEyeHeightOffset) const
@@ -182,46 +232,30 @@ void UInteractionComponent::HandleSweepCollision(const FHitResult& SweepHit, ICa
 {
     if (!SweepHit.bBlockingHit || !CarryProvider || !CarrierActor) return;
 
-    UPrimitiveComponent* HitComp = SweepHit.GetComponent();
-    if (!HitComp || !HitComp->IsSimulatingPhysics()) return;
-
-    const float HitMass = HitComp->GetMass();
-    const float MaxMass = CarryProvider->GetMaxPushableMass();
-    if (HitMass <= MaxMass)
-    {
-        // Obiekt mieści się w limicie udźwigu gracza - przekazujemy fizyczną siłę pchania
-        FVector PushDir = -SweepHit.ImpactNormal;
-        PushDir.Z = 0.0f;
-        PushDir = PushDir.GetSafeNormal();
-
-        if (PushDir.IsNearlyZero())
-        {
-            PushDir = CarrierActor->GetActorForwardVector();
-        }
-
-        HitComp->WakeRigidBody();
-        HitComp->AddForceAtLocation(PushDir * CarryProvider->GetPlayerPushForce(), SweepHit.ImpactPoint, SweepHit.BoneName);
-    }
-    else
-    {
-        StopHeavyPhysicsObject(HitComp, MaxMass);
-    }
+    UKineticForceLibrary::TryApplyPhysicsPush(
+        SweepHit.GetComponent(),
+        SweepHit,
+        CarrierActor->GetActorForwardVector(),
+        CarryProvider->GetPlayerPushForce(),
+        CarryProvider->GetMaxPushableMass(),
+        VelocityStopThreshold);
 }
 
 void UInteractionComponent::SuppressOverlappingHeavyPhysics(ICarryAnchorProviderInterface* CarryProvider)
 {
-    if (!CarryProvider || !IsValid(GrabbedActor)) return;
-
-    UPrimitiveComponent* PropPrim = GrabbedComponent ? GrabbedComponent.Get() : Cast<UPrimitiveComponent>(GrabbedActor->GetRootComponent());
-    if (!PropPrim) return;
-
-    TArray<UPrimitiveComponent*> Overlaps;
-    PropPrim->GetOverlappingComponents(Overlaps);
+    if (!CarryProvider || OverlappingPhysicsComponents.IsEmpty()) return;
 
     const float MaxMass = CarryProvider->GetMaxPushableMass();
-    for (UPrimitiveComponent* OverlapComp : Overlaps)
+    for (int32 Index = OverlappingPhysicsComponents.Num() - 1; Index >= 0; --Index)
     {
-        StopHeavyPhysicsObject(OverlapComp, MaxMass);
+        UPrimitiveComponent* Comp = OverlappingPhysicsComponents[Index].Get();
+        if (!IsValid(Comp) || !Comp->IsSimulatingPhysics())
+        {
+            OverlappingPhysicsComponents.RemoveAtSwap(Index);
+            continue;
+        }
+
+        StopHeavyPhysicsObject(Comp, MaxMass);
     }
 }
 
@@ -274,7 +308,7 @@ void UInteractionComponent::UpdateCarriedPropTransform(float DeltaTime)
     // 3. Reakcja na napotkane przeszkody fizyczne
     HandleSweepCollision(SweepHit, CarryProvider, OwnerActor);
 
-    // 4. Zabezpieczenie przed rotacją kamery i szturnięciami od boku
+    // 4. Zabezpieczenie przed rotacją kamery i szturnięciami od boku (zdarzeniowe bez broadphase co klatkę)
     SuppressOverlappingHeavyPhysics(CarryProvider);
 
     // 5. Weryfikacja dystansu: czy ręce gracza nie zostały zbyt mocno oddalone od zablokowanego propa
@@ -286,18 +320,18 @@ void UInteractionComponent::GetCameraViewPoint(FVector& OutLocation, FRotator& O
     const AActor* Owner = GetOwner();
     if (!Owner) return;
 
-    if (const APawn* PawnOwner = Cast<APawn>(Owner))\
-    {\
-        if (const APlayerController* PC = Cast<APlayerController>(PawnOwner->GetController()))\
-        {\
-            if (PC->PlayerCameraManager)\
-            {\
-                OutLocation = PC->PlayerCameraManager->GetCameraLocation();\
-                OutRotation = PC->PlayerCameraManager->GetCameraRotation();\
-                return;\
-            }\
-        }\
-    }\
+    if (const APawn* PawnOwner = Cast<APawn>(Owner))
+    {
+        if (const APlayerController* PC = Cast<APlayerController>(PawnOwner->GetController()))
+        {
+            if (PC->PlayerCameraManager)
+            {
+                OutLocation = PC->PlayerCameraManager->GetCameraLocation();
+                OutRotation = PC->PlayerCameraManager->GetCameraRotation();
+                return;
+            }
+        }
+    }
 
     Owner->GetActorEyesViewPoint(OutLocation, OutRotation);
 }
@@ -604,6 +638,11 @@ void UInteractionComponent::ExecuteGrab(AActor* TargetActor, UPrimitiveComponent
         PreviousCameraRotation = CamRot;
         TrackedCameraSwingVelocity = FVector::ZeroVector;
         SetComponentTickEnabled(true);
+
+        if (GrabbedComponent)
+        {
+            BindPropOverlapEvents(GrabbedComponent.Get());
+        }
     }
 
     if (IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(GrabbedActor))

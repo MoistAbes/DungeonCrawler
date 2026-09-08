@@ -381,3 +381,63 @@ void UKineticForceLibrary::ApplyVortexPull(
         KineticHelpers::ApplyKineticImpulse(HitActor, PullDirection, ScaledPull, InstigatorActor);
     }
 }
+
+bool UKineticForceLibrary::TryApplyPhysicsPush(
+    UPrimitiveComponent* HitComp,
+    const FHitResult& Hit,
+    const FVector& FallbackDirection,
+    float PushForce,
+    float MaxPushableMass,
+    float VelocityStopThreshold)
+{
+    if (!HitComp || !HitComp->IsSimulatingPhysics())
+    {
+        return false;
+    }
+
+    const float PropMass = HitComp->GetMass();
+    if (PropMass <= MaxPushableMass)
+    {
+        // Kierunek pchnięcia w płaszczyźnie poziomej XY (przeciwny do normalnej zderzenia)
+        FVector PushDir = -Hit.ImpactNormal;
+        PushDir.Z = 0.0f;
+        PushDir = PushDir.GetSafeNormal();
+
+        if (PushDir.IsNearlyZero())
+        {
+            PushDir = FallbackDirection.GetSafeNormal2D();
+        }
+
+        HitComp->WakeRigidBody();
+        HitComp->AddForceAtLocation(PushDir * PushForce, Hit.ImpactPoint, Hit.BoneName);
+        return true;
+    }
+
+    // Jeśli obiekt przekracza dopuszczalną masę gracza, tłumimy niepożądane mikroruchy Chaos
+    if (VelocityStopThreshold > 0.0f)
+    {
+        SuppressHeavyPhysicsJitter(HitComp, MaxPushableMass, VelocityStopThreshold);
+    }
+
+    return false;
+}
+
+void UKineticForceLibrary::SuppressHeavyPhysicsJitter(
+    UPrimitiveComponent* Comp,
+    float MaxMassThreshold,
+    float VelocityStopThreshold)
+{
+    if (!Comp || !Comp->IsSimulatingPhysics())
+    {
+        return;
+    }
+
+    if (Comp->GetMass() > MaxMassThreshold)
+    {
+        if (Comp->GetPhysicsLinearVelocity().Size() < VelocityStopThreshold)
+        {
+            Comp->SetPhysicsLinearVelocity(FVector::ZeroVector);
+            Comp->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+        }
+    }
+}

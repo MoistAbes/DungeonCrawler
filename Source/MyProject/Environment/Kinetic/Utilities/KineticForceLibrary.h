@@ -80,4 +80,28 @@ public:
         float PullStrength,
         AActor* InstigatorActor = nullptr,
         bool bDrawDebug = false);
+
+    /**
+     * Aplikuje fizyczną siłę pchania (np. przy zderzeniu postaci z ciałem sztywnym lub przy niesieniu tarczy/propa).
+     * Jeśli obiekt mieści się w limicie masy (<= MaxPushableMass), aplikuje rzeczywistą siłę AddForceAtLocation.
+     * Jeśli obiekt jest zbyt ciężki (> MaxPushableMass) i podano VelocityStopThreshold > 0, tłumi mikroruchy Chaos.
+     * Zwraca true, jeśli pchnięto obiekt, lub false, jeśli obiekt był zbyt ciężki bądź nie symulował fizyki.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic")
+    static bool TryApplyPhysicsPush(
+        UPrimitiveComponent* HitComp,
+        const FHitResult& Hit,
+        const FVector& FallbackDirection,
+        float PushForce,
+        float MaxPushableMass,
+        float VelocityStopThreshold = 0.0f);
+
+    /**
+     * Tłumi mikroruchy i jitter fizyki Chaos dla ciał sztywnych przekraczających zadany limit masy.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic")
+    static void SuppressHeavyPhysicsJitter(
+        UPrimitiveComponent* Comp,
+        float MaxMassThreshold,
+        float VelocityStopThreshold);
 };

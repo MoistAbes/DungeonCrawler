@@ -13,10 +13,10 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 | **2** | `Server_RequestGrab_Validate()` niczego nie sprawdza | 🔴 **P0** | Multiplayer / Walidacja | **[x] Rozwiązane** |
 | **3** | `PrimaryInteract()` ustawia `GrabbedActor` lokalnie przed RPC | 🔴 **P0** | Multiplayer / Desync | **[x] Rozwiązane** |
 | **4** | Brakuje formalnego state machine dla grab/carry | 🟠 **P1** | Architektura Stanu | **[x] Rozwiązane** |
-| **5** | Carry transform jest wykonywany lokalnie | 🟠 **P1** | Multiplayer / Prezentacja | **[~] Częściowo zrobione** |
+| **5** | Carry transform jest wykonywany lokalnie | 🟠 **P1** | Multiplayer / Prezentacja | **[x] Rozwiązane** |
 | **6** | `InteractionComponent` za mocno powiązany z `APlayerCharacter` | 🟠 **P1** | Loose Coupling | **[x] Rozwiązane** |
-| **7** | Logika pushowania fizyki siedzi w `PlayerCharacter` | 🟠 **P1** | Single Responsibility | **[ ] Do zrobienia** |
-| **8** | Dużo pracy wykonywanej co klatkę w `InteractionComponent` | 🟠 **P1** | Optymalizacja / CPU | **[~] Częściowo zrobione** |
+| **7** | Logika pushowania fizyki siedzi w `PlayerCharacter` | 🟠 **P1** | Single Responsibility | **[x] Rozwiązane** |
+| **8** | Dużo pracy wykonywanej co klatkę w `InteractionComponent` | 🟠 **P1** | Optymalizacja / CPU | **[x] Rozwiązane** |
 | **9** | Magic numbers w kodzie | 🟡 **P2** | Clean Code / Tuning | **[~] Częściowo zrobione** |
 | **10**| Hardcoded velocity stop (`VelocityStopThreshold`) | 🟡 **P2** | Fizyka / Chaos | **[~] Częściowo zrobione** |
 | **11**| Interakcja korzysta z `ECC_Visibility` zamiast dedykowanego kanału | 🟡 **P2** | Kolizje / Semantyka | **[ ] Do zrobienia** |
@@ -107,14 +107,13 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 
 ### 5. Reprezentacja Transformu Niesionego Obiektu (Server vs Client)
 * **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L198)
-* **Status:** `[~] Częściowo zrobione`
+* **Status:** `[x] Rozwiązane`
 * **Problem zgłoszony:**
-  `UpdateCarriedPropTransform()` wykonuje `SetActorLocationAndRotation` z interpolacją lokalną w `TickComponent()`.
-* **Stan faktyczny w kodzie:**
-  - Prowadzenie propa odbywa się przez **Kinematic Sweep Follow** (wzorzec tarczy ochronnej). Prop jest odpięty ze sztywnej hierarchii (`DetachFromActor(KeepWorld)`), a jego transform jest aktualizowany sweepem z testem kolizji `bSweep = true`.
-  - Serwer autorytatywnie egzekwuje kolizje i pchanie obiektów (`HandleSweepCollision`).
-* **Do zrobienia:**
-  Rozdzielić prezentację wizualną: na kliencie zdalnym (Remote Client) wygładzać pozycję niesionego propa poprzez standardową replikację i interpolację `ReplicatedMovement`, upewniając się, że `TickComponent` interpoluje transform wyłącznie u kontrolującego właściciela (Autonomous Proxy) oraz na serwerze (Authority).
+  `UpdateCarriedPropTransform()` wykonywał lokalny sweep i interpolację dla wszystkich klientów, w tym zdalnych (Remote Proxies).
+* **Stan faktyczny po optymalizacji:**
+  - Prowadzenie propa sweepem (`UpdateHoldAnchorTransform`, `UpdateCarriedPropTransform`) jest uruchamiane **wyłącznie** u lokalnie kontrolującego gracza (`IsLocallyControlled()`) oraz na serwerze (`bHasAuthority`).
+  - Zdalni gracze (Remote Proxies) nie zużywają cykli CPU na testy sweep i fizykę – transform niesionego propa otrzymują automatycznie poprzez wbudowaną replikację i wygładzanie ruchu silnika (`ReplicatedMovement`, 60 Hz).
+  - W `TickComponent`, `NotifyCarriedPropAttached` oraz `ExecuteGrab` dodano wczesne wyjście oraz ograniczenie aktywacji ticku dla `Remote Proxies`.
 
 ---
 
@@ -136,28 +135,33 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 ---
 
 ### 7. Wydzielenie logiki pchania fizyki z `PlayerCharacter`
-* **Plik:** [`Source/MyProject/Player/PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp#L125)
-* **Status:** `[ ] Do zrobienia`
+* **Pliki:**
+  - [`Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h)
+  - [`Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.cpp)
+  - [`Source/MyProject/Player/PlayerCharacter.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.cpp)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Status:** `[x] Rozwiązane`
 * **Problem zgłoszony:**
-  W `APlayerCharacter::MoveBlockedBy()` znajduje się bezpośrednia logika fizycznego pchania (`IsSimulatingPhysics`, `GetMass`, `AddForceAtLocation`), co obciąża klasę postaci.
-* **Proponowane rozwiązanie:**
-  Wyekstrahować logikę do dedykowanego komponentu, np. `UPhysicsPushComponent` lub przenieść do biblioteki [`UKineticForceLibrary`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h), tak by `APlayerCharacter::MoveBlockedBy` delegował wykonanie jednym wywołaniem:
-  ```cpp
-  PushComponent->HandleMoveBlocked(Impact);
-  ```
+  W `APlayerCharacter::MoveBlockedBy()` oraz `UInteractionComponent::HandleSweepCollision()` powielona była bezpośrednia logika fizycznego pchania (`IsSimulatingPhysics`, weryfikacja masy `MaxPushableMass`, rzutowanie wektora normalnej na XY, `AddForceAtLocation`, tłumienie mikroruchów ciężkich brył Chaos).
+* **Stan faktyczny po optymalizacji:**
+  - Zunifikowano logikę pchania w [`UKineticForceLibrary::TryApplyPhysicsPush()`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h#L73) oraz [`UKineticForceLibrary::SuppressHeavyPhysicsJitter()`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h#L89).
+  - Zarówno `APlayerCharacter::MoveBlockedBy`, jak i `UInteractionComponent::HandleSweepCollision` oraz `StopHeavyPhysicsObject` delegują całą fizykę kontaktową do tej jednej biblioteki utility.
 
 ---
 
 ### 8. Optymalizacja operacji wykonywanych w `TickComponent`
-* **Plik:** [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp#L162)
-* **Status:** `[~] Częściowo zrobione`
+* **Pliki:**
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.h)
+  - [`Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/InteractionComponent/InteractionComponent.cpp)
+* **Status:** `[x] Rozwiązane`
 * **Problem zgłoszony:**
-  `TickComponent` wykonuje co klatkę m.in. `PropPrim->GetOverlappingComponents(Overlaps)` w metodzie `SuppressOverlappingHeavyPhysics`.
-* **Stan faktyczny:**
-  - `TickComponent` posiada `bStartWithTickEnabled = false` i jest wygaszony (`SetComponentTickEnabled(false)`), gdy gracz nie niesie żadnego przedmiotu (Zero-Tick Idle).
-  - W trakcie niesienia wykonywane jest jednak `GetOverlappingComponents()`.
-* **Do zrobienia:**
-  Zastąpić sprawdzanie `GetOverlappingComponents()` zdarzeniami `OnComponentBeginOverlap` / `OnComponentEndOverlap` podpinanymi dynamicznie na niesionym propie na czas chwytu, utrzymując lekką tablicę `TArray<TWeakObjectPtr<UPrimitiveComponent>> OverlappingHeavyProps`.
+  `TickComponent` wykonywał co klatkę m.in. kosztowne zapytanie do sceny fizycznej `PropPrim->GetOverlappingComponents(Overlaps)` w metodzie `SuppressOverlappingHeavyPhysics`.
+* **Stan faktyczny po optymalizacji:**
+  - Zastąpiono odpytywanie sceny co klatkę podejściem **Event-Driven Overlap Tracking**:
+    - Przy podniesieniu propa dynamicznie rejestrowane są delegaty `OnComponentBeginOverlap` i `OnComponentEndOverlap` na `GrabbedComponent` (metoda `BindPropOverlapEvents`).
+    - Obiekty fizyczne kolidujące z propem są przechowywane w buforze `TArray<TWeakObjectPtr<UPrimitiveComponent>> OverlappingPhysicsComponents`.
+    - W `SuppressOverlappingHeavyPhysics` sprawdzany jest warunek `OverlappingPhysicsComponents.IsEmpty()` ($O(1)$) – jeśli brak ciał w kontakcie, następuje natychmiastowe wyjście bez żadnych alokacji ani zapytań do silnika fizyki.
+    - Przy upuszczeniu propa (`UnbindPropOverlapEvents`) delegaty są natychmiast wyrejestrowywane, a bufor czyszczony.
 
 ---
 
@@ -199,7 +203,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 * **Problem:**
   Czysty `LineTraceSingleByChannel` utrudnia wycelowanie w małe obiekty (np. monety, klucze, małe flakoniki).
 * **Do zrobienia:**
-  Zastąpić pojedynczy promień testem `SweepSingleByChannel` ze sferą o promieniu np. $10\text{–}15\text{ cm}$.
+  Zastąpić pojedynczy promień testem `SweepSingleByChannel` ze sferą o promieniu np. $10–15\text{ cm}$.
 
 ---
 
@@ -303,7 +307,7 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
      - Gracz A rozłącza się w trakcie niesienia obiektu (oczekiwane: bezpieczne upuszczenie).
      - Obiekt zostaje zniszczony w trakcie niesienia (oczekiwane: reset stanu gracza bez awarii silnika).
   3. **Testy Integralności Fizyki:**
-     - Stabilność 4 graczy i kilkunastu ciał sztywnych przy opóźnieniach sieciowych (Ping $100\text{–}150\text{ ms}$, packet loss $2\%$).
+     - Stabilność 4 graczy i kilkunastu ciał sztywnych przy opóźnieniach sieciowych (Ping $100–150\text{ ms}$, packet loss $2\%$).
 
 ---
 
@@ -313,11 +317,11 @@ Zawiera szczegółową analizę 22 punktów review (od krytycznych `P0` po dług
 graph TD
     subgraph "Sprint 1: Dokończenie Bezpieczeństwa Sieciowego (P0/P1)"
         S1_1["Wprowadzenie server cooldown na RPC interakcji (pkt 15)"]
-        S1_2["Event-driven overlap dla SuppressOverlappingHeavyPhysics (pkt 8)"]
+        S1_2["Event-driven overlap dla SuppressOverlappingHeavyPhysics (pkt 8) [Zrobione]"]
     end
 
     subgraph "Sprint 2: Refaktoryzacja Fizyki Postaci (P1)"
-        S2_1["Wydzielenie pchania fizyki z PlayerCharacter do komponentu (pkt 7)"]
+        S2_1["Wydzielenie pchania fizyki z PlayerCharacter do komponentu (pkt 7) [Zrobione]"]
         S2_2["Wprowadzenie kanału ECC_Interaction i Sphere Trace (pkt 11, 12)"]
     end
 

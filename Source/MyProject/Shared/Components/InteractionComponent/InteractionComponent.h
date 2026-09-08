@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/HitResult.h"
 #include "InteractionComponent.generated.h"
 
 class ICarryAnchorProviderInterface;
@@ -129,6 +130,20 @@ private:
 
     /** Wyliczona prędkość kątowa zamachu myszką na promieniu trzymania propa (cm/s) */
     FVector TrackedCameraSwingVelocity = FVector::ZeroVector;
+
+    /** Obiekty fizyczne aktualnie kolidujące/nakładające się na niesiony prop (zarządzane zdarzeniowo bez broadphase co tick) */
+    UPROPERTY(Transient)
+    TArray<TWeakObjectPtr<UPrimitiveComponent>> OverlappingPhysicsComponents;
+
+    // --- Rejestracja i obsługa zdarzeń kolizji (Event-Driven Overlaps) ---
+    void BindPropOverlapEvents(UPrimitiveComponent* PropComp);
+    void UnbindPropOverlapEvents();
+
+    UFUNCTION()
+    void OnPropBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+    UFUNCTION()
+    void OnPropEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
     // --- Metody pomocnicze ogólne ---
     void GetCameraViewPoint(FVector& OutLocation, FRotator& OutRotation) const;

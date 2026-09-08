@@ -13,6 +13,7 @@
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
@@ -317,36 +318,12 @@ void APlayerCharacter::MoveBlockedBy(const FHitResult& Impact)
 {
     Super::MoveBlockedBy(Impact);
 
-    UPrimitiveComponent* HitComp = Impact.GetComponent();
-    if (!HitComp || !HitComp->IsSimulatingPhysics())
-    {
-        return;
-    }
-
-    const float PropMass = HitComp->GetMass();
-
-    // Jeśli pojedynczy prop przekracza maksymalny udźwig gracza, postać go nie ruszy
-    if (PropMass > MaxPushableMass)
-    {
-        return;
-    }
-
-    // Kierunek pchnięcia w płaszczyźnie poziomej XY (przeciwny do normalnej zderzenia)
-    FVector PushDir = -Impact.ImpactNormal;
-    PushDir.Z = 0.0f;
-    PushDir = PushDir.GetSafeNormal();
-
-    if (PushDir.IsNearlyZero())
-    {
-        PushDir = GetActorForwardVector();
-    }
-
-    // Fizyczna siła pchania:
-    // Aplikujemy rzeczywistą siłę (AddForceAtLocation), a NIE sztuczną zmianę prędkości (bVelChange=false).
-    // Dzięki temu, jeśli przed tym propem stoi cięższy obiekt (np. 177 kg) lub ściana,
-    // silnik Chaos uwzględnia sumaryczną masę i tarcie całego łańcucha - zator natychmiast zatrzymuje się w miejscu!
-    HitComp->WakeRigidBody();
-    HitComp->AddForceAtLocation(PushDir * PlayerPushForce, Impact.ImpactPoint, Impact.BoneName);
+    UKineticForceLibrary::TryApplyPhysicsPush(
+        Impact.GetComponent(),
+        Impact,
+        GetActorForwardVector(),
+        PlayerPushForce,
+        MaxPushableMass);
 }
 
 
