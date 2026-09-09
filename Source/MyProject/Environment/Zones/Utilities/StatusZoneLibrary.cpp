@@ -257,3 +257,55 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 		}
 	}
 }
+
+bool UStatusZoneLibrary::ApplyPointHit(
+	AActor* TargetActor,
+	const FVector& HitLocation,
+	const FVector& HitNormal,
+	EStatusEffectType StatusType,
+	float Duration,
+	AActor* InstigatorActor)
+{
+	if (!TargetActor || !NetUtils::HasAuthority(TargetActor) || StatusType == EStatusEffectType::None)
+	{
+		return false;
+	}
+
+	// 1. Jeśli uderzyliśmy w strefę (np. płonąca strzała w plamę oleju)
+	if (AStatusZoneBase* Zone = Cast<AStatusZoneBase>(TargetActor))
+	{
+		Zone->ApplyElementalHit(StatusType, 15.0f, InstigatorActor);
+		return true;
+	}
+
+	// 2. Postać lub prop z komponentem statusów
+	if (UStatusEffectComponent* StatusComp = TargetActor->FindComponentByClass<UStatusEffectComponent>())
+	{
+		StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
+		return true;
+	}
+
+	// 3. Architektura niszczalna (drewniane elementy pod wpływem ognia)
+	if (ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(TargetActor))
+	{
+		if (StatusType == EStatusEffectType::Burning && Structure->IsDestructible() && Structure->GetDamageableComponent())
+		{
+			if (Structure->GetMaterialType_Implementation() == EPhysicalMaterialType::Wood)
+			{
+				Structure->GetDamageableComponent()->ApplyDamage(25.0f);
+				return true;
+			}
+		}
+	}
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	if (UWorld* World = TargetActor->GetWorld())
+	{
+		DrawDebugPoint(World, HitLocation, 12.0f, FColor::Yellow, false, 2.0f);
+		DrawDebugDirectionalArrow(World, HitLocation, HitLocation + HitNormal * 30.0f, 15.0f, FColor::Yellow, false, 2.0f, 0, 2.0f);
+	}
+#endif
+
+	return false;
+}
+

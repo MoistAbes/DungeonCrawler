@@ -40,13 +40,21 @@ Source/MyProject/
 │   │   ├── Components/KnockbackComponent/            [Aktywny] Replikowany odrzut postaci (LaunchCharacter) i ciał sztywnych (AddImpulse)
 │   │   ├── Utilities/KineticForceLibrary             [Aktywny] Radialne eksplozje, wiry kinetyczne, impulsy Chaosu, TryApplyPhysicsPush, SuppressHeavyPhysicsJitter
 │   │   └── Enums/KineticEnums.h                      [Aktywny] EKnockbackFalloff
-│   └── Elements/
-│       ├── Data/StatusEffectDefinitions.h            [Aktywny] Centralny rejestr FStatusEffectRegistry, definicje DoT i reakcji
-│       ├── Enums/ElementEnums.h                      [Aktywny] EStatusEffectType (Burning, Wet, Electrified, Oiled)
-│       ├── StatusZone/ElementalStatusZone            [Aktywny] Aktor kałuż/stref pożaru, LoS perimeter trace, progi wysokości, eliminacja konfliktów
-│       └── Utilities/
-│           ├── ElementalChemistryLibrary             [Aktywny] Silnik reakcji chemicznych i weryfikacji kompatybilności materiałowej
-│           └── ElementalDeliveryLibrary              [Aktywny] 4 archetypy dostarczania żywiołów: Point Hit, Surface Splash, Radial Burst, Zone
+│   ├── Elements/
+│   │   ├── Data/StatusEffectDefinitions.h            [Aktywny] Centralny rejestr FStatusEffectRegistry, definicje DoT i reakcji
+│   │   ├── Enums/ElementEnums.h                      [Aktywny] EStatusEffectType (Burning, Wet, Electrified, Oiled)
+│   │   └── Utilities/
+│   │       └── ElementalChemistryLibrary             [Aktywny] Silnik reakcji chemicznych i weryfikacji kompatybilności materiałowej
+│   └── Zones/
+│       ├── StatusZoneBase.h/.cpp                     [Aktywny] Abstrakcyjna baza cyklu życia strefy, tick serwera 0.25s, DoT, reakcje chemiczne
+│       ├── StatusZone.h/.cpp                         [Aktywny] Klasa adapter/wrapper wstecznej kompatybilności dziedzicząca z SurfaceSplashZone
+│       ├── Shapes/
+│       │   ├── SurfaceSplashZone.h/.cpp              [Aktywny] Powłoka powierzchniowa (UDecalComponent, 48-ray perimeter, Drop-Off binary search, half-space check)
+│       │   └── VolumetricStatusZone.h/.cpp           [Aktywny] Trójwymiarowa sfera statusowa (chmury gazu, kłęby dymu, spowolnienie, brak dekalów)
+│       ├── Utilities/
+│       │   └── StatusZoneLibrary.h/.cpp              [Aktywny] Zunifikowana biblioteka dostarczania (Point Hit, Surface Splash, Volumetric Zone, Instant Burst)
+│       ├── Data/ZoneData.h                           [Aktywny] FZoneEffectConfig (status, instant damage, continuous DoT, movement multiplier)
+│       └── Enums/ZoneEnums.h                         [Aktywny] EZoneSpatialShape, EVolatileZoneSpawnMode
 │
 ├── Shared/
 │   ├── Components/
@@ -110,6 +118,15 @@ Source/MyProject/
 ### Filar 4: Telemetria i Logowanie
 - **Dedykowane Kategorie Logowania:** Usunięto użycie `LogTemp`. Cały projekt raportuje do wyodrębnionych kategorii w [`DungeonLogCategories.h`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Logging/DungeonLogCategories.h) (`LogDungeonInteraction`, `LogDungeonPhysics`, `LogDungeonNetwork`, `LogDungeonMechanisms`, `LogDungeonElements`).
 
+### Filar 5: Modułowy System Stref Gameplayowych (Status Zone System & Multi-Surface Fix)
+- **Hierarchia C++ o Pojedynczej Odpowiedzialności (Wariant A):**
+  - Rozbicie monolitycznego aktora strefy na czystą hierarchię klas: `AStatusZoneBase` (baza cyklu życia, autorytatywny timer 0.25s, DoT, reakcje chemiczne), `ASurfaceSplashZone` (powłoka powierzchniowa, UDecalComponent, 48-promieniowy obrys z Drop-Off binary edge search, weryfikacja półprzestrzeni), `AVolumetricStatusZone` (lekka sfera 3D, zero dekalów, zero tablic wierzchołków obrysu) oraz bibliotekę fabryczną `UStatusZoneLibrary` z bezstanowym `ApplyInstantBurst` w $t_0$.
+- **Rozwiązanie Konfliktu Multi-Surface Splashes (Podłoga vs Ściana):**
+  - Wyeliminowano przedwczesne niszczenie świeżo zespawnowanych plam podłogowych przez plamy ścienne wygenerowane w tej samej klatce. Wprowadzono zakaz samoniszczenia dla identycznych żywiołów oraz wymóg ścisłej koplanarności przy wypieraniu cieczy (`NormalDot > 0.85` oraz dystans płaszczyzny $< 30\text{ cm}$).
+- **Krytyczny Audyt Skalowalności (4 Graczy, Roje Wrogów, 50+ Stref):**
+  - Zidentyfikowano 4 kluczowe obszary wymagające uwagi wydajnościowej: odpytywanie solvera Chaos (`GetOverlappingActors` co 0.25s), powtarzane raycasty LoS, overdraw dekalów na GPU przy nakładaniu się wielu plam oraz synchronizację timerów serwera.
+  - Wyznaczono plan optymalizacji: Event-Driven Overlaps (`TSet` z `Begin/EndOverlap`), Zone Merging zamiast duplikacji dekalów oraz Timer Phase Staggering (szczegóły w [STATUS_ZONE_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/STATUS_ZONE_SPECIFICATION.md)).
+
 ---
 
 ## 4. Historia Przeglądu Architektury (Audit Complete)
@@ -136,3 +153,5 @@ Wszystkie 21 punktów technicznych z audytu projektu zostało z sukcesem zrealiz
 - **Sprint 4: Theme Park Loch v0.1:**
   1. Implementacja pułapki miotającej pociski [`AProjectileLauncherTrap`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Mechanisms/LauncherTrap/) (strzałki/kule ognia z interwałem czasowym).
   2. Implementacja prefabów propów zgodnie ze specyfikacją: `BP_PlankShield_Wood` (lekka drewniana tarcza) oraz `BP_GlassOrb_*` (szklane kule alchemiczne).
+  3. Wdrożenie optymalizacji P1 ze specyfikacji stref (Event-Driven Overlaps oraz Zone Merging) przed skalowaniem do masowych fal AI.
+

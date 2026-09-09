@@ -71,4 +71,17 @@ public:
 		float Radius,
 		const FZoneEffectConfig& EffectConfig,
 		AActor* InstigatorActor = nullptr);
+
+	/**
+	 * 4. POINT HIT (Uderzenie punktowe / bezpośrednie trafienie pociskiem)
+	 * Trafienie pojedynczym pociskiem w cel (postać, strefa, niszczalna drewniana struktura).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (DefaultToSelf = "InstigatorActor"))
+	static bool ApplyPointHit(
+		AActor* TargetActor,
+		const FVector& HitLocation,
+		const FVector& HitNormal,
+		EStatusEffectType StatusType,
+		float Duration,
+		AActor* InstigatorActor = nullptr);
 };
