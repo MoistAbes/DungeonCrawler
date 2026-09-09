@@ -47,6 +47,9 @@ protected:
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_PlayExplosionEffects(const FVector& DetonationCenter);
 
+    /** Obsługa tworzenia powłok powierzchniowych (posadzka + pobliskie pionowe ściany) */
+    void SpawnSurfaceSplashes(const FVector& DetonationCenter);
+
     // -------------------------------------------------------------------------
     // Zasięg Efektu
     // -------------------------------------------------------------------------
@@ -63,7 +66,7 @@ protected:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
     EVolatileZoneSpawnMode ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceSplash;
 
-    /** Zunifikowana konfiguracja efektu (InstantDamage, KnockbackForce, AppliedStatus, DoT, MovementSpeedMultiplier) */
+    /** Zunifikowana konfiguracja efektu (InstantDamage, KnockbackForce, AppliedStatus, DoT) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
     FZoneEffectConfig ZoneEffectConfig;
 

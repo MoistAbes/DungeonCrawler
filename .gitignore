@@ -19,3 +19,7 @@ Build/
 # Unreal project temp files
 *.xcodeproj
 *.xcworkspace
+
+# AI Agent local artifacts
+.antigravity/
+*.log

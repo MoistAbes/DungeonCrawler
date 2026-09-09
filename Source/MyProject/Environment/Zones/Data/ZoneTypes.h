@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
@@ -47,8 +47,4 @@ struct MYPROJECT_API FZoneEffectConfig
 	/** Ciągłe obrażenia zadawane co sekundę graczom i strukturom wewnątrz (np. ogień, kwas) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Zone|Continuous", meta = (ClampMin = "0.0"))
 	float ContinuousDamagePerSec = 0.0f;
-
-	/** Mnożnik prędkości chodu dla postaci wewnątrz strefy (np. 0.5 dla spowolnienia w oleju, 1.0 dla braku modyfikacji) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Zone|Continuous", meta = (ClampMin = "0.1", ClampMax = "2.0"))
-	float MovementSpeedMultiplier = 1.0f;
 };

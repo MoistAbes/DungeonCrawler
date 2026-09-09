@@ -1,18 +1,50 @@
-﻿#include "StatusZoneLibrary.h"
+#include "StatusZoneLibrary.h"
 
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/OverlapResult.h"
 #include "DrawDebugHelpers.h"
 #include "CollisionQueryParams.h"
+#include "GameFramework/Pawn.h"
 
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "Engine/Brush.h"
 
-AStatusZone* UStatusZoneLibrary::ApplySurfaceSplash(
+bool UStatusZoneLibrary::IsValidSurfaceTarget(const AActor* Actor)
+{
+	if (!Actor)
+	{
+		return false;
+	}
+
+	// 1. Wykluczamy postacie oraz dynamiczne/interaktywne rekwizyty lochu (beczki, skrzynie)
+	if (Actor->IsA<APawn>() || Actor->IsA<AInteractivePropBase>())
+	{
+		return false;
+	}
+
+	// 2. Akceptujemy oficjalne fundamenty i architekturę lochu (ściany, podłogi, sufity)
+	if (Actor->IsA<ADungeonStructureBase>())
+	{
+		return true;
+	}
+
+	// 3. Akceptujemy geometrię poziomu (BSP Brushes map testowych i prototypowych)
+	if (Actor->IsA<ABrush>())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 	const UObject* WorldContextObject,
 	const FHitResult& HitResult,
 	float SplashRadius,
@@ -29,9 +61,16 @@ AStatusZone* UStatusZoneLibrary::ApplySurfaceSplash(
 
 	AActor* HitActor = HitResult.GetActor();
 
-	// 1. Jeśli trafiliśmy bezpośrednio w postać z komponentem statusów (np. butelka rozbiła się na głowie gracza)
+	// 1. Jeśli trafiliśmy bezpośrednio w postać lub strefę
 	if (HitActor)
 	{
+		// Trafienie w istniejącą strefę
+		if (AStatusZoneBase* ExistingZone = Cast<AStatusZoneBase>(HitActor))
+		{
+			ExistingZone->ApplyElementalHit(EffectConfig.AppliedStatus, 0.0f, InstigatorActor);
+			return Cast<ASurfaceSplashZone>(ExistingZone);
+		}
+
 		if (EffectConfig.AppliedStatus != EStatusEffectType::None)
 		{
 			if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
@@ -40,12 +79,36 @@ AStatusZone* UStatusZoneLibrary::ApplySurfaceSplash(
 			}
 		}
 
-		// Trafienie w istniejącą strefę
-		if (AStatusZone* ExistingZone = Cast<AStatusZone>(HitActor))
+		// Opcja B: Jeśli trafiliśmy w postać / Pawn, szukamy posadzki pod jej stopami, aby rozlać plamę na podłodze
+		if (HitActor->IsA<APawn>())
 		{
-			ExistingZone->ApplyElementalHit(EffectConfig.AppliedStatus, 0.0f, InstigatorActor);
-			return ExistingZone;
+			const FVector PawnLocation = HitActor->GetActorLocation();
+			FHitResult FloorHit;
+			FCollisionQueryParams FloorTraceParams(SCENE_QUERY_STAT(SurfaceSplashFloorTrace), false, HitActor);
+			FloorTraceParams.AddIgnoredActor(HitActor);
+			if (InstigatorActor)
+			{
+				FloorTraceParams.AddIgnoredActor(InstigatorActor);
+			}
+
+			const FVector TraceStart = PawnLocation;
+			const FVector TraceEnd = PawnLocation - FVector(0.0f, 0.0f, 300.0f);
+
+			if (World->LineTraceSingleByChannel(FloorHit, TraceStart, TraceEnd, ECC_WorldStatic, FloorTraceParams))
+			{
+				return ApplySurfaceSplash(WorldContextObject, FloorHit, SplashRadius, SurfaceHeight, EffectConfig, Duration, InstigatorActor);
+			}
+			else
+			{
+				return nullptr;
+			}
 		}
+	}
+
+	// Strefa powierzchniowa może powstać WYŁĄCZNIE na fundamentach lochu lub geometrii poziomu
+	if (!IsValidSurfaceTarget(HitActor))
+	{
+		return nullptr;
 	}
 
 	// 2. Wyliczenie pozycji i orientacji powłoki powierzchniowej
@@ -58,24 +121,22 @@ AStatusZone* UStatusZoneLibrary::ApplySurfaceSplash(
 	SpawnParams.Owner = InstigatorActor;
 	SpawnParams.Instigator = Cast<APawn>(InstigatorActor);
 
-	AStatusZone* Zone = World->SpawnActor<AStatusZone>(AStatusZone::StaticClass(), SpawnLocation, SpawnRotation, SpawnParams);
+	ASurfaceSplashZone* Zone = World->SpawnActor<ASurfaceSplashZone>(ASurfaceSplashZone::StaticClass(), SpawnLocation, SpawnRotation, SpawnParams);
 	if (!Zone)
 	{
 		return nullptr;
 	}
 
 	// 3. Przyczepienie strefy do trafionej ściany/podłogi (AttachToComponent)
-	// Dzięki temu zburzenie ściany automatycznie niszczy strefę, a ruch taranu przemieszcza plamę!
 	if (UPrimitiveComponent* HitComponent = HitResult.GetComponent())
 	{
 		Zone->AttachToComponent(HitComponent, FAttachmentTransformRules::KeepWorldTransform);
 	}
 
-	Zone->InitializeZone(
+	Zone->InitializeSurfaceSplash(
 		EffectConfig,
 		SplashRadius,
 		Duration,
-		EZoneShapeType::SurfaceSplash,
 		SurfaceHeight,
 		SurfaceNormal,
 		InstigatorActor);
@@ -86,7 +147,7 @@ AStatusZone* UStatusZoneLibrary::ApplySurfaceSplash(
 	return Zone;
 }
 
-AStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
+AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 	const UObject* WorldContextObject,
 	const FVector& Location,
 	float Radius,
@@ -105,20 +166,13 @@ AStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 	SpawnParams.Owner = InstigatorActor;
 	SpawnParams.Instigator = Cast<APawn>(InstigatorActor);
 
-	AStatusZone* Zone = World->SpawnActor<AStatusZone>(AStatusZone::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
+	AVolumetricStatusZone* Zone = World->SpawnActor<AVolumetricStatusZone>(AVolumetricStatusZone::StaticClass(), Location, FRotator::ZeroRotator, SpawnParams);
 	if (!Zone)
 	{
 		return nullptr;
 	}
 
-	Zone->InitializeZone(
-		EffectConfig,
-		Radius,
-		Duration,
-		EZoneShapeType::VolumetricSphere,
-		Radius,
-		FVector::UpVector,
-		InstigatorActor);
+	Zone->InitializeVolumetricZone(EffectConfig, Radius, Duration, InstigatorActor);
 
 	UE_LOG(LogDungeonElements, Log, TEXT("[StatusZoneLibrary] Spawned Volumetric Zone (Radius: %.1f cm, Duration: %.1f s)"), Radius, Duration);
 
@@ -179,7 +233,7 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 			}
 
 			// Inna strefa w pobliżu wybuchu
-			if (AStatusZone* OtherZone = Cast<AStatusZone>(HitActor))
+			if (AStatusZoneBase* OtherZone = Cast<AStatusZoneBase>(HitActor))
 			{
 				OtherZone->ApplyElementalHit(EffectConfig.AppliedStatus, EffectConfig.InstantDamage, InstigatorActor);
 				ProcessedActors.Add(HitActor);
