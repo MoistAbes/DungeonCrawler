@@ -129,11 +129,8 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 				{
 					if (ExistingSplash->GetStatusType() == EffectConfig.AppliedStatus)
 					{
-						const float NormalDot = FVector::DotProduct(ExistingSplash->GetSurfaceNormal(), SurfaceNormal);
-						const float PlaneDist = FMath::Abs(FVector::DotProduct(HitResult.ImpactPoint - ExistingSplash->GetActorLocation(), SurfaceNormal));
-
 						// Ta sama płaszczyzna: zgodny wektor normalny oraz brak przesunięcia płaszczyzny
-						if (NormalDot > 0.85f && PlaneDist < 30.0f)
+						if (ExistingSplash->IsCoplanarWith(HitResult.ImpactPoint, SurfaceNormal))
 						{
 							ExistingSplash->MergeWithZone(Duration, 1.20f, SplashRadius * 1.5f);
 							UE_LOG(LogDungeonElements, Log, TEXT("[StatusZoneLibrary] Merged into existing Surface Splash (Radius: %.1f cm)"), ExistingSplash->GetRadius());

@@ -53,6 +53,26 @@ public:
 	/** Sprawdza, czy pamięć podręczna obrysu jest aktualna względem aktualnego położenia, orientacji i promienia */
 	bool IsPerimeterCacheValid() const;
 
+	/** Sprawdza, czy zadany punkt i wektor normalny leżą w tej samej płaszczyźnie co ta strefa */
+	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
+	bool IsCoplanarWithPoint(const FVector& OtherLocation, const FVector& OtherNormal, float ToleranceDist = 30.0f, float MinDot = 0.85f) const;
+
+	/** Sprawdza, czy inna strefa powierzchniowa leży w tej samej płaszczyźnie */
+	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
+	bool IsCoplanarWithZone(const ASurfaceSplashZone* OtherSplash, float ToleranceDist = 30.0f, float MinDot = 0.85f) const;
+
+	/** Wygodny alias C++ do sprawdzania płaszczyzny punktu */
+	FORCEINLINE bool IsCoplanarWith(const FVector& OtherLocation, const FVector& OtherNormal, float ToleranceDist = 30.0f, float MinDot = 0.85f) const
+	{
+		return IsCoplanarWithPoint(OtherLocation, OtherNormal, ToleranceDist, MinDot);
+	}
+
+	/** Wygodny alias C++ do sprawdzania płaszczyzny innej strefy */
+	FORCEINLINE bool IsCoplanarWith(const ASurfaceSplashZone* OtherSplash, float ToleranceDist = 30.0f, float MinDot = 0.85f) const
+	{
+		return IsCoplanarWithZone(OtherSplash, ToleranceDist, MinDot);
+	}
+
 	virtual void MergeWithZone(float InDuration, float RadiusGrowthMultiplier = 1.20f, float MaxRadiusCap = 1000.0f) override;
 
 protected:
@@ -94,7 +114,29 @@ protected:
 	virtual bool CanZonesInteract(const AStatusZoneBase* OtherZone) const override;
 	virtual bool HandleLiquidDisplacement(AActor* HitInstigator) override;
 
+	/** Aktualizuje rozmiar i orientację projektora Decal */
+	void UpdateDecalTransform();
+
 private:
+	// -------------------------------------------------------------------------
+	// Pomocnicze metody obliczeniowe (obrys, kolizja, geometria)
+	// -------------------------------------------------------------------------
+
+	/** Weryfikuje, czy w zadanym punkcie w przestrzeni istnieje stabilne podłoże (podłoga/ściana) */
+	bool CheckSurfacePresentAt(const FVector& ProbeCenter, float LiftOffset, const FCollisionQueryParams& TraceParams) const;
+
+	/** Sprawdza zasięg w danym kierunku radialnym z uwzględnieniem pionowych przeszkód */
+	float TraceObstacleDistance(const FVector& Center, const FVector& TraceStart, const FVector& RayDir, float MaxDist, const FCollisionQueryParams& TraceParams) const;
+
+	/** Szuka dokładnej krawędzi podłoża metodą binary search (Drop-Off Test) */
+	float FindDropOffEdgeDistance(const FVector& Center, const FVector& RayDir, float InitialMaxDist, float LiftOffset, const FCollisionQueryParams& TraceParams) const;
+
+	/** Sprawdza, czy obiekt mieści się w granicach grubości powłoki wzdłuż wektora normalnego */
+	bool IsWithinNormalBounds(const FBoxSphereBounds& Bounds, float& OutDistNormal) const;
+
+	/** Sprawdza, czy obiekt mieści się w granicach wielokąta obrysu w płaszczyźnie stycznej */
+	bool IsWithinTangentialPerimeter(const FBoxSphereBounds& Bounds, float DistNormal) const;
+
 	/** Punkty obrysu w przestrzeni świata */
 	mutable TArray<FVector> CachedPerimeterPoints;
 
