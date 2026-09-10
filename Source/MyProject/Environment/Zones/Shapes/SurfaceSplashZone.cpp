@@ -14,10 +14,8 @@ ASurfaceSplashZone::ASurfaceSplashZone()
 	SurfaceNormal = FVector::UpVector;
 	ShapeType = EZoneShapeType::SurfaceSplash;
 
-	ZoneDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("ZoneDecal"));
-	ZoneDecal->SetupAttachment(RootComponent);
-	ZoneDecal->DecalSize = FVector(50.0f, Radius, Radius);
-	ZoneDecal->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f));
+	// Projektor Decal jest wyłączony, aby nie rzutować pustego białego materiału na fundamenty
+	ZoneDecal = nullptr;
 }
 
 void ASurfaceSplashZone::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -50,7 +48,7 @@ void ASurfaceSplashZone::InitializeSurfaceSplash(
 
 	if (ZoneDecal)
 	{
-		ZoneDecal->SetVisibility(true);
+		ZoneDecal->SetVisibility(false);
 	}
 	UpdateDecalTransform();
 
@@ -92,9 +90,7 @@ void ASurfaceSplashZone::UpdateDecalTransform()
 {
 	if (ZoneDecal)
 	{
-		const float ProjectionDepth = FMath::Max(SurfaceHeight * 2.0f, 60.0f);
-		ZoneDecal->DecalSize = FVector(ProjectionDepth, Radius, Radius);
-		ZoneDecal->SetWorldRotation(FRotationMatrix::MakeFromX(-SurfaceNormal).Rotator());
+		ZoneDecal->SetVisibility(false);
 	}
 }
 
