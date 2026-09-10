@@ -19,9 +19,9 @@ void AVolumetricStatusZone::InitializeVolumetricZone(
 
 bool AVolumetricStatusZone::IsActorWithinZoneGeometry(const FBoxSphereBounds& Bounds) const
 {
-	const float DistSq = FVector::DistSquared(Bounds.Origin, GetActorLocation());
-	const float CombinedRadius = Radius + Bounds.SphereRadius;
-	return DistSq <= FMath::Square(CombinedRadius);
+	// Wyliczamy rzeczywistą minimalną odległość od środka sfery do bryły kolizyjnej celu (AABB)
+	const float DistSq = Bounds.GetBox().ComputeSquaredDistanceToPoint(GetActorLocation());
+	return DistSq <= FMath::Square(Radius);
 }
 
 void AVolumetricStatusZone::DrawDebugVisuals() const

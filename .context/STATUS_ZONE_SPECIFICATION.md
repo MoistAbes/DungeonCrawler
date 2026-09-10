@@ -97,7 +97,9 @@ classDiagram
 3. **`AVolumetricStatusZone` (`Source/MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h`):**
    - Czysty, ultra-lekki wolumen 3D (chmury gazu, kłęby dymu, strefy ciszy, parowanie).
    - Całkowity brak dekalów (`UDecalComponent`), brak tablic wierzchołków obrysu, brak alokacji 48 promieni raycastingu.
-   - Błyskawiczny test przynależności: czysta odległość euklidesowa $D \le R$ oraz Line of Sight do środka sfery.
+   - Błyskawiczny i matematycznie precyzyjny test geometryczny AABB celu: `Bounds.GetBox().ComputeSquaredDistanceToPoint(ZoneCenter) <= Radius^2`.
+   - Weryfikacja przeszkód architektonicznych: Line of Sight ze środka sfery z 5-punktowym próbnikiem anatomicznym (lite ściany, drzwi i zamknięte pokoje $1\times 1\text{ m}$ w 100% zatrzymują gaz wewnątrz).
+   - Pełna obsługa **Zone Merging**: odświeżanie czasu trwania, bezpieczne powiększanie promienia o 20% do limitu `MaxRadiusCap`, natychmiastowe `ForceNetUpdate()` i `ProcessActiveOverlaps()`.
 4. **`UStatusZoneLibrary` (`Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h`):**
    - Zunifikowana fabryka dostarczania żywiołów do świata:
      - `ApplyPointHit`: bezpośrednie trafienie pociskiem/strzałą w cel, sprawdzające strefy, komponent statusów i niszczalne drewno.

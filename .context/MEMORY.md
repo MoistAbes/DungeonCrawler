@@ -135,6 +135,11 @@ Source/MyProject/
     - W `UStatusZoneLibrary::ApplySurfaceSplash`: rozszerzono ślad pionowy w dół poszukujący posadzki pod aktorem również dla `AInteractivePropBase` (kałuża tworzy się bezpośrednio pod nim).
     - W `AStatusZoneBase::IsActorEligibleForZoneEffect`: wyłączono przypodłogowy raycast LoS ($Z=0$) dla `SurfaceSplash` (gdzie 48-promieniowy obrys już w pełni uwzględnia architekturę), eliminując fałszywe odrzucanie obiektów stojących w kałuży przez mikroskopijne krawędzie siatek.
     - W `ASurfaceSplashZone`: dodano $+15\text{ cm}$ bufora tolerancji na kontakt fizyki Chaos w `IsWithinNormalBounds` i `IsWithinTangentialPerimeter`.
+  - **Ukończenie i Matematyczna Precyzja `AVolumetricStatusZone` (Chmury 3D / Gazy):**
+    - Czysty wolumen przestrzenny 3D bez narzutu dekalów na GPU.
+    - Zastąpiono uproszczone porównanie sfer na precyzyjny dystans do prostopadłościanu kolizyjnego AABB: `Bounds.GetBox().ComputeSquaredDistanceToPoint(GetActorLocation()) <= FMath::Square(Radius)`.
+    - Weryfikacja geometryczna Line of Sight ze środka sfery z 5-punktowym próbnikiem anatomicznym (lite ściany, zamknięte drzwi i pokoje $1\times 1\text{ m}$ w 100% zatrzymują gaz wewnątrz, brak przenikania przez architekturę).
+    - Pełna obsługa Zone Merging dla chmur gazowych (odświeżenie czasu trwania, bezpieczny wzrost promienia o 20% do `MaxRadiusCap`, natychmiastowe `ForceNetUpdate()` i `ProcessActiveOverlaps()`).
   - Usunięto przestarzałą klasę wrapper `AStatusZone`. Wszystkie call-site'y korzystają bezpośrednio z dedykowanych klas stref.
 
 ---

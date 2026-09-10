@@ -341,6 +341,9 @@ void AStatusZoneBase::MergeWithZone(float InDuration, float RadiusGrowthMultipli
 		Radius = TargetRadius;
 		OnRep_Radius();
 	}
+
+	ForceNetUpdate();
+	ProcessActiveOverlaps();
 }
 
 void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float InstantDamage, AActor* HitInstigator)
