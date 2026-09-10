@@ -8,6 +8,7 @@
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
+#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
 AVolatileProp::AVolatileProp()
 {
@@ -126,7 +127,8 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
     FHitResult FloorHit;
     if (GetWorld()->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, FloorTraceDist), ECC_Visibility, TraceParams))
     {
-        if (FloorHit.GetActor() && UStatusZoneLibrary::IsValidSurfaceTarget(FloorHit.GetActor()))
+        AActor* HitActor = FloorHit.GetActor();
+        if (HitActor)
         {
             ASurfaceSplashZone* FloorZone = UStatusZoneLibrary::ApplySurfaceSplash(
                 this,
@@ -185,10 +187,24 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
         FHitResult SurfaceHit;
         if (GetWorld()->LineTraceSingleByChannel(SurfaceHit, DetonationCenter, TraceEnd, ECC_Visibility, TraceParams))
         {
-            // Akceptujemy wyłącznie trafienia w fundamenty/struktury lochu lub geometrię poziomu
-            if (!SurfaceHit.GetActor() || !UStatusZoneLibrary::IsValidSurfaceTarget(SurfaceHit.GetActor()))
+            AActor* HitActor = SurfaceHit.GetActor();
+            if (!HitActor)
             {
                 continue;
+            }
+
+            // Jeśli promień trafił w postać lub interaktywny rekwizyt:
+            // Obiekt fizycznie blokuje strugę cieczy przed dotarciem do ściany, więc ZAWSZE otrzymuje status!
+            if (!UStatusZoneLibrary::IsValidSurfaceTarget(HitActor))
+            {
+                if (ZoneEffectConfig.AppliedStatus != EStatusEffectType::None)
+                {
+                    if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
+                    {
+                        StatusComp->ApplyStatus(ZoneEffectConfig.AppliedStatus, ZoneDuration, this);
+                    }
+                }
+                continue; // Ciecz została zatrzymana na obiekcie i nie leci na ścianę za nim
             }
 
             // Deduplikacja: sprawdzamy, czy ten punkt nie leży na tej samej płaszczyźnie co już utworzona strefa

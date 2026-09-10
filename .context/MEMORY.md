@@ -130,6 +130,11 @@ Source/MyProject/
     - Wprowadzono **5-punktowy próbnik anatomiczny (Multi-Point Probe)** z optymalizacją Fast-Path w `UKineticForceLibrary::HasExplosionLineOfSight` (środek tułowia, głowa/klatka piersiowa $+70\%$, lewe i prawe ramię $\pm 70\%$, stopy $-70\%$). Wyeliminowano problem chowania się postaci za małymi propami/skrzynkami.
     - Zunifikowano `UStatusZoneLibrary::ApplyInstantBurst` w **Single-Pass Query**: jedno zapytanie overlap na kanałach `Pawn`, `PhysicsBody`, `WorldDynamic`, `WorldStatic` zamiast 4 osobnych sweepów; równoczesna aplikacja obrażeń, odrzutu, statusu o konfigurowalnym `Duration` oraz reakcji chemicznych na sąsiednich strefach.
     - Dodano obsługę niszczenia drewnianych struktur i barykad lochu (`ADungeonStructureBase` na profilu `BlockAll` / `ECC_WorldStatic`).
+  - **Fizyczne Blokowanie Splasha i Pewna Aplikacja Statusu (Splash Blocking & Status Guarantee):**
+    - W `AVolatileProp::SpawnSurfaceSplashes`: każdy radialny promień zatrzymany na postaci (`APawn`) lub dynamicznym rekwizycie (`AInteractivePropBase`) natychmiast aplikuje status z pełnym czasem `ZoneDuration` na `UStatusEffectComponent` tego aktora i przerywa lot strugi cieczy na ścianę za nim.
+    - W `UStatusZoneLibrary::ApplySurfaceSplash`: rozszerzono ślad pionowy w dół poszukujący posadzki pod aktorem również dla `AInteractivePropBase` (kałuża tworzy się bezpośrednio pod nim).
+    - W `AStatusZoneBase::IsActorEligibleForZoneEffect`: wyłączono przypodłogowy raycast LoS ($Z=0$) dla `SurfaceSplash` (gdzie 48-promieniowy obrys już w pełni uwzględnia architekturę), eliminując fałszywe odrzucanie obiektów stojących w kałuży przez mikroskopijne krawędzie siatek.
+    - W `ASurfaceSplashZone`: dodano $+15\text{ cm}$ bufora tolerancji na kontakt fizyki Chaos w `IsWithinNormalBounds` i `IsWithinTangentialPerimeter`.
   - Usunięto przestarzałą klasę wrapper `AStatusZone`. Wszystkie call-site'y korzystają bezpośrednio z dedykowanych klas stref.
 
 ---

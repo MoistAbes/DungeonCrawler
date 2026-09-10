@@ -242,12 +242,17 @@ bool AStatusZoneBase::IsActorEligibleForZoneEffect(AActor* TargetActor, UPrimiti
 		return false;
 	}
 
-	// 2. Weryfikacja geometryczna Line of Sight (przeszkody architektoniczne, filary)
-	FHitResult LoSHit;
-	const AActor* IgnoredActor = ZoneInstigator.IsValid() ? ZoneInstigator.Get() : this;
-	if (!UKineticForceLibrary::HasExplosionLineOfSight(GetWorld(), ZoneCenter, TargetActor, TargetComp, LoSHit, IgnoredActor))
+	// 2. Weryfikacja geometryczna Line of Sight
+	// Dla stref przestrzennych 3D (chmury gazu, dym) sprawdzamy widoczność do środka sfery.
+	// Dla stref powierzchniowych (Surface Splash) obrys wielokąta z 48 promieniami już w pełni uwzględnił architekturę i przeszkody.
+	if (ShapeType != EZoneShapeType::SurfaceSplash)
 	{
-		return false;
+		FHitResult LoSHit;
+		const AActor* IgnoredActor = ZoneInstigator.IsValid() ? ZoneInstigator.Get() : this;
+		if (!UKineticForceLibrary::HasExplosionLineOfSight(GetWorld(), ZoneCenter, TargetActor, TargetComp, LoSHit, IgnoredActor))
+		{
+			return false;
+		}
 	}
 
 	// 3. Rozwiązywanie konfliktów nakładających się płynów

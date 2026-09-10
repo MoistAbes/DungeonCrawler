@@ -79,10 +79,10 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 			}
 		}
 
-		// Opcja B: Jeśli trafiliśmy w postać / Pawn, szukamy posadzki pod jej stopami, aby rozlać plamę na podłodze
-		if (HitActor->IsA<APawn>())
+		// Opcja B: Jeśli trafiliśmy w postać lub rekwizyt, szukamy posadzki pod nim, aby rozlać plamę na podłodze
+		if (HitActor->IsA<APawn>() || HitActor->IsA<AInteractivePropBase>())
 		{
-			const FVector PawnLocation = HitActor->GetActorLocation();
+			const FVector ActorLocation = HitActor->GetActorLocation();
 			FHitResult FloorHit;
 			FCollisionQueryParams FloorTraceParams(SCENE_QUERY_STAT(SurfaceSplashFloorTrace), false, HitActor);
 			FloorTraceParams.AddIgnoredActor(HitActor);
@@ -91,8 +91,8 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 				FloorTraceParams.AddIgnoredActor(InstigatorActor);
 			}
 
-			const FVector TraceStart = PawnLocation;
-			const FVector TraceEnd = PawnLocation - FVector(0.0f, 0.0f, 300.0f);
+			const FVector TraceStart = ActorLocation;
+			const FVector TraceEnd = ActorLocation - FVector(0.0f, 0.0f, 300.0f);
 
 			if (World->LineTraceSingleByChannel(FloorHit, TraceStart, TraceEnd, ECC_WorldStatic, FloorTraceParams))
 			{

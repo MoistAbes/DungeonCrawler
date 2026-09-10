@@ -160,6 +160,19 @@ Pola w `FZoneEffectConfig`:
 - **Symptom:** Utworzenie metod czysto wirtualnych (`= 0`) w `AStatusZoneBase` uniemożliwiało silnikowi Unreal Engine wygenerowanie obiektu domyślnego klasy (Class Default Object - CDO).
 - **Rozwiązanie:** Zastąpiono czysto wirtualne metody implementacjami domyślnymi `virtual bool IsActorEligibleForZoneEffect(AActor* TargetActor)` w `AStatusZoneBase`, nadpisywanymi w klasach potomnych.
 
+### Problem 3: Brak statusu przy fizycznym zablokowaniu rozbryzgu (Splash Blocking) przez postać lub prop (Rozwiązany)
+- **Symptom:** Gdy postać lub interaktywny rekwizyt (np. beczka, skrzynka) stał na drodze rozbryzgu cieczy z `AVolatileProp`, ciecz fizycznie zatrzymywała się na obiekcie (rozwarstwiała się na nim i nie leciała dalej na ścianę), lecz obiekt ten nie zawsze otrzymywał status żywiołowy (`Wet`, `Oiled`).
+- **Przyczyny źródłowe:**
+  1. **Ignorowanie blokera w skanowaniu radialnym (`AVolatileProp::SpawnSurfaceSplashes`):** Promienie radialne natrafiając na aktora niebędącego strukturą (`!IsValidSurfaceTarget`) wykonywały `continue;`, całkowicie pomijając aplikację statusu na obiekt, który przechwycił strugę cieczy.
+  2. **Zawężenie promienia podłogowego tylko do `APawn` (`UStatusZoneLibrary::ApplySurfaceSplash`):** Trafienie w `AInteractivePropBase` nie generowało poszukiwania posadzki w dół pod propem, przez co pod rekwizytem nie formowała się kałuża.
+  3. **Kolizje Line of Sight na poziomie podłogi (`AStatusZoneBase::IsActorEligibleForZoneEffect`):** Weryfikacja LoS za pomocą promienia z $Z=0$ (środek strefy na podłodze) haczyła o mikroskopijne krawędzie siatki podłogi lub inne rekwizyty, fałszywie odrzucając obiekty stojące bezpośrednio w kałuży. Dla stref `SurfaceSplash` obrys 48 promieni już w pełni definiuje geometrię widoczności i architektury.
+  4. **Zerowa tolerancja granic w `ASurfaceSplashZone`:** Brak bufora grubości (`GetMaxAllowedHeight()`) sprawiał, że obiekty uniesione o 1–3 cm przez skórę kolizyjną Chaos (contact skin) lub stojące na skraju dekalowania wypadały poza strefę.
+- **Rozwiązanie w kodzie:**
+  1. W `AVolatileProp::SpawnSurfaceSplashes`: każdy promień trafiający w obiekt niebędący strukturą natychmiast aplikuje status z pełnym czasem trwania `ZoneDuration` na `UStatusEffectComponent` tego aktora, zatrzymując strugę przed dotarciem do ściany za nim.
+  2. W `UStatusZoneLibrary::ApplySurfaceSplash`: rozszerzono wyszukiwanie podłogi w dół o `AInteractivePropBase`, dzięki czemu plama rozlewa się pod stopami gracza lub pod rekwizytem.
+  3. W `AStatusZoneBase::IsActorEligibleForZoneEffect`: ominięto redundantny, przypodłogowy test LoS dla `EZoneShapeType::SurfaceSplash` (zachowując go dla przestrzennych chmur 3D `VolumetricZone`).
+  4. W `ASurfaceSplashZone`: dodano $+15\text{ cm}$ tolerancji w `IsWithinNormalBounds` oraz `IsWithinTangentialPerimeter`, co idealnie pokrywa się z rzutem dekalowania i geometrią fizyczną Chaos.
+
 ---
 
 ## 6. Krytyczny Audyt Wydajności i Skalowalności

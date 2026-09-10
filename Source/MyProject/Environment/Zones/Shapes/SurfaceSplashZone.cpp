@@ -367,8 +367,8 @@ bool ASurfaceSplashZone::IsWithinNormalBounds(const FBoxSphereBounds& Bounds, fl
 		return false;
 	}
 
-	// Obiekt znajduje się ponad dopuszczalną grubością strefy
-	if (MinDist > GetMaxAllowedHeight())
+	// Obiekt znajduje się ponad dopuszczalną grubością strefy (+15 cm buforu na tolerancję fizyki Chaos i nierówności)
+	if (MinDist > GetMaxAllowedHeight() + 15.0f)
 	{
 		return false;
 	}
@@ -404,7 +404,8 @@ bool ASurfaceSplashZone::IsWithinTangentialPerimeter(const FBoxSphereBounds& Bou
 
 	const float AllowedRadius = GetPerimeterRadiusAtAngle(AngleRad);
 
-	return (TangentialDist - TangentialExtent <= AllowedRadius);
+	// Bufor 15 cm odpowiadający rzeczywistemu zasięgowi dekalów i krawędzi obiektów
+	return (TangentialDist - TangentialExtent <= AllowedRadius + 15.0f);
 }
 
 bool ASurfaceSplashZone::IsActorWithinZoneGeometry(const FBoxSphereBounds& Bounds) const
