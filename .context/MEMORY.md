@@ -47,7 +47,6 @@ Source/MyProject/
 │   │       └── ElementalChemistryLibrary             [Aktywny] Silnik reakcji chemicznych i weryfikacji kompatybilności materiałowej
 │   └── Zones/
 │       ├── StatusZoneBase.h/.cpp                     [Aktywny] Abstrakcyjna baza cyklu życia strefy, tick serwera 0.25s, DoT, reakcje chemiczne
-│       ├── StatusZone.h/.cpp                         [Aktywny] Klasa adapter/wrapper wstecznej kompatybilności dziedzicząca z SurfaceSplashZone
 │       ├── Shapes/
 │       │   ├── SurfaceSplashZone.h/.cpp              [Aktywny] Powłoka powierzchniowa (UDecalComponent, 48-ray perimeter, Drop-Off binary search, half-space check)
 │       │   └── VolumetricStatusZone.h/.cpp           [Aktywny] Trójwymiarowa sfera statusowa (chmury gazu, kłęby dymu, spowolnienie, brak dekalów)

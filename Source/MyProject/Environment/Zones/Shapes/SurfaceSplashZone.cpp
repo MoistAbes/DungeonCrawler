@@ -103,16 +103,49 @@ float ASurfaceSplashZone::CalculateBroadphaseRadius() const
 	return FMath::Sqrt(FMath::Square(Radius) + FMath::Square(MaxHeight)) + 15.0f;
 }
 
+bool ASurfaceSplashZone::IsPerimeterCacheValid() const
+{
+	if (CachedPerimeterPoints.Num() < 3 || CachedPerimeterDistances.Num() < 3)
+	{
+		return false;
+	}
+
+	if (FVector::DistSquared(GetActorLocation(), CachedCenter) > 4.0f) // Tolerancja 2 cm na przesunięcie rodzica
+	{
+		return false;
+	}
+
+	if (FVector::DistSquared(SurfaceNormal, CachedNormal) > 0.001f)
+	{
+		return false;
+	}
+
+	if (!FMath::IsNearlyEqual(Radius, CachedRadius, 0.5f))
+	{
+		return false;
+	}
+
+	return true;
+}
+
 void ASurfaceSplashZone::RebuildPerimeterPoints()
 {
 	CachedPerimeterPoints.Reset();
+	CachedPerimeterDistances.Reset();
 
 	if (!GetWorld() || Radius <= 0.0f)
 	{
+		CachedCenter = FVector(NAN);
+		CachedNormal = FVector(NAN);
+		CachedRadius = -1.0f;
 		return;
 	}
 
 	const FVector Center = GetActorLocation();
+	CachedCenter = Center;
+	CachedNormal = SurfaceNormal;
+	CachedRadius = Radius;
+
 	const FMatrix SurfaceMatrix = FRotationMatrix::MakeFromX(SurfaceNormal);
 	const FVector AxisY = SurfaceMatrix.GetScaledAxis(EAxis::Y);
 	const FVector AxisZ = SurfaceMatrix.GetScaledAxis(EAxis::Z);
@@ -123,6 +156,7 @@ void ASurfaceSplashZone::RebuildPerimeterPoints()
 
 	constexpr int32 NumSegments = 48;
 	CachedPerimeterPoints.Reserve(NumSegments);
+	CachedPerimeterDistances.Reserve(NumSegments);
 
 	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(StatusZonePerimeterTrace), false, this);
 	TraceParams.AddIgnoredActor(this);
@@ -214,12 +248,18 @@ void ASurfaceSplashZone::RebuildPerimeterPoints()
 		}
 
 		CachedPerimeterPoints.Add(Center + RayDir * MaxAllowedDist);
+		CachedPerimeterDistances.Add(MaxAllowedDist);
 	}
 }
 
 float ASurfaceSplashZone::GetPerimeterRadiusAtAngle(float AngleRad) const
 {
-	const int32 NumPoints = CachedPerimeterPoints.Num();
+	if (!IsPerimeterCacheValid())
+	{
+		const_cast<ASurfaceSplashZone*>(this)->RebuildPerimeterPoints();
+	}
+
+	const int32 NumPoints = CachedPerimeterDistances.Num();
 	if (NumPoints < 3)
 	{
 		return Radius;
@@ -235,43 +275,22 @@ float ASurfaceSplashZone::GetPerimeterRadiusAtAngle(float AngleRad) const
 	const float SegmentFloat = NormalizedAngle / StepRad;
 	const int32 i0 = FMath::Clamp(FMath::FloorToInt(SegmentFloat), 0, NumPoints - 1);
 	const int32 i1 = (i0 + 1) % NumPoints;
-
-	const FVector ZoneCenter = GetActorLocation();
-	const FMatrix SurfaceMatrix = FRotationMatrix::MakeFromX(SurfaceNormal);
-	const FVector AxisY = SurfaceMatrix.GetScaledAxis(EAxis::Y);
-	const FVector AxisZ = SurfaceMatrix.GetScaledAxis(EAxis::Z);
-
-	const FVector ToPt0 = CachedPerimeterPoints[i0] - ZoneCenter;
-	const FVector ToPt1 = CachedPerimeterPoints[i1] - ZoneCenter;
-
-	const float a_y = FVector::DotProduct(ToPt0, AxisY);
-	const float a_z = FVector::DotProduct(ToPt0, AxisZ);
-	const float b_y = FVector::DotProduct(ToPt1, AxisY);
-	const float b_z = FVector::DotProduct(ToPt1, AxisZ);
-
-	const float v_y = FMath::Cos(NormalizedAngle);
-	const float v_z = FMath::Sin(NormalizedAngle);
-
-	const float Denominator = v_y * (b_z - a_z) - v_z * (b_y - a_y);
-	const float Numerator = a_y * b_z - a_z * b_y;
-
-	if (FMath::Abs(Denominator) > 1e-4f)
-	{
-		const float t = Numerator / Denominator;
-		if (t > 0.0f)
-		{
-			return FMath::Clamp(t, 10.0f, Radius);
-		}
-	}
-
-	const float Dist0 = FMath::Sqrt(a_y * a_y + a_z * a_z);
-	const float Dist1 = FMath::Sqrt(b_y * b_y + b_z * b_z);
 	const float Fraction = SegmentFloat - static_cast<float>(i0);
-	return FMath::Clamp(FMath::Lerp(Dist0, Dist1, Fraction), 10.0f, Radius);
+
+	const float Dist0 = CachedPerimeterDistances[i0];
+	const float Dist1 = CachedPerimeterDistances[i1];
+
+	// Interpolacja kątowa z ograniczeniem [0, Radius]. 0.0f oznacza brak powierzchni (krawędź przepaści/dziura)
+	return FMath::Clamp(FMath::Lerp(Dist0, Dist1, Fraction), 0.0f, Radius);
 }
 
 bool ASurfaceSplashZone::IsActorWithinZoneGeometry(const FBoxSphereBounds& Bounds) const
 {
+	if (!IsPerimeterCacheValid())
+	{
+		const_cast<ASurfaceSplashZone*>(this)->RebuildPerimeterPoints();
+	}
+
 	const FVector ZoneCenter = GetActorLocation();
 	const FVector BoundsOrigin = Bounds.Origin;
 	const FVector Extent = Bounds.BoxExtent;
@@ -385,7 +404,7 @@ void ASurfaceSplashZone::DrawDebugVisuals() const
 	const FString StatusName = GetStatusDebugName();
 	const FVector Center = GetActorLocation();
 
-	if (CachedPerimeterPoints.Num() < 3)
+	if (!IsPerimeterCacheValid())
 	{
 		const_cast<ASurfaceSplashZone*>(this)->RebuildPerimeterPoints();
 	}

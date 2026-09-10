@@ -66,12 +66,9 @@ classDiagram
         #IsActorEligibleForZoneEffect(Actor) bool override
     }
 
-    class AStatusZone {
-        <<Backwards Compatibility>>
-    }
-
     class UStatusZoneLibrary {
         <<BlueprintFunctionLibrary>>
+        +ApplyPointHit(...) bool
         +ApplySurfaceSplash(...)
         +SpawnVolumetricZone(...)
         +ApplyInstantBurst(...)
@@ -80,7 +77,6 @@ classDiagram
 
     AStatusZoneBase <|-- ASurfaceSplashZone
     AStatusZoneBase <|-- AVolumetricStatusZone
-    ASurfaceSplashZone <|-- AStatusZone
     UStatusZoneLibrary ..> AStatusZoneBase : Fabryka i Logika Statyczna
 ```
 
@@ -94,18 +90,20 @@ classDiagram
 2. **`ASurfaceSplashZone` (`Source/MyProject/Environment/Zones/Shapes/SurfaceSplashZone.h`):**
    - Odpowiedzialność ściśle geometryczna dla powłok powierzchniowych (podłogi, ściany, pochyłości).
    - Zarządzanie komponentem `UDecalComponent` (dynamiczny materiał, orientacja do wektora normalnego powierzchni).
-   - Generowanie wielokąta obrysu: 48 promieni trace'ujących geometrię z binarnym poszukiwaniem krawędzi (Drop-Off Binary Search).
-   - Rzutowanie na płaszczyznę styczną (Tangential Projection) i wyznaczanie obwodu.
+   - **Leniwa inwalidacja cache (`IsPerimeterCacheValid`):** porównanie z `CachedCenter`, `CachedNormal`, `CachedRadius`. Rebuild obrysu następuje tylko przy faktycznym przemieszczeniu rodzica w świecie (`AttachToComponent`).
+   - Generowanie obrysu 48 promieni z binarnym poszukiwaniem krawędzi (Drop-Off Binary Search).
+   - **Szybka interpolacja radialna (`GetPerimeterRadiusAtAngle`):** $O(1)$ interpolacja liniowa `Lerp` między dwoma sąsiednimi promieniami z ograniczeniem `[0.0f, Radius]`, eliminująca zbędną geometrię analityczną i sztuczne 10 cm lewitowania plamy nad przepaścią.
    - Weryfikacja półprzestrzeni (`Half-Space Test`) eliminująca przenikanie przez ściany o grubości $< 30\text{ cm}$.
 3. **`AVolumetricStatusZone` (`Source/MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h`):**
    - Czysty, ultra-lekki wolumen 3D (chmury gazu, kłęby dymu, strefy ciszy, parowanie).
    - Całkowity brak dekalów (`UDecalComponent`), brak tablic wierzchołków obrysu, brak alokacji 48 promieni raycastingu.
    - Błyskawiczny test przynależności: czysta odległość euklidesowa $D \le R$ oraz Line of Sight do środka sfery.
 4. **`UStatusZoneLibrary` (`Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h`):**
-   - Centralna fabryka stref.
-   - `ApplySurfaceSplash`: wykrywa trafienie w geometrię fundamentu (`DungeonStructureBase`), spawnuje `ASurfaceSplashZone` i podpina go pod trafiony komponent (`AttachToComponent`).
-   - `SpawnVolumetricZone`: spawnuje `AVolumetricStatusZone` zawieszony w przestrzeni.
-   - `ApplyInstantBurst`: wykonuje natychmiastowe uderzenie w klatce $t_0$ (Line of Sight, obrażenia, odrzut, aplikacja statusu) bez tworzenia aktora strefy.
+   - Zunifikowana fabryka dostarczania żywiołów do świata:
+     - `ApplyPointHit`: bezpośrednie trafienie pociskiem/strzałą w cel, sprawdzające strefy, komponent statusów i niszczalne drewno.
+     - `ApplySurfaceSplash`: wykrywa trafienie w geometrię fundamentu (`DungeonStructureBase`), spawnuje `ASurfaceSplashZone` i podpina go pod trafiony komponent (`AttachToComponent`).
+     - `SpawnVolumetricZone`: spawnuje `AVolumetricStatusZone` zawieszony w przestrzeni.
+     - `ApplyInstantBurst`: wykonuje natychmiastowe uderzenie w klatce $t_0$ (Line of Sight, obrażenia, odrzut, aplikacja statusu) bez tworzenia aktora strefy.
 
 ---
 

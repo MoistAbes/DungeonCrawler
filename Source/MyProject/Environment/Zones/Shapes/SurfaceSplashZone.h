@@ -50,6 +50,9 @@ public:
 	/** Zwraca maksymalny promień strefy na zadanym kącie obrysu (uwzględnia przeszkody i wycięcia) */
 	float GetPerimeterRadiusAtAngle(float AngleRad) const;
 
+	/** Sprawdza, czy pamięć podręczna obrysu jest aktualna względem aktualnego położenia, orientacji i promienia */
+	bool IsPerimeterCacheValid() const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -90,6 +93,14 @@ protected:
 	virtual bool HandleLiquidDisplacement(AActor* HitInstigator) override;
 
 private:
-	/** Punkty obrysu z uwzględnieniem Line-of-Sight ścian i krawędzi architektury */
+	/** Punkty obrysu w przestrzeni świata */
 	mutable TArray<FVector> CachedPerimeterPoints;
+
+	/** Promienie obrysu dla 48 kierunków radialnych (do szybkiej interpolacji) */
+	mutable TArray<float> CachedPerimeterDistances;
+
+	/** Parametry transformu i promienia, dla których wyliczono powyższy cache */
+	mutable FVector CachedCenter = FVector(NAN);
+	mutable FVector CachedNormal = FVector(NAN);
+	mutable float CachedRadius = -1.0f;
 };
