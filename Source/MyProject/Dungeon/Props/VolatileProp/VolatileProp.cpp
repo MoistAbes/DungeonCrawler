@@ -60,6 +60,7 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
                 DetonationCenter,
                 EffectRadius,
                 ZoneEffectConfig,
+                ZoneDuration,
                 this);
         }
         break;

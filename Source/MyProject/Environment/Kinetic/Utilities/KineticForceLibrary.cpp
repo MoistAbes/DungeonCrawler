@@ -1,4 +1,4 @@
-﻿#include "KineticForceLibrary.h"
+#include "KineticForceLibrary.h"
 
 #include "Components/PrimitiveComponent.h"
 #include "DrawDebugHelpers.h"
@@ -123,18 +123,17 @@ bool UKineticForceLibrary::HasExplosionLineOfSight(
         LoSParams.AddIgnoredActor(IgnoredActor);
     }
 
-    // Wyznaczamy docelowy punkt uderzenia fali na powierzchni obiektu
-    FVector TargetPoint = TargetActor->GetActorLocation();
+    // 1. FAST-PATH: Podstawowy punkt (najbliższy punkt kolizji lub środek aktora)
+    FVector PrimaryPoint = TargetActor->GetActorLocation();
     if (TargetComp)
     {
-        TargetComp->GetClosestPointOnCollision(Origin, TargetPoint);
+        TargetComp->GetClosestPointOnCollision(Origin, PrimaryPoint);
     }
 
-    const FVector Dir = (TargetPoint - Origin).GetSafeNormal();
-    // Wysyłamy promień nieco za punkt kolizji, by uchwycić właściwy komponent
-    const FVector TraceEnd = TargetPoint + Dir * 15.0f;
+    const FVector PrimaryDir = (PrimaryPoint - Origin).GetSafeNormal();
+    const FVector PrimaryTraceEnd = PrimaryPoint + PrimaryDir * 15.0f;
 
-    if (World->LineTraceSingleByChannel(OutHitResult, Origin, TraceEnd, ECC_Visibility, LoSParams))
+    if (World->LineTraceSingleByChannel(OutHitResult, Origin, PrimaryTraceEnd, ECC_Visibility, LoSParams))
     {
         if (OutHitResult.GetActor() == TargetActor)
         {
@@ -143,25 +142,69 @@ bool UKineticForceLibrary::HasExplosionLineOfSight(
     }
     else
     {
-        // Jeśli promień nie napotkał żadnego blokera, linia wzroku jest czysta
-        OutHitResult.ImpactPoint = TargetPoint;
-        OutHitResult.ImpactNormal = -Dir;
+        // Jeśli promień nie napotkał żadnego blokera, linia wzroku jest w 100% czysta
+        OutHitResult.ImpactPoint = PrimaryPoint;
+        OutHitResult.ImpactNormal = -PrimaryDir;
         return true;
     }
 
-    // Dodatkowy test dla postaci (APawn) - sprawdzamy środek tułowia, by krawędź posadzki nie blokowała wybuchu
-    if (TargetActor->IsA<APawn>())
+    // 2. MULTI-POINT PROBE: Jeśli punkt centralny został zablokowany przez przeszkodę (np. mały prop lub wąski słupek),
+    // badamy strategiczne punkty sylwetki celu (głowa, stopy, lewy i prawy bok), by sprawdzić czy cel wystaje zza osłony.
+    float CollisionRadius = 0.0f;
+    float CollisionHalfHeight = 0.0f;
+    TargetActor->GetSimpleCollisionCylinder(CollisionRadius, CollisionHalfHeight);
+
+    // Jeśli cel nie posiada wymiarów cylindra (lub jest mikroskopijny), sprawdzamy Bounding Box
+    if (CollisionHalfHeight <= 10.0f || CollisionRadius <= 5.0f)
     {
-        const FVector PawnCenter = TargetActor->GetActorLocation();
-        if (World->LineTraceSingleByChannel(OutHitResult, Origin, PawnCenter, ECC_Visibility, LoSParams))
+        FVector OriginBox, ExtentBox;
+        TargetActor->GetActorBounds(true, OriginBox, ExtentBox);
+        CollisionRadius = FMath::Max(ExtentBox.X, ExtentBox.Y);
+        CollisionHalfHeight = ExtentBox.Z;
+    }
+
+    if (CollisionHalfHeight > 10.0f)
+    {
+        const FVector Center = TargetActor->GetActorLocation();
+        const FVector ToTarget2D = (Center - Origin).GetSafeNormal2D();
+        const FVector RightPerp = FVector(-ToTarget2D.Y, ToTarget2D.X, 0.0f);
+
+        // Punkty próbkowania wzdłuż anatomii celu
+        TArray<FVector, TInlineAllocator<4>> ProbePoints;
+        // A. Głowa / górna część klatki piersiowej (70% wysokości nad środkiem) - chroni przed niskimi skrzynkami/propami
+        ProbePoints.Add(Center + FVector(0.0f, 0.0f, CollisionHalfHeight * 0.70f));
+        // B. Lewe ramię / flanka (70% promienia w bok) - chroni przed cienkimi słupkami
+        ProbePoints.Add(Center - RightPerp * (CollisionRadius * 0.70f));
+        // C. Prawe ramię / flanka (70% promienia w bok)
+        ProbePoints.Add(Center + RightPerp * (CollisionRadius * 0.70f));
+        // D. Stopy / dół sylwetki (70% wysokości pod środkiem) - wykrywa cele nad wybuchem / na schodach
+        ProbePoints.Add(Center - FVector(0.0f, 0.0f, CollisionHalfHeight * 0.70f));
+
+        for (const FVector& ProbePoint : ProbePoints)
         {
-            if (OutHitResult.GetActor() == TargetActor)
+            const FVector ProbeDir = (ProbePoint - Origin).GetSafeNormal();
+            const FVector ProbeEnd = ProbePoint + ProbeDir * 15.0f;
+
+            FHitResult ProbeHit;
+            if (World->LineTraceSingleByChannel(ProbeHit, Origin, ProbeEnd, ECC_Visibility, LoSParams))
             {
+                if (ProbeHit.GetActor() == TargetActor)
+                {
+                    OutHitResult = ProbeHit;
+                    return true;
+                }
+            }
+            else
+            {
+                // Promień dotarł do celu bez żadnej kolizji po drodze
+                OutHitResult.ImpactPoint = ProbePoint;
+                OutHitResult.ImpactNormal = -ProbeDir;
                 return true;
             }
         }
     }
 
+    // Wszystkie punkty anatomiczne zostały w pełni zasłonięte przez przeszkody
     return false;
 }
 
@@ -200,11 +243,12 @@ void UKineticForceLibrary::ApplyExplosion(
         QueryParams.AddIgnoredActor(InstigatorActor);
     }
 
-    // Wykrywamy postacie oraz obiekty fizyczne i dynamiczne
+    // Wykrywamy postacie, obiekty fizyczne, dynamiczne oraz niszczalne struktury statyczne
     FCollisionObjectQueryParams ObjectParams;
     ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
     ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
     ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+    ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
 
     const bool bHit = World->OverlapMultiByObjectType(
         Overlaps,
@@ -227,6 +271,15 @@ void UKineticForceLibrary::ApplyExplosion(
         if (!HitActor || DamagedActors.Contains(HitActor))
         {
             continue;
+        }
+
+        // Filtrujemy geometrię statyczną: ignorujemy stałe elementy lochu bez komponentu zniszczeń
+        if (Overlap.GetComponent() && Overlap.GetComponent()->GetCollisionObjectType() == ECC_WorldStatic)
+        {
+            if (!HitActor->FindComponentByClass<UDamageableComponent>())
+            {
+                continue;
+            }
         }
 
         // Geometryczne ekranowanie przeszkodami (Line of Sight)
@@ -262,18 +315,22 @@ void UKineticForceLibrary::ApplyExplosion(
         // 2. Aplikowanie odrzutu przez zunifikowany helper kinetyczny
         if (BaseKnockbackForce > 0.0f)
         {
-            FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
-            if (KnockbackDir.IsNearlyZero())
+            // Pomijamy odrzut fizyczny dla statycznych struktur architektury
+            if (!Overlap.GetComponent() || Overlap.GetComponent()->GetCollisionObjectType() != ECC_WorldStatic)
             {
-                KnockbackDir = FVector::UpVector;
+                FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
+                if (KnockbackDir.IsNearlyZero())
+                {
+                    KnockbackDir = FVector::UpVector;
+                }
+
+                // Dodajemy lekkie podbicie w górę (Upward Bias), by eksplozje ładnie podrywały cele z ziemi
+                KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.35f, 0.1f, 1.0f);
+                KnockbackDir.Normalize();
+
+                const float ScaledForce = BaseKnockbackForce * FalloffFactor;
+                KineticHelpers::ApplyKineticImpulse(HitActor, KnockbackDir, ScaledForce, InstigatorActor);
             }
-
-            // Dodajemy lekkie podbicie w górę (Upward Bias), by eksplozje ładnie podrywały cele z ziemi
-            KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.35f, 0.1f, 1.0f);
-            KnockbackDir.Normalize();
-
-            const float ScaledForce = BaseKnockbackForce * FalloffFactor;
-            KineticHelpers::ApplyKineticImpulse(HitActor, KnockbackDir, ScaledForce, InstigatorActor);
         }
     }
 }

@@ -126,6 +126,10 @@ Source/MyProject/
   - Zaimplementowano **Zone Merging & Refresh**: trafienie tym samym żywiołem na tę samą powierzchnię nie tworzy nowego aktora, lecz odświeża czas i powiększa promień istniejącej strefy o 20% z przeliczeniem obrysu 48 promieni (eliminacja GPU Decal Overdraw).
   - Wprowadzono leniwą inwalidację cache obrysu (`IsPerimeterCacheValid`) oraz szybką interpolację kątową promienia ($O(1)$) z limitem 0.0f (brak lewitacji na krawędziach).
   - **Refaktoryzacja Czystej Architektury `ASurfaceSplashZone`:** Rozbito monolityczne metody obliczeniowe na prywatne funkcje pomocnicze (`CheckSurfacePresentAt`, `TraceObstacleDistance`, `FindDropOffEdgeDistance`, `IsWithinNormalBounds`, `IsWithinTangentialPerimeter`), scentralizowano transformację dekalów w `UpdateDecalTransform()`, a weryfikację koplanarności ujednolicono w `IsCoplanarWithPoint` / `IsCoplanarWithZone`.
+  - **Usprawnienie 1-Hit Explosion (`ApplyInstantBurst` / `HasExplosionLineOfSight`):**
+    - Wprowadzono **5-punktowy próbnik anatomiczny (Multi-Point Probe)** z optymalizacją Fast-Path w `UKineticForceLibrary::HasExplosionLineOfSight` (środek tułowia, głowa/klatka piersiowa $+70\%$, lewe i prawe ramię $\pm 70\%$, stopy $-70\%$). Wyeliminowano problem chowania się postaci za małymi propami/skrzynkami.
+    - Zunifikowano `UStatusZoneLibrary::ApplyInstantBurst` w **Single-Pass Query**: jedno zapytanie overlap na kanałach `Pawn`, `PhysicsBody`, `WorldDynamic`, `WorldStatic` zamiast 4 osobnych sweepów; równoczesna aplikacja obrażeń, odrzutu, statusu o konfigurowalnym `Duration` oraz reakcji chemicznych na sąsiednich strefach.
+    - Dodano obsługę niszczenia drewnianych struktur i barykad lochu (`ADungeonStructureBase` na profilu `BlockAll` / `ECC_WorldStatic`).
   - Usunięto przestarzałą klasę wrapper `AStatusZone`. Wszystkie call-site'y korzystają bezpośrednio z dedykowanych klas stref.
 
 ---

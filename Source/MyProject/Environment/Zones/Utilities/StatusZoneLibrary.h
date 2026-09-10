@@ -70,6 +70,7 @@ public:
 		const FVector& Origin,
 		float Radius,
 		const FZoneEffectConfig& EffectConfig,
+		float Duration = 4.0f,
 		AActor* InstigatorActor = nullptr);
 
 	/**

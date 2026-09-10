@@ -237,6 +237,7 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 	const FVector& Origin,
 	float Radius,
 	const FZoneEffectConfig& EffectConfig,
+	float Duration,
 	AActor* InstigatorActor)
 {
 	UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
@@ -245,67 +246,111 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 		return;
 	}
 
-	// 1. Fala kinetyczna (wybuch fizyczny + obrażenia) z Line-of-Sight pobierana z EffectConfig
-	if (EffectConfig.InstantDamage > 0.0f || EffectConfig.KnockbackForce > 0.0f)
+	// 1. Zunifikowany pojedynczy przebieg przestrzenny (Single-Pass Query)
+	// Wykrywamy: postacie (Pawn), obiekty fizyczne (PhysicsBody), dynamiczne (WorldDynamic) oraz niszczalne struktury (WorldStatic)
+	TArray<FOverlapResult> Overlaps;
+	FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneInstantBurst), false);
+	if (InstigatorActor)
 	{
-		UKineticForceLibrary::ApplyExplosion(
-			WorldContextObject,
-			Origin,
-			Radius,
-			EffectConfig.InstantDamage,
-			EffectConfig.KnockbackForce,
-			InstigatorActor,
-			nullptr,
-			false);
+		QueryParams.AddIgnoredActor(InstigatorActor);
 	}
 
-	// 2. Aplikowanie statusu do obiektów w zasięgu wzroku wybuchu (LoS)
-	if (EffectConfig.AppliedStatus != EStatusEffectType::None)
+	FCollisionObjectQueryParams ObjectParams;
+	ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
+	ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+	ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+
+	const bool bHit = World->OverlapMultiByObjectType(
+		Overlaps,
+		Origin,
+		FQuat::Identity,
+		ObjectParams,
+		SphereShape,
+		QueryParams);
+
+	if (!bHit)
 	{
-		TArray<FOverlapResult> Overlaps;
-		FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius);
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneInstantBurst), false, InstigatorActor);
+		return;
+	}
 
-		World->OverlapMultiByChannel(Overlaps, Origin, FQuat::Identity, ECC_Pawn, SphereShape, QueryParams);
+	TSet<AActor*> ProcessedActors;
 
-		TArray<FOverlapResult> DynamicOverlaps;
-		World->OverlapMultiByChannel(DynamicOverlaps, Origin, FQuat::Identity, ECC_WorldDynamic, SphereShape, QueryParams);
-		Overlaps.Append(DynamicOverlaps);
-
-		TArray<FOverlapResult> PhysicsOverlaps;
-		World->OverlapMultiByChannel(PhysicsOverlaps, Origin, FQuat::Identity, ECC_PhysicsBody, SphereShape, QueryParams);
-		Overlaps.Append(PhysicsOverlaps);
-
-		TSet<AActor*> ProcessedActors;
-		for (const FOverlapResult& Overlap : Overlaps)
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		AActor* HitActor = Overlap.GetActor();
+		if (!HitActor || HitActor == InstigatorActor || ProcessedActors.Contains(HitActor))
 		{
-			AActor* HitActor = Overlap.GetActor();
-			if (!HitActor || HitActor == InstigatorActor || ProcessedActors.Contains(HitActor))
+			continue;
+		}
+
+		// Filtrowanie statycznej architektury: pomijamy niezniszczalną geometrię lochu bez DamageableComponent
+		if (Overlap.GetComponent() && Overlap.GetComponent()->GetCollisionObjectType() == ECC_WorldStatic)
+		{
+			if (!HitActor->FindComponentByClass<UDamageableComponent>())
 			{
 				continue;
 			}
+		}
 
-			// Inna strefa w pobliżu wybuchu
-			if (AStatusZoneBase* OtherZone = Cast<AStatusZoneBase>(HitActor))
-			{
-				OtherZone->ApplyElementalHit(EffectConfig.AppliedStatus, EffectConfig.InstantDamage, InstigatorActor);
-				ProcessedActors.Add(HitActor);
-				continue;
-			}
-
-			// Weryfikacja Line-of-Sight
-			FHitResult LoSHit;
-			if (!UKineticForceLibrary::HasExplosionLineOfSight(World, Origin, HitActor, Overlap.GetComponent(), LoSHit, InstigatorActor))
-			{
-				continue;
-			}
-
+		// Reakcja łańcuchowa z innymi strefami żywiołów (np. detonacja lub podpalenie plamy)
+		if (AStatusZoneBase* OtherZone = Cast<AStatusZoneBase>(HitActor))
+		{
+			OtherZone->ApplyElementalHit(EffectConfig.AppliedStatus, EffectConfig.InstantDamage, InstigatorActor);
 			ProcessedActors.Add(HitActor);
+			continue;
+		}
 
-			// Aplikacja statusu
+		// Geometryczna weryfikacja Line of Sight z wielopunktowym próbnikiem
+		FHitResult LoSHit;
+		if (!UKineticForceLibrary::HasExplosionLineOfSight(World, Origin, HitActor, Overlap.GetComponent(), LoSHit, InstigatorActor))
+		{
+			continue;
+		}
+
+		ProcessedActors.Add(HitActor);
+
+		// Obliczamy spadek siły z odległością (liniowy falloff, min. 25% na skraju)
+		const FVector TargetLocation = LoSHit.ImpactPoint.IsZero() ? HitActor->GetActorLocation() : LoSHit.ImpactPoint;
+		const float Distance = FVector::Dist(Origin, TargetLocation);
+		if (Distance > Radius)
+		{
+			continue;
+		}
+		const float FalloffFactor = FMath::Clamp(1.0f - (Distance / Radius), 0.25f, 1.0f);
+
+		// A. Zadawanie natychmiastowych obrażeń przez DamageableComponent
+		if (EffectConfig.InstantDamage > 0.0f)
+		{
+			if (UDamageableComponent* Damageable = HitActor->FindComponentByClass<UDamageableComponent>())
+			{
+				const float ScaledDamage = EffectConfig.InstantDamage * FalloffFactor;
+				Damageable->ApplyDamage(ScaledDamage);
+			}
+		}
+
+		// B. Aplikowanie odrzutu fizycznego (Knockback)
+		if (EffectConfig.KnockbackForce > 0.0f)
+		{
+			if (!Overlap.GetComponent() || Overlap.GetComponent()->GetCollisionObjectType() != ECC_WorldStatic)
+			{
+				FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
+				if (KnockbackDir.IsNearlyZero())
+				{
+					KnockbackDir = FVector::UpVector;
+				}
+				const float ScaledForce = EffectConfig.KnockbackForce * FalloffFactor;
+				UKineticForceLibrary::ApplyDirectionalKnockback(HitActor, KnockbackDir, ScaledForce, 0.35f, InstigatorActor);
+			}
+		}
+
+		// C. Aplikacja statusu żywiołowego
+		if (EffectConfig.AppliedStatus != EStatusEffectType::None)
+		{
 			if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
 			{
-				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, 4.0f, InstigatorActor);
+				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, Duration, InstigatorActor);
 			}
 		}
 	}

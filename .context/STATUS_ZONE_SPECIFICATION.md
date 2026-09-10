@@ -103,7 +103,7 @@ classDiagram
      - `ApplyPointHit`: bezpośrednie trafienie pociskiem/strzałą w cel, sprawdzające strefy, komponent statusów i niszczalne drewno.
      - `ApplySurfaceSplash`: wykrywa trafienie w geometrię fundamentu (`DungeonStructureBase`), spawnuje `ASurfaceSplashZone` i podpina go pod trafiony komponent (`AttachToComponent`).
      - `SpawnVolumetricZone`: spawnuje `AVolumetricStatusZone` zawieszony w przestrzeni.
-     - `ApplyInstantBurst`: wykonuje natychmiastowe uderzenie w klatce $t_0$ (Line of Sight, obrażenia, odrzut, aplikacja statusu) bez tworzenia aktora strefy.
+     - `ApplyInstantBurst`: wykonuje natychmiastowe uderzenie w klatce $t_0$ w zunifikowanym pojedynczym przebiegu (`Single-Pass Query`: Line of Sight z 5-punktowym próbnikiem anatomicznym, obrażenia z falloffem, odrzut fizyczny, niszczenie drewnianych struktur `WorldStatic` oraz aplikacja statusu o zadanym `Duration`) bez alokacji trwałego aktora strefy.
 
 ---
 
