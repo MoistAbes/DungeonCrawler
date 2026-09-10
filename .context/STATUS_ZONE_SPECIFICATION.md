@@ -199,16 +199,16 @@ graph LR
   2. **Volumetric Zones Bypass:** Dla stref wolumetrycznych (np. chmura trującego dymu) gaz wnika w zakamarki — test LoS można uprościć lub sprawdzać wyłącznie przy wejściu do strefy (`BeginOverlap`), a nie co $0.25\text{ s}$.
 
 ### 6.3. Overdraw Dekali na GPU (Render Thread & Fillrate)
-- **Stan obecny:**
-  Każdy `ASurfaceSplashZone` tworzy instancję `UDecalComponent`. W przypadku detonacji 5 beczek wodnych na tym samym odcinku posadzki w świecie gry istnieje 5 osobnych komponentów dekalowych, z których każdy renderuje się do buforów G-Buffer silnika.
-- **Krytyczna ocena:**
-  Gdy 4 graczy patrzy pod kątem na posadzkę z 10 nakładającymi się dekalami, koszt cieniowania pikseli (pixel shader) rośnie liniowo z liczbą warstw dekalów. Może to prowadzić do spadków FPS na słabszych kartach graficznych.
-- **Rekomendacja optymalizacyjna:**
-  **Łączenie Stref (Zone Merging & Refresh):**
-  Zamiast spawnować nowy aktor `ASurfaceSplashZone` dla tego samego żywiołu na tej samej powierzchni, biblioteka `UStatusZoneLibrary` powinna sprawdzić, czy w promieniu $R \times 0.5$ istnieje już aktywna strefa tego typu. Jeśli tak:
-  - Odświeżamy jej czas trwania: `ServerEndTime = GetWorld()->GetTimeSeconds() + Duration`.
-  - Powiększamy promień dekalowej strefy (np. o 20%, do ustalonego limitu $R_{\max}$).
-  - Nie alokujemy nowego aktora ani nowego dekalowego komponentu!
+- **Stan wdrożony (Zrealizowano):**
+  Zaimplementowano mechanizm **Zone Merging & Refresh**:
+  W [`UStatusZoneLibrary`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.cpp) przed zespawnowaniem nowego aktora strefy badane jest otoczenie punktu trafienia:
+  - Jeśli na tej samej płaszczyźnie (`NormalDot > 0.85` oraz odległość płaszczyzny $< 30\text{ cm}$) istnieje już strefa tego samego żywiołu:
+    1. Wywoływana jest metoda [`MergeWithZone(Duration, 1.20f, SplashRadius * 1.5f)`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Zones/StatusZoneBase.cpp).
+    2. Wydłużany jest czas trwania: `ServerEndTime = FMath::Max(ServerEndTime, Now + Duration)`.
+    3. Promień strefy zostaje powiększony o $20\%$ (do ustalonego bezpiecznego limitu).
+    4. Wymuszone zostaje przeliczenie 48-promieniowego obrysu, co rozlewa plamę wzdłuż wolnych korytarzy bez przekraczania ścian i krawędzi.
+    5. Zwracana jest istniejąca strefa, a nowy aktor i dekal nie są alokowane.
+- **Zysk:** Całkowite wyeliminowanie GPU Overdraw przy wielokrotnym detonowaniu beczek w tym samym punkcie oraz drastyczny spadek liczby tykających aktorów.
 
 ### 6.4. Zsynchronizowany Tick i Mikro-przycięcia (Timer Hitching)
 - **Stan obecny:**
@@ -233,10 +233,10 @@ graph LR
 
 ## 7. Plan Działań Optymalizacyjnych (Roadmapa v0.2 / v0.3)
 
-| Priorytet | Zadanie | Cel | Oczekiwany zysk |
-| :---: | :--- | :--- | :--- |
-| **P1** | **Event-Driven Overlap Tracking** | Zamiana `GetOverlappingActors()` na `TSet` w oparciu o `OnComponentBegin/EndOverlap`. | Drastyczny spadek obciążenia CPU serwera (z $O(\text{strefy} \times \text{drzewo Chaos})$ do $O(N)$). |
-| **P1** | **Zone Merging (Łączenie Stref)** | Odświeżanie istniejącej strefy tego samego typu zamiast tworzenia duplikatów w tym samym punkcie. | Eliminacja GPU Decal Overdraw i oszczędność pamięci aktorów. |
-| **P2** | **Timer Phase Staggering** | Losowe mikro-przesunięcie pierwszej fazy timera strefy. | Całkowita eliminacja okresowych mikro-przycięć (hitching frames). |
-| **P2** | **LoS Caching** | Pamięć podręczna widoczności per aktor, odświeżana tylko przy ruchu $> 30\text{ cm}$. | Zmniejszenie liczby zapytań PhysX/Chaos Raycast o 70–80%. |
-| **P3** | **Multi-Zone Spawning** | Możliwość jednoczesnego zespawnowania fali $t_0$, powłoki cieczy i chmury oparów z jednego obiektu. | Wzbogacenie spektakularności alchemii i reakcji łańcuchowych. |
+| Priorytet | Zadanie | Status | Cel / Zysk |
+| :---: | :--- | :---: | :--- |
+| **P1** | **Zone Merging (Łączenie Stref)** | **[ZREALIZOWANE]** | Odświeżanie istniejącej strefy i powiększenie promienia o 20% zamiast duplikatów. Zero Overdraw. |
+| **P1** | **Event-Driven Overlap Tracking** | Do wdrożenia | Zamiana `GetOverlappingActors()` na `TSet` w oparciu o `OnComponentBegin/EndOverlap`. Spadek obciążenia CPU. |
+| **P2** | **Timer Phase Staggering** | Do wdrożenia | Losowe mikro-przesunięcie pierwszej fazy timera strefy eliminujące mikro-przycięcia klatek. |
+| **P2** | **LoS Caching** | Do wdrożenia | Pamięć podręczna widoczności per aktor odświeżana tylko przy ruchu $> 30\text{ cm}$. Ograniczenie raycastów o 70%. |
+| **P3** | **Multi-Zone Spawning** | Backlog | Jednoczesne spawnowanie fali $t_0$, powłoki cieczy i chmury gazu z jednego obiektu. |

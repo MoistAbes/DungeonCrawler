@@ -113,6 +113,38 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 
 	// 2. Wyliczenie pozycji i orientacji powłoki powierzchniowej
 	const FVector SurfaceNormal = HitResult.ImpactNormal.IsNearlyZero() ? FVector::UpVector : HitResult.ImpactNormal.GetSafeNormal();
+
+	// 2a. Zone Merging: Sprawdzamy, czy na tej samej powierzchni istnieje już strefa tego samego żywiołu
+	if (EffectConfig.AppliedStatus != EStatusEffectType::None)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(SplashRadius * 0.85f);
+		FCollisionQueryParams OverlapParams(SCENE_QUERY_STAT(StatusZoneMergeQuery), false);
+
+		if (World->OverlapMultiByChannel(Overlaps, HitResult.ImpactPoint, FQuat::Identity, ECC_WorldDynamic, OverlapSphere, OverlapParams))
+		{
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				if (ASurfaceSplashZone* ExistingSplash = Cast<ASurfaceSplashZone>(Overlap.GetActor()))
+				{
+					if (ExistingSplash->GetStatusType() == EffectConfig.AppliedStatus)
+					{
+						const float NormalDot = FVector::DotProduct(ExistingSplash->GetSurfaceNormal(), SurfaceNormal);
+						const float PlaneDist = FMath::Abs(FVector::DotProduct(HitResult.ImpactPoint - ExistingSplash->GetActorLocation(), SurfaceNormal));
+
+						// Ta sama płaszczyzna: zgodny wektor normalny oraz brak przesunięcia płaszczyzny
+						if (NormalDot > 0.85f && PlaneDist < 30.0f)
+						{
+							ExistingSplash->MergeWithZone(Duration, 1.20f, SplashRadius * 1.5f);
+							UE_LOG(LogDungeonElements, Log, TEXT("[StatusZoneLibrary] Merged into existing Surface Splash (Radius: %.1f cm)"), ExistingSplash->GetRadius());
+							return ExistingSplash;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	const FVector SpawnLocation = HitResult.ImpactPoint + SurfaceNormal * 2.0f;
 	const FRotator SpawnRotation = FRotationMatrix::MakeFromZ(SurfaceNormal).Rotator();
 
@@ -159,6 +191,30 @@ AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 	if (!World || World->GetNetMode() == NM_Client || Radius <= 0.0f)
 	{
 		return nullptr;
+	}
+
+	// Zone Merging: Sprawdzamy, czy w pobliżu istnieje strefa wolumetryczna tego samego żywiołu
+	if (EffectConfig.AppliedStatus != EStatusEffectType::None)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionShape OverlapSphere = FCollisionShape::MakeSphere(Radius * 0.75f);
+		FCollisionQueryParams OverlapParams(SCENE_QUERY_STAT(StatusZoneMergeQuery), false);
+
+		if (World->OverlapMultiByChannel(Overlaps, Location, FQuat::Identity, ECC_WorldDynamic, OverlapSphere, OverlapParams))
+		{
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				if (AVolumetricStatusZone* ExistingVolumetric = Cast<AVolumetricStatusZone>(Overlap.GetActor()))
+				{
+					if (ExistingVolumetric->GetStatusType() == EffectConfig.AppliedStatus)
+					{
+						ExistingVolumetric->MergeWithZone(Duration, 1.20f, Radius * 1.5f);
+						UE_LOG(LogDungeonElements, Log, TEXT("[StatusZoneLibrary] Merged into existing Volumetric Zone (Radius: %.1f cm)"), ExistingVolumetric->GetRadius());
+						return ExistingVolumetric;
+					}
+				}
+			}
+		}
 	}
 
 	FActorSpawnParameters SpawnParams;

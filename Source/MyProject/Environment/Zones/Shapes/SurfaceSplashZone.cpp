@@ -59,6 +59,19 @@ void ASurfaceSplashZone::InitializeSurfaceSplash(
 	RebuildPerimeterPoints();
 }
 
+void ASurfaceSplashZone::MergeWithZone(float InDuration, float RadiusGrowthMultiplier, float MaxRadiusCap)
+{
+	Super::MergeWithZone(InDuration, RadiusGrowthMultiplier, MaxRadiusCap);
+
+	if (ZoneDecal)
+	{
+		const float ProjectionDepth = FMath::Max(SurfaceHeight * 2.0f, 60.0f);
+		ZoneDecal->DecalSize = FVector(ProjectionDepth, Radius, Radius);
+	}
+
+	RebuildPerimeterPoints();
+}
+
 void ASurfaceSplashZone::OnRep_Radius()
 {
 	Super::OnRep_Radius();

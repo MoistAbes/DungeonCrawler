@@ -315,6 +315,29 @@ bool AStatusZoneBase::HandleLiquidDisplacement(AActor* HitInstigator)
 	return true;
 }
 
+void AStatusZoneBase::MergeWithZone(float InDuration, float RadiusGrowthMultiplier, float MaxRadiusCap)
+{
+	REQUIRE_AUTHORITY();
+
+	if (!GetWorld())
+	{
+		return;
+	}
+
+	// 1. Odświeżenie / wydłużenie czasu trwania
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	const float NewEndTime = CurrentTime + InDuration;
+	ServerEndTime = FMath::Max(ServerEndTime, NewEndTime);
+
+	// 2. Bezpieczne i kontrolowane powiększenie promienia
+	const float TargetRadius = FMath::Min(Radius * RadiusGrowthMultiplier, MaxRadiusCap);
+	if (TargetRadius > Radius)
+	{
+		Radius = TargetRadius;
+		OnRep_Radius();
+	}
+}
+
 void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float InstantDamage, AActor* HitInstigator)
 {
 	REQUIRE_AUTHORITY();

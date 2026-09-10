@@ -42,6 +42,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Custom|Zone")
 	virtual void ApplyElementalHit(EStatusEffectType IncomingStatus, float InstantDamage = 0.0f, AActor* HitInstigator = nullptr);
 
+	/** Scala strefę z nowo nałożonym tym samym żywiołem (odświeża czas, opcjonalnie powiększa promień) */
+	UFUNCTION(BlueprintCallable, Category = "Custom|Zone")
+	virtual void MergeWithZone(float InDuration, float RadiusGrowthMultiplier = 1.20f, float MaxRadiusCap = 1000.0f);
+
 	/** Zwraca konfigurację efektów strefy */
 	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
 	const FZoneEffectConfig& GetEffectConfig() const { return EffectConfig; }

@@ -122,9 +122,10 @@ Source/MyProject/
   - Rozbicie monolitycznego aktora strefy na czystą hierarchię klas: `AStatusZoneBase` (baza cyklu życia, autorytatywny timer 0.25s, DoT, reakcje chemiczne), `ASurfaceSplashZone` (powłoka powierzchniowa, UDecalComponent, 48-promieniowy obrys z Drop-Off binary edge search, weryfikacja półprzestrzeni), `AVolumetricStatusZone` (lekka sfera 3D, zero dekalów, zero tablic wierzchołków obrysu) oraz bibliotekę fabryczną `UStatusZoneLibrary` z bezstanowym `ApplyInstantBurst` w $t_0$.
 - **Rozwiązanie Konfliktu Multi-Surface Splashes (Podłoga vs Ściana):**
   - Wyeliminowano przedwczesne niszczenie świeżo zespawnowanych plam podłogowych przez plamy ścienne wygenerowane w tej samej klatce. Wprowadzono zakaz samoniszczenia dla identycznych żywiołów oraz wymóg ścisłej koplanarności przy wypieraniu cieczy (`NormalDot > 0.85` oraz dystans płaszczyzny $< 30\text{ cm}$).
-- **Krytyczny Audyt Skalowalności (4 Graczy, Roje Wrogów, 50+ Stref):**
-  - Zidentyfikowano 4 kluczowe obszary wymagające uwagi wydajnościowej: odpytywanie solvera Chaos (`GetOverlappingActors` co 0.25s), powtarzane raycasty LoS, overdraw dekalów na GPU przy nakładaniu się wielu plam oraz synchronizację timerów serwera.
-  - Wyznaczono plan optymalizacji: Event-Driven Overlaps (`TSet` z `Begin/EndOverlap`), Zone Merging zamiast duplikacji dekalów oraz Timer Phase Staggering (szczegóły w [STATUS_ZONE_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/STATUS_ZONE_SPECIFICATION.md)).
+- **Krytyczny Audyt Skalowalności i Wdrożenie Zone Merging:**
+  - Zaimplementowano **Zone Merging & Refresh**: trafienie tym samym żywiołem na tę samą powierzchnię nie tworzy nowego aktora, lecz odświeża czas i powiększa promień istniejącej strefy o 20% z przeliczeniem obrysu 48 promieni (eliminacja GPU Decal Overdraw).
+  - Wprowadzono leniwą inwalidację cache obrysu (`IsPerimeterCacheValid`) oraz szybką interpolację kątową promienia ($O(1)$) z limitem 0.0f (brak lewitacji na krawędziach).
+  - Usunięto przestarzałą klasę wrapper `AStatusZone`. Wszystkie call-site'y korzystają bezpośrednio z dedykowanych klas stref.
 
 ---
 

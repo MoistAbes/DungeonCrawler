@@ -53,6 +53,8 @@ public:
 	/** Sprawdza, czy pamięć podręczna obrysu jest aktualna względem aktualnego położenia, orientacji i promienia */
 	bool IsPerimeterCacheValid() const;
 
+	virtual void MergeWithZone(float InDuration, float RadiusGrowthMultiplier = 1.20f, float MaxRadiusCap = 1000.0f) override;
+
 protected:
 	virtual void BeginPlay() override;
 
