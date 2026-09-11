@@ -484,6 +484,7 @@ void ASurfaceSplashZone::DrawDebugVisuals() const
 	const int32 NumPoints = CachedPerimeterPoints.Num();
 	constexpr float DebugVisualOffset = 4.0f;
 	const FVector VisualOffset = SurfaceNormal * DebugVisualOffset;
+	const float DebugLifeTime = ZoneTickInterval + 0.05f;
 
 	if (NumPoints >= 3 && MaxDistSq >= 2500.0f)
 	{
@@ -491,17 +492,17 @@ void ASurfaceSplashZone::DrawDebugVisuals() const
 		{
 			const FVector Pt1 = CachedPerimeterPoints[i] + VisualOffset;
 			const FVector Pt2 = CachedPerimeterPoints[(i + 1) % NumPoints] + VisualOffset;
-			DrawDebugLine(GetWorld(), Pt1, Pt2, ZoneColor, false, 0.0f, 0, 4.0f);
+			DrawDebugLine(GetWorld(), Pt1, Pt2, ZoneColor, false, DebugLifeTime, 0, 4.0f);
 		}
 	}
 	else
 	{
 		FMatrix Matrix = FRotationMatrix::MakeFromX(SurfaceNormal);
 		Matrix.SetOrigin(Center + VisualOffset);
-		DrawDebugCircle(GetWorld(), Matrix, Radius, 48, ZoneColor, false, 0.0f, 0, 4.0f, false);
+		DrawDebugCircle(GetWorld(), Matrix, Radius, 48, ZoneColor, false, DebugLifeTime, 0, 4.0f, false);
 	}
 
 	const FVector TextPos = Center + SurfaceNormal * 30.0f;
-	DrawDebugString(GetWorld(), TextPos, FString::Printf(TEXT("[%s: %.1fs | R: %.0f cm]"), *StatusName, Remaining, Radius), nullptr, ZoneColor, 0.0f, true, 1.2f);
+	DrawDebugString(GetWorld(), TextPos, FString::Printf(TEXT("[%s: %.1fs | R: %.0f cm]"), *StatusName, Remaining, Radius), nullptr, ZoneColor, DebugLifeTime, true, 1.2f);
 #endif
 }

@@ -36,9 +36,9 @@ void AVolumetricStatusZone::DrawDebugVisuals() const
 	const FColor ZoneColor = GetStatusDebugColor();
 	const FString StatusName = GetStatusDebugName();
 	const FVector Center = GetActorLocation();
-
-	DrawDebugSphere(GetWorld(), Center, Radius, 16, ZoneColor, false, 0.0f, 0, 2.0f);
+	const float DebugLifeTime = ZoneTickInterval + 0.05f;
+	DrawDebugSphere(GetWorld(), Center, Radius, 16, ZoneColor, false, DebugLifeTime, 0, 2.0f);
 	const FVector TextPos = Center + FVector(0.0f, 0.0f, 30.0f);
-	DrawDebugString(GetWorld(), TextPos, FString::Printf(TEXT("[%s: %.1fs | R: %.0f cm]"), *StatusName, Remaining, Radius), nullptr, ZoneColor, 0.0f, true, 1.2f);
+	DrawDebugString(GetWorld(), TextPos, FString::Printf(TEXT("[%s: %.1fs | R: %.0f cm]"), *StatusName, Remaining, Radius), nullptr, ZoneColor, DebugLifeTime, true, 1.2f);
 #endif
 }

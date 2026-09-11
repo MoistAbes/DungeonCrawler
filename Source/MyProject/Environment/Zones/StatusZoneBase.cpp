@@ -15,9 +15,11 @@
 AStatusZoneBase::AStatusZoneBase()
 {
 	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickInterval = ZoneTickInterval;
 
 	bReplicates = true;
 	SetReplicateMovement(false);
+	NetDormancy = DORM_DormantAll;
 
 	Radius = 300.0f;
 	ShapeType = EZoneShapeType::SurfaceSplash;
@@ -78,12 +80,8 @@ void AStatusZoneBase::Tick(float DeltaTime)
 			return;
 		}
 
-		// Niezawodne, bezstanowe sprawdzanie obecności co 0.25s
-		if (CurrentTime - LastTickTime >= 0.25f)
-		{
-			LastTickTime = CurrentTime;
-			ProcessActiveOverlaps();
-		}
+		// Przetwarzanie obecności i efektów strefy (zgodnie z TickInterval = ZoneTickInterval)
+		ProcessActiveOverlaps();
 	}
 
 	DrawDebugVisuals();
@@ -113,6 +111,7 @@ void AStatusZoneBase::InitializeZoneBase(
 		ZoneCollision->SetSphereRadius(CalculateBroadphaseRadius());
 	}
 
+	FlushNetDormancy();
 	ForceNetUpdate();
 	ProcessActiveOverlaps();
 }
@@ -342,6 +341,7 @@ void AStatusZoneBase::MergeWithZone(float InDuration, float RadiusGrowthMultipli
 		OnRep_Radius();
 	}
 
+	FlushNetDormancy();
 	ForceNetUpdate();
 	ProcessActiveOverlaps();
 }
@@ -383,6 +383,7 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			}
 
 			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
+			FlushNetDormancy();
 			ForceNetUpdate();
 
 			UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, 25.0f, 1200.0f, this, nullptr, false);
@@ -397,6 +398,7 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			ServerEndTime = GetWorld()->GetTimeSeconds() + 8.0f;
 
 			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
+			FlushNetDormancy();
 			ForceNetUpdate();
 			ProcessActiveOverlaps();
 			return;
@@ -409,6 +411,7 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			ServerEndTime = GetWorld()->GetTimeSeconds() + 6.0f;
 
 			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
+			FlushNetDormancy();
 			ForceNetUpdate();
 			ProcessActiveOverlaps();
 			return;

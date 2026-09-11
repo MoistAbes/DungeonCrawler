@@ -89,6 +89,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Debug")
 	bool bDrawDebugZone = true;
 
+	/** Interwał sprawdzania obecności i przetwarzania efektów strefy (w sekundach) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Zone", meta = (ClampMin = "0.05", ClampMax = "1.0"))
+	float ZoneTickInterval = 0.25f;
+
 	// -------------------------------------------------------------------------
 	// Replikacja sieciowa
 	// -------------------------------------------------------------------------

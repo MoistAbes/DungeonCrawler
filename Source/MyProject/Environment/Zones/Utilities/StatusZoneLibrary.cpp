@@ -12,6 +12,7 @@
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
 #include "Engine/Brush.h"
@@ -127,6 +128,11 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 			{
 				if (ASurfaceSplashZone* ExistingSplash = Cast<ASurfaceSplashZone>(Overlap.GetActor()))
 				{
+					if (ExistingSplash->IsActorBeingDestroyed())
+					{
+						continue;
+					}
+
 					if (ExistingSplash->GetStatusType() == EffectConfig.AppliedStatus)
 					{
 						// Ta sama płaszczyzna: zgodny wektor normalny oraz brak przesunięcia płaszczyzny
@@ -383,14 +389,20 @@ bool UStatusZoneLibrary::ApplyPointHit(
 		return true;
 	}
 
-	// 3. Architektura niszczalna (drewniane elementy pod wpływem ognia)
-	if (ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(TargetActor))
+	// 3. Obiekty podatne na zniszczenie bez komponentu statusów (np. drewniane barykady/struktury pod wpływem ognia)
+	if (StatusType == EStatusEffectType::Burning)
 	{
-		if (StatusType == EStatusEffectType::Burning && Structure->IsDestructible() && Structure->GetDamageableComponent())
+		if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
 		{
-			if (Structure->GetMaterialType_Implementation() == EPhysicalMaterialType::Wood)
+			EPhysicalMaterialType MatType = EPhysicalMaterialType::Default;
+			if (TargetActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
 			{
-				Structure->GetDamageableComponent()->ApplyDamage(25.0f);
+				MatType = IMaterialProviderInterface::Execute_GetMaterialType(TargetActor);
+			}
+
+			if (MatType == EPhysicalMaterialType::Wood)
+			{
+				Damageable->ApplyDamage(25.0f);
 				return true;
 			}
 		}
