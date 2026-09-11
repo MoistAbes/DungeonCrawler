@@ -207,6 +207,13 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
                 continue; // Ciecz została zatrzymana na obiekcie i nie leci na ścianę za nim
             }
 
+            // Ograniczenie liczby wtórnych stref na ścianach/suficie (1 podłogowa + max 3 naścienne)
+            constexpr int32 MaxTotalSplashes = 4;
+            if (SpawnedSurfaces.Num() >= MaxTotalSplashes)
+            {
+                break;
+            }
+
             // Deduplikacja: sprawdzamy, czy ten punkt nie leży na tej samej płaszczyźnie co już utworzona strefa
             bool bAlreadySplashed = false;
             for (const FHitResult& ExistingHit : SpawnedSurfaces)
@@ -228,10 +235,10 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
                 continue;
             }
 
-            // Fizyczny promień plamy na powierzchni odpowiadający przecięciu sfery wybuchu z płaszczyzną:
-            // R_surface = sqrt(R_effect^2 - Dist^2), z minimalnym progiem 60 cm
+            // Promień rozbryzgu naściennego (bryzgi cieczy na przeszkodach są wtórne względem kałuży na posadzce)
             const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, EffectRadius);
-            const float SplashRadius = FMath::Max(60.0f, FMath::Sqrt(FMath::Max(0.0f, FMath::Square(EffectRadius) - FMath::Square(DistToSurface))));
+            const float BaseRadius = FMath::Sqrt(FMath::Max(0.0f, FMath::Square(EffectRadius) - FMath::Square(DistToSurface)));
+            const float SplashRadius = FMath::Clamp(BaseRadius * 0.45f, 60.0f, 220.0f);
 
             ASurfaceSplashZone* SurfaceZone = UStatusZoneLibrary::ApplySurfaceSplash(
                 this,

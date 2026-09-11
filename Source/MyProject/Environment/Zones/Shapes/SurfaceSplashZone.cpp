@@ -235,16 +235,45 @@ float ASurfaceSplashZone::FindDropOffEdgeDistance(
 	float LiftOffset,
 	const FCollisionQueryParams& TraceParams) const
 {
-	// Jeśli dozwolony dystans jest zbyt krótki lub w punkcie końcowym jest stabilne podłoże - nie ma krawędzi/przepaści
-	if (InitialMaxDist <= 15.0f || CheckSurfacePresentAt(Center + RayDir * InitialMaxDist, LiftOffset, TraceParams))
+	if (InitialMaxDist <= 15.0f)
 	{
 		return InitialMaxDist;
 	}
 
-	// 4-krokowy binary search w celu precyzyjnego znalezienia krawędzi podłoża
-	float Low = 0.0f;
-	float High = InitialMaxDist;
-	for (int32 Step = 0; Step < 4; ++Step)
+	// Krok próbkowania wzdłuż promienia: 35 cm.
+	// Zapewnia ciągłość powierzchni i uniemożliwia przeskakiwanie nad szczelinami między filarami.
+	constexpr float StepDist = 35.0f;
+	float LastValidDist = 0.0f;
+	float FirstInvalidDist = -1.0f;
+
+	// 1. Sekwencyjny marsz od środka na zewnątrz (Ray Marching)
+	for (float CurrentDist = StepDist; CurrentDist < InitialMaxDist; CurrentDist += StepDist)
+	{
+		if (CheckSurfacePresentAt(Center + RayDir * CurrentDist, LiftOffset, TraceParams))
+		{
+			LastValidDist = CurrentDist;
+		}
+		else
+		{
+			FirstInvalidDist = CurrentDist;
+			break;
+		}
+	}
+
+	// Jeśli żaden krok pośredni nie natrafił na pustkę, sprawdzamy punkt końcowy
+	if (FirstInvalidDist < 0.0f)
+	{
+		if (CheckSurfacePresentAt(Center + RayDir * InitialMaxDist, LiftOffset, TraceParams))
+		{
+			return InitialMaxDist;
+		}
+		FirstInvalidDist = InitialMaxDist;
+	}
+
+	// 2. Lokalny binary search w przedziale [LastValidDist, FirstInvalidDist] dla dokładności co do centymetra
+	float Low = LastValidDist;
+	float High = FirstInvalidDist;
+	for (int32 Step = 0; Step < 3; ++Step)
 	{
 		const float Mid = (Low + High) * 0.5f;
 		if (CheckSurfacePresentAt(Center + RayDir * Mid, LiftOffset, TraceParams))
