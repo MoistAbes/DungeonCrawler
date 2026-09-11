@@ -1,198 +1,2458 @@
-# Architektura Systemowa i Standardy Projektowe: Dungeon Crawler Co-op
+\# Architecture — DungeonCrawler
 
-Dokument stanowi **centralny i nadrzędny dokument architektoniczny projektu** *Dungeon Crawler* (Unreal Engine 5.8 C++, `MYPROJECT_API`).
-Definiuje wzorce inżynierii oprogramowania, modularność domeny, prawa fizyki i kinetyki, silnik chemii żywiołów, autorytatywną warstwę sieciową Co-op (1–6 graczy) oraz specyfikację struktur lochu zgodną z [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md) i [CORE_COOP_PRINCIPLES.md](file:///E:/UE_PROJECTS/MyProject/.context/CORE_COOP_PRINCIPLES.md).
 
----
 
-## 1. Paradygmat Architektoniczny (Java/Spring & Clean Architecture Standards)
+> Current-state description of the project's Unreal Engine architecture.
 
-Projekt implementuje rygorystyczne wzorce czystego kodu inspirowane wzorcami backendowymi (Java/Spring Boot, Event-Driven Architecture, REST/RPC):
+>
 
-* **Single Responsibility Principle (Kompozycja ponad Dziedziczenie):**
-  * Klasy `AActor` oraz `ACharacter` pełnią wyłącznie rolę punktów styku / orkiestratorów (odpowiednik `@RestController`).
-  * Wszelka logika domenowa (integralność fizyczna, chemia żywiołów, interakcje, noszenie obiektów Chaos, mechanizmy) jest hermetyzowana w dedykowanych komponentach `UActorComponent` (odpowiednik `@Service`).
-* **Dependency Inversion & Loose Coupling (Architektura Interfejsowa):**
-  * Komunikacja międzydomenowa i manipulacja obiektami w świecie gry odbywa się **wyłącznie za pośrednictwem interfejsów `UInterface` / `IInterface`**.
-  * Całkowity zakaz twardego rzutowania (`Cast<T>`) w kodzie domenowym.
-  * Kluczowe kontrakty projektu:
-    - [`IMaterialProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MaterialProviderInterface.h) – tożsamość materiałowa (`Stone`, `Wood`, `Metal`, `Glass`, `Flesh`).
-    - [`IInteractableInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IInteractableInterface.h) – obsługa logicznej interakcji klawiszem `E` (dźwignie, włączniki) z opcjonalnym czasem przytrzymania (Hold/Channeling).
-    - [`IGrabbableInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/IGrabbableInterface.h) – kontrakt fizycznej manipulacji propami (chwyt, pęd rzutu, upuszczenie).
-    - [`IMechanismReceiverInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MechanismReceiverInterface.h) – odbiór sygnałów logicznych ON/OFF z przełączników i płyt naciskowych.
-    - [`ICarryAnchorProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h) – odseparowanie logiki trzymania propa od konkretnej klasy postaci.
-    - [`IStatProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/StatProviderInterface.h) – ujednolicone zapytania o stan HP/durability dla UI.
-* **Architektura Sterowana Zdarzeniami (Event-Driven Architecture):**
-  * Komunikacja komponent -> UI / Prezentacja / Efekty VFX realizowana jest przez dynamiczne delegaty multicastowe (`DECLARE_DYNAMIC_MULTICAST_DELEGATE`).
-* **Ścisła Separacja Domeny od Prezentacji (MVC / Layered Pattern):**
-  * **C++ (Backend / Domena):** Czysta logika biznesowa, matematyka kinetyczna, autorytatywny kod sieciowy, ewaluacja chemiczna, struktury `USTRUCT`, komponenty i interfejsy.
-  * **Blueprints (Frontend / Widok / Prefaby):** Wyłącznie klasy pochodne służące do spinania assetów wizualnych (Static Meshe, animacje, materiały, dźwięki, widgety). Obowiązuje zakaz programowania logiki biznesowej w Blueprintach.
-* **Data-Driven Configuration:**
-  * Parametry fizyczne, mnożniki i progi definiowane są w strukturach konfiguracyjnych (`UPROPERTY(EditDefaultsOnly)` – np. `FCarrySocketConfig`), eliminując Magic Numbers i sztywne stałe.
+> This document describes \*\*how the project is structured today\*\* and the architectural boundaries that should be preserved when extending it.
 
----
+>
 
-## 2. Mapa Architektury Kodu (`Source/MyProject/`)
+> Project-wide architectural rules and priorities are defined in `CONSTITUTION.md`.
+
+> Persistent cross-session AI context belongs in `MEMORY.md`.
+
+> Expected behavior of individual features belongs in `.context/specs/`.
+
+
+
+\---
+
+
+
+\## 1. Project Overview
+
+
+
+DungeonCrawler is an Unreal Engine 5.8 C++ multiplayer dungeon crawler.
+
+
+
+The project uses:
+
+
+
+\* C++ for core gameplay systems and reusable runtime logic,
+
+\* Blueprints for actor composition, asset configuration, presentation and simple feature-specific wiring,
+
+\* Unreal Interfaces for capability-based communication,
+
+\* Actor Components for reusable gameplay behavior,
+
+\* Unreal Delegates/Events for event-driven communication,
+
+\* Unreal replication and RPCs for multiplayer gameplay,
+
+\* Unreal MCP for inspecting and verifying editor-side state that cannot be reliably represented by source files alone.
+
+
+
+The project currently uses a \*\*single Unreal runtime module\*\*:
+
+
 
 ```text
+
+MyProject
+
+```
+
+
+
+The folders under `Source/MyProject/` represent architectural domains, not separate Unreal modules.
+
+
+
+\---
+
+
+
+\# 2. Source Structure
+
+
+
+The main runtime source tree is organized into the following domains:
+
+
+
+```text
+
 Source/MyProject/
-├── Logging/                                         <-- Dedykowana telemetria i kategorie logowania
-│   └── DungeonLogCategories.h/.cpp                  (LogDungeonInteraction, LogDungeonPhysics, LogDungeonNetwork, LogDungeonMechanisms, LogDungeonElements)
-│
-├── Networking/                                      <-- Warstwa autorytatywna Co-op (1–6 graczy)
-│   └── NetworkFunctionLibrary.h/.cpp                (Makra REQUIRE_AUTHORITY, ConfigurePhysicsReplication, AttachCarriedProp, DetachCarriedProp)
-│
-├── Dungeon/                                         <-- Świat lochu, struktury i mechanizmy
-│   ├── Structure/
-│   │   └── DungeonStructureBase.h/.cpp              (Modularne ściany/podłogi, Punch-Through, niszczalność, replikacja)
-│   ├── Props/
-│   │   ├── InteractivePropBase/                     (Fizyczne rekwizyty Chaos, kwantyzacja transformu, transfer kinetyczny)
-│   │   ├── VolatileProp/                            (Niestabilne obiekty alchemiczne, wybuchy autorytatywne, NetMulticast FX)
-│   │   ├── SwitchPropBase/                          (Abstrakcyjny przełącznik/aktywator logiczny, bAllowSwitchBack, TargetMechanisms)
-│   │   ├── SimpleSwitchProp/                        (Dźwignia/przełącznik ścienny z IInteractableInterface)
-│   │   └── PressurePlateProp/                       (Fizyczna płyta naciskowa sumująca rzeczywistą masę ciał >= 50 kg)
-│   └── Mechanisms/
-│       ├── MechanismTrapBase/                       (Abstrakcyjna baza pułapek z pętlą czasową bIsContinuousLoop i IMechanismReceiver)
-│       └── PistonTrap/                              (Kamienny taran/tłok ścienny/podłogowy, maszyna stanów EPistonState, Zero-Tick)
-│
-├── Environment/                                     <-- Fizyka, kinetyka i żywioły
-│   ├── Kinetic/
-│   │   ├── Components/KnockbackComponent/           (Aplikowanie odrzutów dla postaci i impulsów dla ciał sztywnych)
-│   │   ├── Utilities/KineticForceLibrary            (Radialne eksplozje, wiry kinetyczne, pchanie TryApplyPhysicsPush, tłumienie SuppressHeavyPhysicsJitter)
-│   │   └── Enums/KineticEnums.h                     (EKnockbackFalloff)
-│   └── Elements/
-│       ├── Data/StatusEffectDefinitions.h           (Centralny rejestr FStatusEffectRegistry, parametry DoT i reakcji)
-│       ├── Enums/ElementEnums.h                     (EStatusEffectType: None, Burning, Wet, Electrified, Oiled)
-│       ├── StatusZone/ElementalStatusZone           (Autonomiczne strefy rozlewisk/kałuż/ognia, LoS, wygaszanie konfliktów cieczy)
-│       └── Utilities/
-│           ├── ElementalChemistryLibrary            (Silnik reakcji chemicznych i kompatybilności materiałowej)
-│           └── ElementalDeliveryLibrary             (Point Hit, Surface Splash, Radial Burst z LoS, Status Zone)
-│
-├── Shared/                                          <-- Współdzielone serwisy, komponenty i kontrakty
-│   ├── Components/
-│   │   ├── DamageableComponent/                     (Replikowane durability/HP, Server-Authoritative, kinetic debounce)
-│   │   ├── InteractionComponent/                    (Wykrywanie wzrokiem Sphere/Line Trace, akcje IInteractable, Hold/Channeling 5s)
-│   │   ├── PhysicsCarryComponent/                   (Manipulacja i rzuty Chaos, Kinematic Sweep Follow, ECarryState, FCarrySocketConfig)
-│   │   └── StatusEffectComponent/                   (Replikowany zarządca statusów, Zero-Bandwidth Timers, Elemental Priority Pipeline)
-│   ├── Interfaces/
-│   │   ├── CarryAnchorProviderInterface.h           (Kontrakt kotwicy rąk i limitów pchania dla postaci niosącej)
-│   │   ├── IGrabbableInterface.h                    (Kontrakt chwytania i rzucania fizycznymi propami)
-│   │   ├── IInteractableInterface.h                 (Kontrakt interakcji logicznych)
-│   │   ├── MaterialProviderInterface.h              (Zapytanie o tożsamość materiałową EPhysicalMaterialType)
-│   │   ├── MechanismReceiverInterface.h             (Kontrakt odbiornika sygnałów aktywatorów SetMechanismState)
-│   │   └── StatProviderInterface.h                  (Kontrakt na odczyt wskaźników HP/durability)
-│   └── Enums/
-│       └── PhysicalMaterialEnums.h                  (EPhysicalMaterialType: Stone, Wood, Metal, Glass, Flesh)
-│
-├── Player/                                          <-- Postać gracza i sterowanie
-│   ├── Components/PlayerCameraComponent/            (Płynny zoom TPP/Top-Down, On-Demand Tick)
-│   ├── PlayerCharacter.h/.cpp                       (Kinematyczna postać CMC, Flesh, MoveBlockedBy fizyczne pchanie, orkiestrator wejścia E/R)
-│   └── PlayerCharacterController.h/.cpp
-│
-└── UI/                                              <-- Warstwa prezentacji stanu gry
-    ├── PlayerHUD/                                   (Aktor HUD orkiestrujący widgety)
-    ├── PlayerHUDWidget/                             (Główny widok: pasek zdrowia + kontener statusów)
-    ├── StatusIconWidget/                            (Dynamiczna kontrolka ikony statusu z radialnym timerem)
-    └── StatBarWidget.h/.cpp                         (Wskaźnik paskowy HP/durability)
+
+├── Dungeon/
+
+├── Environment/
+
+├── Logging/
+
+├── Networking/
+
+├── Player/
+
+├── Shared/
+
+├── UI/
+
+├── MyProject.Build.cs
+
+├── MyProject.cpp
+
+└── MyProject.h
+
 ```
 
----
 
-## 3. Żelazna Zasada Ekosystemu: Święta Trójca Propów i Struktur
 
-Zgodnie ze specyfikacją [THEME_PARK_SPECIFICATION.md](file:///E:/UE_PROJECTS/MyProject/.context/THEME_PARK_SPECIFICATION.md), **żaden interaktywny ani fizyczny obiekt w świecie gry nie może być "pustym Static Meshem"**. Wszystkie elementy (propy, struktury, pułapki, barykady) bezwzględnie implementują **Świętą Trójcę**:
+\## 2.1 Dungeon
 
-```mermaid
-classDiagram
-    class HolyTrinityObject {
-        <<Contract>>
-        +EPhysicalMaterialType MaterialType
-        +UDamageableComponent Damageable
-        +UStatusEffectComponent StatusEffects
-    }
-    class IMaterialProviderInterface {
-        <<Interface>>
-        +GetMaterialType() EPhysicalMaterialType
-    }
-    class UDamageableComponent {
-        +CurrentDurability : float
-        +MaxDurability : float
-        +ApplyKineticImpact(Velocity, Mass)
-    }
-    class UStatusEffectComponent {
-        +ActiveStatusEffects : TArray
-        +ApplyStatus(NewStatus, Duration)
-        +HasStatus(Status) bool
-    }
 
-    HolyTrinityObject ..|> IMaterialProviderInterface : 1. Tożsamość Materiałowa
-    HolyTrinityObject *-- UDamageableComponent : 2. Wytrzymałość i Życie
-    HolyTrinityObject *-- UStatusEffectComponent : 3. Reaktywność Żywiołowa
+
+```text
+
+Dungeon/
+
+├── Mechanisms/
+
+├── Props/
+
+└── Structure/
+
 ```
 
-1. **Tożsamość Materiałowa ([`IMaterialProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/MaterialProviderInterface.h)):**
-   - Określa naturę fizyczną obiektu: `Stone`, `Wood`, `Metal`, `Glass`, `Flesh`.
-   - Determinuje reakcje żywiołowe (np. kamień i metal odrzucają ogień, drewno płonie, szkło jest kruche).
-2. **Wytrzymałość i Życie ([`UDamageableComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/DamageableComponent/DamageableComponent.h)):**
-   - Autorytatywne punkty wytrzymałości (`CurrentDurability`, `MaxDurability`).
-   - Kinetyczne obrażenia od prędkości kolizji (`ApplyKineticImpact`) z debouncem przeciw wielokrotnym trafieniom (`KineticImpactCooldown = 0.25s`).
-3. **Reaktywność Żywiołowa ([`UStatusEffectComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h)):**
-   - Obsługa powłok (`Wet`, `Oiled`, `Burning`, `Electrified`).
-   - Autorytatywne DoT, reakcje chemiczne i zoptymalizowana sieć *Zero-Bandwidth Timers*.
 
----
 
-## 4. Architektura Postaci, Kinetyki i Trzymania Obiektów
+Contains dungeon-specific interactive gameplay such as:
 
-### 4.1. Kinematyczna Postać Gracza ([`APlayerCharacter`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Player/PlayerCharacter.h))
-- Oparta na stabilnym, sieciowym `CharacterMovementComponent` (CMC) z wyłączonym zbędnym tickiem (`bCanEverTick = false`).
-- Postać nie symuluje fizyki jako Rigid Body w Chaosie, co eliminuje wystrzeliwanie postaci przy kolizjach ze skrzyniami i podłożem.
-- **Fizyczne Pchanie Ciałem (`MoveBlockedBy`):**
-  - Wydelegowane do [`UKineticForceLibrary::TryApplyPhysicsPush`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h).
-  - Gracz posiada zdefiniowaną masę wirtualną ($100\text{ kg}$) i siłę naporu ($150\,000\text{ N}$).
-  - Kolizja z propem $\le 100\text{ kg}$ przekazuje wektorową siłę pchania, pozwalając na toczenie głazów i przepychanie skrzyń.
-  - Kolizja z propem $> 100\text{ kg}$ traktowana jest jak solidna ściana.
 
-### 4.2. Wzorzec Kinematycznego Prowadzenia Propów ([`UPhysicsCarryComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h))
-Całkowicie odrzucono sztywny `AttachToComponent` oraz niestabilny w sieci `PhysicsHandleComponent`:
 
-```mermaid
-flowchart TD
-    A["Gracz wciska E na propie IGrabbable"] --> B["UPhysicsCarryComponent::TryGrab"]
-    B --> C["Server_RequestGrab (dwupoziomowa walidacja)"]
-    C --> D["Kinematic Sweep w stronę kotwicy rąk (bSweep = true)"]
-    D --> E{"Kolizja w locie (SweepHit)?"}
-    E -- "Trafiono przeszkodę <= 100kg" --> F["Aplikacja PlayerPushForce (Pchanie skrzyni tarczą)"]
-    E -- "Trafiono przeszkodę > 100kg" --> G["SuppressHeavyPhysicsJitter (Tłumienie mikroruchów)"]
-    D --> H{"Dystans rąk > CarryBreakDistance (70 cm)?"}
-    H -- "Tak (Zablokowanie o ścianę)" --> I["Carry Grip Break (Upuszczenie propa pod nogi)"]
-    H -- "Nie" --> J["Prop prowadzony stabilnie jako Tarcza Blokująca"]
+\* mechanisms,
+
+\* traps,
+
+\* interactive props,
+
+\* dungeon structural actors.
+
+
+
+Examples include:
+
+
+
+\* `AMechanismTrapBase`
+
+\* `APistonTrap`
+
+\* `AInteractivePropBase`
+
+\* `AVolatileProp`
+
+\* `ADungeonStructureBase`
+
+
+
+Dungeon systems can use shared interfaces/components where appropriate instead of duplicating generic gameplay behavior.
+
+
+
+\---
+
+
+
+\## 2.2 Environment
+
+
+
+```text
+
+Environment/
+
+├── Elements/
+
+├── Kinetic/
+
+└── Zones/
+
+&#x20;   └── Shapes/
+
 ```
 
-- **Rola Tarczy (Blocking Shield):** Trzymana deska lub głaz blokuje lecące pociski (`ECC_WorldDynamic`), magię i uderzenia wrogów, pochłaniając energię i chroniąc gracza.
-- **Decoupling przez Interfejs:** Komponent noszenia nie zależy od konkretnej klasy postaci, lecz od lekkiego interfejsu [`ICarryAnchorProviderInterface`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h).
-- **Rzut Zamachem Myszką (Camera Angular Swing Throw) i Pure Drop (Klawisz E):**
-  - Wciśnięcie `E` w spoczynku upuszcza prop pod nogi z zerową prędkością (czysty spadek grawitacyjny).
-  - Dynamiczny obrót kamerą (zamach myszą) wylicza prędkość kątową na ramieniu trzymania i nadaje pęd po łuku zamachu.
-- **Dedykowany Rzut na wprost (Klawisz R / LPM):**
-  - Autorytatywny rzut w kierunku celownika (`ThrowImpulseStrength = 1400`) z uwzględnieniem prędkości biegu postaci.
 
----
 
-## 5. Silnik Żywiołów, Chemii i Dystrybucji (Elemental Engine)
+Contains environmental gameplay systems.
 
-### 5.1. Hierarchia Reakcji Chemii (Elemental Priority Pipeline)
-Podczas aplikacji statusu przez [`UStatusEffectComponent`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h) zachodzi dwufazowa ewaluacja logiczna:
-1. **Faza 1 (Żywioł vs Aktywna Powłoka):**
-   - Jeśli cel ma aktywny status (np. `Wet`), a przychodzi ogień (`Burning`), wyzwalana jest reakcja `Steam_Extinguish`. Woda odparowuje, ogień zostaje ugaszony (`bConsumeIncomingStatus = true`), nie dotykając materiału pod spodem.
-   - Jeśli cel jest `Oiled`, a przychodzi `Burning` $\rightarrow$ gwałtowna detonacja `Oil_Ignition`.
-   - Jeśli cel jest `Wet`, a przychodzi `Electrified` $\rightarrow$ natychmiastowe porażenie przewodzące `Conductive_Shock`.
-2. **Faza 2 (Żywioł vs Tożsamość Materiałowa):**
-   - Dopiero gdy żywioł nie zostanie zneutralizowany przez powłokę, silnik sprawdza [`UElementalChemistryLibrary::CanMaterialReceiveStatus`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h). Kamień i metal odrzucają ogień, uniemożliwiając ich zapalenie.
 
-### 5.2. Architektura Dystrybucji Żywiołów ([`UElementalDeliveryLibrary`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Elements/Utilities/ElementalDeliveryLibrary.h))
-Silnik obsługuje 4 fundamentalne archetypy dostarczania:
-1. **Point Hit:** Punktowe uderzenie pojedynczym pociskiem w 1 aktora.
-2. **Surface Splash:** Rozbryzg na powierzchni (np. stłuczenie flakonu oliwy/wody).
-3. **Radial Burst (z Line of Sight):** Radialna eksplozja sprawdzająca przeszkody geometryczne.
-4. **Status Zone:** Trwałe strefy naziemne (kałuże, pożary) z ochroną przed nakładaniem sprzecznych żywiołów.
+
+Important existing systems include:
+
+
+
+\* status zones,
+
+\* environmental effects,
+
+\* kinetic/physics-related functionality.
+
+
+
+Important classes/libraries include:
+
+
+
+\* `AStatusZoneBase`
+
+\* `ASurfaceSplashZone`
+
+\* `AVolumetricStatusZone`
+
+\* `UStatusZoneLibrary`
+
+\* `UKineticForceLibrary`
+
+
+
+Environment systems are expected to remain reusable where practical and should not become tightly coupled to individual dungeon actors.
+
+
+
+\---
+
+
+
+\## 2.3 Logging
+
+
+
+Contains project-specific Unreal logging categories.
+
+
+
+Existing categories include:
+
+
+
+\* `LogDungeonInteraction`
+
+\* `LogDungeonPhysics`
+
+\* `LogDungeonNetwork`
+
+\* `LogDungeonMechanisms`
+
+\* `LogDungeonElements`
+
+
+
+Logging should provide useful diagnostic information without becoming part of gameplay architecture.
+
+
+
+\---
+
+
+
+\## 2.4 Networking
+
+
+
+Contains reusable networking-related helpers and infrastructure.
+
+
+
+An existing example is:
+
+
+
+\* `NetworkFunctionLibrary`
+
+
+
+The networking domain should contain reusable networking functionality rather than feature-specific gameplay rules whenever possible.
+
+
+
+\---
+
+
+
+\## 2.5 Player
+
+
+
+Contains the player-controlled gameplay domain.
+
+
+
+The primary player actor is:
+
+
+
+\* `APlayerCharacter`
+
+
+
+Player functionality is largely composed from reusable components rather than implemented as one monolithic character class.
+
+
+
+\---
+
+
+
+\## 2.6 Shared
+
+
+
+```text
+
+Shared/
+
+├── Components/
+
+├── Enums/
+
+└── Interfaces/
+
+```
+
+
+
+Contains reusable gameplay building blocks shared across multiple domains.
+
+
+
+Important components include:
+
+
+
+\* `UDamageableComponent`
+
+\* `UInteractionComponent`
+
+\* `UPhysicsCarryComponent`
+
+\* `UStatusEffectComponent`
+
+
+
+Important interfaces include:
+
+
+
+\* `ICarryAnchorProviderInterface`
+
+\* `IGrabbableInterface`
+
+\* `IInteractableInterface`
+
+\* `IMaterialProviderInterface`
+
+\* `IMechanismReceiverInterface`
+
+\* `IStatProviderInterface`
+
+
+
+Shared code should only be placed here when it represents genuinely reusable functionality.
+
+
+
+\---
+
+
+
+\## 2.7 UI
+
+
+
+Contains Unreal UMG-based UI functionality.
+
+
+
+Examples include:
+
+
+
+\* `PlayerHUD`
+
+\* `PlayerHUDWidget`
+
+\* `StatusIconWidget`
+
+\* `StatBarWidget`
+
+
+
+UI code should consume gameplay state rather than becoming the owner of gameplay rules.
+
+
+
+\---
+
+
+
+\# 3. Player Architecture
+
+
+
+\## 3.1 Player Character
+
+
+
+`APlayerCharacter` derives from `ACharacter`.
+
+
+
+The character uses composition through multiple components, including functionality for:
+
+
+
+\* interaction,
+
+\* physics carrying,
+
+\* damage/durability,
+
+\* knockback,
+
+\* status effects,
+
+\* camera behavior,
+
+\* carry/hold anchoring.
+
+
+
+The player character also implements capability interfaces including:
+
+
+
+\* `IMaterialProviderInterface`
+
+\* `ICarryAnchorProviderInterface`
+
+
+
+The character therefore acts primarily as the player-facing composition root for player functionality rather than owning every gameplay responsibility itself.
+
+
+
+\---
+
+
+
+\## 3.2 Player Components
+
+
+
+Important player-related components include:
+
+
+
+\* `InteractionComponent`
+
+\* `PhysicsCarryComponent`
+
+\* `DamageableComponent`
+
+\* `KnockbackComponent`
+
+\* `StatusEffectComponent`
+
+\* `PlayerCameraComponent`
+
+\* `HoldAnchorComponent`
+
+\* Unreal camera/spring-arm components where applicable.
+
+
+
+Components should own narrowly scoped behavior.
+
+
+
+For example:
+
+
+
+```text
+
+PlayerCharacter
+
+├── Interaction
+
+├── Physics Carry
+
+├── Damage / Durability
+
+├── Knockback
+
+├── Status Effects
+
+├── Camera
+
+└── Carry Anchor
+
+```
+
+
+
+A new player feature should generally be evaluated as a candidate for a component before adding substantial logic directly to `APlayerCharacter`.
+
+
+
+This is not an absolute rule: behavior that is inherently part of character lifecycle, movement or character-level state may remain on the character.
+
+
+
+\---
+
+
+
+\# 4. Shared Gameplay Components
+
+
+
+\## 4.1 Damageable Component
+
+
+
+`UDamageableComponent` provides reusable damage/durability behavior.
+
+
+
+It owns state such as:
+
+
+
+\* current durability,
+
+\* maximum durability.
+
+
+
+It exposes operations and events related to damage and destruction.
+
+
+
+The component also supports replicated gameplay state where required.
+
+
+
+Damageable behavior should remain independent from specific actors whenever possible.
+
+
+
+Actors that need custom consequences of damage should react to component events rather than duplicating damage logic.
+
+
+
+\---
+
+
+
+\## 4.2 Interaction Component
+
+
+
+`UInteractionComponent` provides reusable interaction functionality.
+
+
+
+It is intended to separate interaction detection/flow from the concrete actor that owns the component.
+
+
+
+Interactive actors can expose interaction capabilities through:
+
+
+
+```text
+
+IInteractableInterface
+
+```
+
+
+
+This allows the interaction system to work with different actor implementations without requiring the interaction component to know every concrete actor class.
+
+
+
+\---
+
+
+
+\## 4.3 Physics Carry Component
+
+
+
+`UPhysicsCarryComponent` owns the player-facing physics carry/manipulation flow.
+
+
+
+Its current state model includes:
+
+
+
+```text
+
+None
+
+RequestingGrab
+
+Carrying
+
+Releasing
+
+```
+
+
+
+The component contains networking operations including:
+
+
+
+```text
+
+Server\_RequestGrab
+
+Server\_RequestForwardThrow
+
+Server\_RequestDropOrSwing
+
+Client\_GrabDenied
+
+```
+
+
+
+The component is responsible for the carry interaction state and its networked execution.
+
+
+
+Concrete grabbable actors communicate through capabilities such as:
+
+
+
+```text
+
+IGrabbableInterface
+
+```
+
+
+
+and related anchor/carry interfaces.
+
+
+
+This prevents the player character from needing specialized knowledge of every object that can be carried.
+
+
+
+\---
+
+
+
+\## 4.4 Status Effect Component
+
+
+
+`UStatusEffectComponent` provides reusable status-effect state/behavior for actors that can receive status effects.
+
+
+
+It is used as a shared gameplay component rather than embedding status state separately inside every affected actor.
+
+
+
+Environmental systems such as Status Zones can interact with this capability without requiring knowledge of every concrete target actor.
+
+
+
+\---
+
+
+
+\# 5. Status Zone Architecture
+
+
+
+Status Zones are environmental gameplay actors responsible for applying effects to actors inside defined areas.
+
+
+
+The base class is:
+
+
+
+```text
+
+AStatusZoneBase
+
+```
+
+
+
+Current shape-specific implementations include:
+
+
+
+```text
+
+ASurfaceSplashZone
+
+AVolumetricStatusZone
+
+```
+
+
+
+with the shape implementations located under:
+
+
+
+```text
+
+Environment/Zones/Shapes/
+
+```
+
+
+
+The base zone architecture handles responsibilities such as:
+
+
+
+\* zone lifecycle,
+
+\* duration,
+
+\* overlap/target evaluation,
+
+\* effect application,
+
+\* environmental interactions,
+
+\* relevant replicated state.
+
+
+
+Shape-specific classes should primarily provide geometry/shape-specific behavior rather than duplicate the complete zone system.
+
+
+
+Shared operations are also exposed through:
+
+
+
+```text
+
+UStatusZoneLibrary
+
+```
+
+
+
+\---
+
+
+
+\# 6. Interfaces and Capability-Based Communication
+
+
+
+The project uses Unreal Interfaces to represent capabilities.
+
+
+
+Examples include:
+
+
+
+```text
+
+IGrabbableInterface
+
+IInteractableInterface
+
+IMechanismReceiverInterface
+
+IMaterialProviderInterface
+
+IStatProviderInterface
+
+ICarryAnchorProviderInterface
+
+```
+
+
+
+The purpose of an interface is to allow a system to depend on a capability rather than a concrete actor implementation.
+
+
+
+For example:
+
+
+
+```text
+
+Interaction System
+
+&#x20;       │
+
+&#x20;       ▼
+
+IInteractableInterface
+
+&#x20;       │
+
+&#x20;  ┌────┴────┐
+
+&#x20;  ▼         ▼
+
+Switch     Door
+
+```
+
+
+
+The interaction system does not need separate knowledge of every concrete interactive actor.
+
+
+
+Interfaces should not be introduced automatically.
+
+
+
+A capability should become an interface when:
+
+
+
+\* multiple implementations are expected,
+
+\* a system genuinely needs to depend on a capability,
+
+\* decoupling provides a meaningful architectural benefit.
+
+
+
+A one-off behavior does not automatically require an interface.
+
+
+
+\---
+
+
+
+\# 7. Cast<T> Policy
+
+
+
+`Cast<T>` is \*\*not globally forbidden\*\* in the project.
+
+
+
+Unreal gameplay code sometimes legitimately needs to determine whether an object is a particular concrete Unreal type.
+
+
+
+Casts are acceptable when they represent a justified concrete-type requirement, especially at Unreal/framework boundaries or inside functionality that explicitly operates on a known concrete type.
+
+
+
+The architectural problem occurs when casts become the primary way systems discover and couple themselves to each other.
+
+
+
+Prefer:
+
+
+
+```text
+
+Interface
+
+Component
+
+Delegate/Event
+
+Explicit reference
+
+```
+
+
+
+when the dependency represents a reusable capability or architectural contract.
+
+
+
+Avoid patterns such as:
+
+
+
+```text
+
+System A
+
+&#x20;├── Cast<ActorTypeA>()
+
+&#x20;├── Cast<ActorTypeB>()
+
+&#x20;├── Cast<ActorTypeC>()
+
+&#x20;└── special-case logic for every new actor
+
+```
+
+
+
+because this creates growing concrete-type coupling.
+
+
+
+A practical rule is:
+
+
+
+> \*\*Do not ban casts. Do not use casts as the architecture.\*\*
+
+
+
+Existing code such as `UStatusZoneLibrary` may legitimately use a concrete cast when the operation specifically requires `AStatusZoneBase`.
+
+
+
+\---
+
+
+
+\# 8. Domain Communication
+
+
+
+The preferred communication mechanisms depend on the relationship between systems.
+
+
+
+\## 8.1 Direct References
+
+
+
+Use direct references when one object genuinely owns or explicitly depends on another object.
+
+
+
+Example:
+
+
+
+```text
+
+PlayerCharacter
+
+&#x20;   │
+
+&#x20;   └── owns/references Components
+
+```
+
+
+
+Direct references are preferable to artificial abstraction when the relationship is clear and stable.
+
+
+
+\---
+
+
+
+\## 8.2 Interfaces
+
+
+
+Use interfaces for capability-based interaction.
+
+
+
+Example:
+
+
+
+```text
+
+InteractionComponent
+
+&#x20;       │
+
+&#x20;       ▼
+
+IInteractableInterface
+
+&#x20;       │
+
+&#x20;       ▼
+
+Concrete Actor
+
+```
+
+
+
+\---
+
+
+
+\## 8.3 Components
+
+
+
+Use Actor Components when behavior should be reusable across multiple actor types.
+
+
+
+Example:
+
+
+
+```text
+
+Actor A ──┐
+
+Actor B ──┼──> UDamageableComponent
+
+Actor C ──┘
+
+```
+
+
+
+\---
+
+
+
+\## 8.4 Delegates and Events
+
+
+
+Use events/delegates when a system needs to notify other systems without directly owning them.
+
+
+
+Example:
+
+
+
+```text
+
+DamageableComponent
+
+&#x20;       │
+
+&#x20;       └── OnDestroyed
+
+&#x20;               │
+
+&#x20;       ┌───────┴───────┐
+
+&#x20;       ▼               ▼
+
+&#x20;      VFX             Gameplay
+
+```
+
+
+
+This avoids unnecessary direct dependencies.
+
+
+
+\---
+
+
+
+\# 9. Networking Architecture
+
+
+
+The multiplayer model is \*\*server authoritative\*\*.
+
+
+
+The client provides intent.
+
+
+
+The server validates and owns authoritative gameplay state.
+
+
+
+Conceptually:
+
+
+
+```text
+
+Client
+
+&#x20; │
+
+&#x20; │ input / intent
+
+&#x20; ▼
+
+Server
+
+&#x20; │
+
+&#x20; ├── validation
+
+&#x20; ├── gameplay rules
+
+&#x20; ├── state mutation
+
+&#x20; └── replication
+
+&#x20;      │
+
+&#x20;      ▼
+
+&#x20;   Clients
+
+```
+
+
+
+Examples include server RPCs in systems such as `UPhysicsCarryComponent`.
+
+
+
+\## 9.1 Client Responsibilities
+
+
+
+Clients may:
+
+
+
+\* gather player input,
+
+\* initiate requests,
+
+\* provide interaction intent,
+
+\* display replicated gameplay state,
+
+\* perform appropriate local presentation.
+
+
+
+Clients should not be treated as authoritative sources for shared gameplay state.
+
+
+
+\---
+
+
+
+\## 9.2 Server Responsibilities
+
+
+
+The server owns:
+
+
+
+\* authoritative gameplay decisions,
+
+\* validation of client requests,
+
+\* authoritative state mutation,
+
+\* multiplayer interactions,
+
+\* replication of relevant state.
+
+
+
+A new multiplayer gameplay feature should explicitly define:
+
+
+
+1\. what the client requests,
+
+2\. what the server validates,
+
+3\. what state the server owns,
+
+4\. what state is replicated,
+
+5\. what clients use for presentation.
+
+
+
+\---
+
+
+
+\# 10. Replication
+
+
+
+Replication should be intentional.
+
+
+
+Not every property needs replication.
+
+
+
+For each replicated state, the implementation should have a gameplay reason for replication.
+
+
+
+Relevant systems already use replicated state where required, including:
+
+
+
+\* player gameplay components,
+
+\* physics carry state,
+
+\* status zones.
+
+
+
+Replication logic should remain close to the system that owns the state.
+
+
+
+Do not create a generic replication layer merely to avoid using Unreal's native replication mechanisms.
+
+
+
+\---
+
+
+
+\# 11. Blueprint Architecture
+
+
+
+Blueprints are an important part of the project.
+
+
+
+They are primarily used for:
+
+
+
+\* actor composition,
+
+\* asset configuration,
+
+\* designer-facing values,
+
+\* presentation,
+
+\* simple event wiring,
+
+\* feature-specific wiring that does not justify additional C++ complexity.
+
+
+
+Blueprints are \*\*not restricted to presentation only\*\*.
+
+
+
+At the same time, core reusable gameplay rules should generally live in C++ when they require:
+
+
+
+\* authoritative multiplayer behavior,
+
+\* reusable gameplay logic,
+
+\* complex state,
+
+\* non-trivial physics,
+
+\* performance-sensitive execution,
+
+\* strong code-level contracts.
+
+
+
+A Blueprint should not become a second implementation of an existing C++ gameplay system.
+
+
+
+Preferred relationship:
+
+
+
+```text
+
+C++ gameplay system
+
+&#x20;       ▲
+
+&#x20;       │
+
+Blueprint composition/configuration
+
+&#x20;       │
+
+&#x20;       ▼
+
+Unreal assets / presentation
+
+```
+
+
+
+Blueprints may orchestrate existing C++ functionality without taking ownership of the underlying domain rules.
+
+
+
+\---
+
+
+
+\# 12. Actor Composition
+
+
+
+The project favors composition over deep inheritance for reusable gameplay behavior.
+
+
+
+A typical actor may be composed from:
+
+
+
+```text
+
+Actor
+
+├── Gameplay Component
+
+├── Interaction Component
+
+├── Damageable Component
+
+├── Physics Component
+
+└── Presentation / Blueprint configuration
+
+```
+
+
+
+Inheritance remains appropriate when the Unreal type hierarchy itself represents a meaningful relationship.
+
+
+
+For example:
+
+
+
+```text
+
+AActor
+
+&#x20; └── AInteractivePropBase
+
+&#x20;       └── AVolatileProp
+
+```
+
+
+
+or:
+
+
+
+```text
+
+AActor
+
+&#x20; └── AMechanismTrapBase
+
+&#x20;       └── APistonTrap
+
+```
+
+
+
+The goal is not to eliminate inheritance.
+
+
+
+The goal is to avoid deep inheritance trees where unrelated responsibilities accumulate in base classes.
+
+
+
+\---
+
+
+
+\# 13. Dungeon Structure and Props
+
+
+
+Dungeon-specific actors can use shared capabilities and components.
+
+
+
+Examples:
+
+
+
+```text
+
+ADungeonStructureBase
+
+AInteractivePropBase
+
+AVolatileProp
+
+AMechanismTrapBase
+
+APistonTrap
+
+```
+
+
+
+A base class should contain behavior genuinely shared by its descendants.
+
+
+
+Generic gameplay functionality such as:
+
+
+
+\* damage,
+
+\* interaction,
+
+\* status effects,
+
+\* carrying,
+
+
+
+should use shared components/interfaces where appropriate instead of being independently reimplemented by each dungeon actor.
+
+
+
+\---
+
+
+
+\# 14. Data and Configuration
+
+
+
+The project contains shared configuration structures such as:
+
+
+
+\* `FCarrySocketConfig`
+
+\* `FZoneEffectConfig`
+
+
+
+Configuration should be separated from hard-coded gameplay behavior when the same behavior needs meaningful tuning or reuse.
+
+
+
+Use Unreal-native data-driven mechanisms where appropriate, including:
+
+
+
+\* `USTRUCT` configuration,
+
+\* Data Assets,
+
+\* Data Tables,
+
+\* Blueprint-exposed properties.
+
+
+
+Do not introduce a data abstraction solely for the sake of abstraction.
+
+
+
+The appropriate mechanism depends on:
+
+
+
+\* whether designers need to edit it,
+
+\* whether values are shared,
+
+\* whether values are runtime state or static configuration,
+
+\* whether network replication is required.
+
+
+
+\---
+
+
+
+\# 15. Input Architecture
+
+
+
+The project uses Unreal Enhanced Input.
+
+
+
+Current input assets include actions for functionality such as:
+
+
+
+\* Move,
+
+\* Look,
+
+\* Jump,
+
+\* Interact,
+
+\* Throw,
+
+\* Zoom.
+
+
+
+Input should represent \*\*player intent\*\*.
+
+
+
+Gameplay systems should not become tightly coupled to raw input mappings when the input can instead be translated into a gameplay operation.
+
+
+
+For multiplayer functionality:
+
+
+
+```text
+
+Input
+
+&#x20; ↓
+
+Intent
+
+&#x20; ↓
+
+Gameplay System
+
+&#x20; ↓
+
+Server Authority
+
+```
+
+
+
+This keeps input configuration separate from authoritative gameplay rules.
+
+
+
+\---
+
+
+
+\# 16. UI Architecture
+
+
+
+The UI uses Unreal UMG.
+
+
+
+Examples include:
+
+
+
+```text
+
+PlayerHUD
+
+PlayerHUDWidget
+
+StatusIconWidget
+
+StatBarWidget
+
+```
+
+
+
+The UI should primarily:
+
+
+
+\* display gameplay state,
+
+\* react to gameplay events,
+
+\* trigger presentation changes.
+
+
+
+UI should not become the authoritative owner of gameplay state.
+
+
+
+For example, a health bar should reflect health owned by a gameplay system/component rather than storing a second authoritative health value inside the widget.
+
+
+
+Preferred flow:
+
+
+
+```text
+
+Gameplay State
+
+&#x20;     │
+
+&#x20;     ▼
+
+Event / Observable State
+
+&#x20;     │
+
+&#x20;     ▼
+
+UI Widget
+
+&#x20;     │
+
+&#x20;     ▼
+
+Presentation
+
+```
+
+
+
+\---
+
+
+
+\# 17. Libraries and Shared Helpers
+
+
+
+The project contains reusable Unreal helper libraries, including:
+
+
+
+\* `UKineticForceLibrary`
+
+\* `UStatusZoneLibrary`
+
+\* `NetworkFunctionLibrary`
+
+
+
+These should remain focused on reusable operations.
+
+
+
+A library should not become a hidden global service containing unrelated gameplay state.
+
+
+
+When a helper starts accumulating state, lifecycle responsibilities or ownership semantics, it should be evaluated as a possible component, actor, subsystem or dedicated gameplay object instead.
+
+
+
+\---
+
+
+
+\# 18. Logging Architecture
+
+
+
+Project logging uses Unreal's logging system and project-specific categories.
+
+
+
+Logging should be used for:
+
+
+
+\* debugging gameplay behavior,
+
+\* diagnosing networking issues,
+
+\* tracing complex interactions,
+
+\* investigating physics problems,
+
+\* reporting meaningful failure conditions.
+
+
+
+Logging should not be used as a substitute for proper state communication.
+
+
+
+Avoid excessive logging inside high-frequency execution paths unless there is a clear diagnostic purpose.
+
+
+
+\---
+
+
+
+\# 19. Architectural Boundaries
+
+
+
+The following boundaries are currently important.
+
+
+
+\### Gameplay ↔ Presentation
+
+
+
+Gameplay state belongs to gameplay systems.
+
+
+
+Presentation consumes that state.
+
+
+
+\### Client ↔ Server
+
+
+
+Client input is intent.
+
+
+
+The server owns authoritative multiplayer gameplay.
+
+
+
+\### Shared ↔ Feature-Specific
+
+
+
+Shared code must represent genuinely reusable functionality.
+
+
+
+Feature-specific logic should remain in its feature domain.
+
+
+
+\### Capability ↔ Implementation
+
+
+
+Interfaces represent capabilities.
+
+
+
+Concrete actor classes provide implementations.
+
+
+
+\### Configuration ↔ Runtime State
+
+
+
+Configuration describes how a system should behave.
+
+
+
+Runtime state belongs to the object/system executing that behavior.
+
+
+
+\### C++ ↔ Blueprint
+
+
+
+C++ provides reusable/core gameplay behavior.
+
+
+
+Blueprint provides composition, configuration, presentation and simple orchestration where appropriate.
+
+
+
+\---
+
+
+
+\# 20. Architectural Constraints
+
+
+
+The following constraints currently guide implementation.
+
+
+
+\## 20.1 Do Not Reimplement Existing Systems
+
+
+
+Before introducing a new:
+
+
+
+\* interaction system,
+
+\* damage system,
+
+\* carry system,
+
+\* status-effect system,
+
+\* kinetic-force helper,
+
+\* networking helper,
+
+
+
+inspect the existing implementation first.
+
+
+
+Extend or reuse it when possible.
+
+
+
+\---
+
+
+
+\## 20.2 Do Not Introduce Premature Abstractions
+
+
+
+Do not automatically create:
+
+
+
+```text
+
+Service
+
+Manager
+
+Factory
+
+Repository
+
+Provider
+
+Controller
+
+Coordinator
+
+```
+
+
+
+or similar abstraction layers.
+
+
+
+An abstraction should solve a concrete problem such as:
+
+
+
+\* multiple implementations,
+
+\* dependency isolation,
+
+\* lifecycle ownership,
+
+\* reusable behavior,
+
+\* testability,
+
+\* clear architectural boundary.
+
+
+
+\---
+
+
+
+\## 20.3 Avoid God Objects
+
+
+
+Watch especially for growth of:
+
+
+
+\* `APlayerCharacter`,
+
+\* base actor classes,
+
+\* generic managers,
+
+\* Blueprint graphs.
+
+
+
+When a class starts accumulating unrelated responsibilities, evaluate whether the behavior belongs in:
+
+
+
+\* an Actor Component,
+
+\* an Interface,
+
+\* a dedicated Actor,
+
+\* a Subsystem,
+
+\* a library,
+
+\* or another domain-specific object.
+
+
+
+\---
+
+
+
+\## 20.4 Tick Is Not Free
+
+
+
+`Tick` should have a clear reason to exist.
+
+
+
+Prefer where appropriate:
+
+
+
+\* delegates,
+
+\* overlap events,
+
+\* timers,
+
+\* state transitions,
+
+\* explicit gameplay events.
+
+
+
+Tick remains valid when the behavior genuinely requires continuous per-frame evaluation.
+
+
+
+\---
+
+
+
+\# 21. State Machines
+
+
+
+Complex mutually exclusive behavior should use explicit state modeling rather than scattered booleans.
+
+
+
+`UPhysicsCarryComponent` is an existing example:
+
+
+
+```text
+
+None
+
+&#x20; ↓
+
+RequestingGrab
+
+&#x20; ↓
+
+Carrying
+
+&#x20; ↓
+
+Releasing
+
+&#x20; ↓
+
+None
+
+```
+
+
+
+When a system begins accumulating multiple interacting flags, evaluate whether those flags actually represent a state machine.
+
+
+
+\---
+
+
+
+\# 22. Performance Considerations
+
+
+
+Gameplay architecture should remain conscious of runtime cost.
+
+
+
+Pay particular attention to:
+
+
+
+\* per-frame Tick logic,
+
+\* physics queries,
+
+\* overlap processing,
+
+\* network RPC frequency,
+
+\* replicated state,
+
+\* large numbers of actors/components,
+
+\* expensive Blueprint execution.
+
+
+
+Performance optimizations should be based on actual needs rather than speculative micro-optimization.
+
+
+
+The preferred order is:
+
+
+
+```text
+
+Correct behavior
+
+→
+
+Correct architecture
+
+→
+
+Measure
+
+→
+
+Optimize where necessary
+
+```
+
+
+
+\---
+
+
+
+\# 23. Specifications and Architecture
+
+
+
+Architecture describes \*\*how the project is structured\*\*.
+
+
+
+Feature specifications describe \*\*what a feature should do\*\*.
+
+
+
+A feature specification should not silently redefine global architecture.
+
+
+
+For a non-trivial feature, the expected relationship is:
+
+
+
+```text
+
+CONSTITUTION
+
+&#x20;    ↓
+
+ARCHITECTURE
+
+&#x20;    ↓
+
+FEATURE SPECIFICATION
+
+&#x20;    ↓
+
+IMPLEMENTATION PLAN
+
+&#x20;    ↓
+
+TASKS
+
+&#x20;    ↓
+
+C++ / Blueprint / Content
+
+&#x20;    ↓
+
+VERIFICATION
+
+```
+
+
+
+If a feature appears to require a change to the existing architecture, the architectural impact should be made explicit before implementation.
+
+
+
+\---
+
+
+
+\# 24. Unreal MCP and Editor State
+
+
+
+Not all Unreal project state is reliably visible from source code.
+
+
+
+Important examples include:
+
+
+
+\* Blueprint graph configuration,
+
+\* Blueprint inheritance,
+
+\* actor/component instances,
+
+\* level/world composition,
+
+\* editor-exposed property values,
+
+\* asset references,
+
+\* runtime/editor configuration.
+
+
+
+Unreal MCP should therefore be used when source inspection alone cannot verify the required state.
+
+
+
+The repository is the source of truth for source-controlled code/configuration.
+
+
+
+Unreal Editor/MCP is the source of truth for editor-side state that cannot be reliably represented by those source files.
+
+
+
+\---
+
+
+
+\# 25. Current Architectural Risks
+
+
+
+These are areas to monitor, not automatic problems.
+
+
+
+\## Player Character Growth
+
+
+
+`APlayerCharacter` already coordinates multiple components.
+
+
+
+Future player features should avoid moving unrelated systems directly into the character.
+
+
+
+\## Damageable Component Growth
+
+
+
+`UDamageableComponent` should not become a generic container for every possible player/actor resource.
+
+
+
+If durability, health, armor, shield, stamina and similar systems develop substantially different rules, they should be evaluated as separate responsibilities.
+
+
+
+\## Status Zone Complexity
+
+
+
+`AStatusZoneBase` and related environmental systems contain significant gameplay behavior.
+
+
+
+Future extensions should preserve the separation between:
+
+
+
+\* zone lifecycle,
+
+\* geometry,
+
+\* effect configuration,
+
+\* effect application,
+
+\* environmental interactions.
+
+
+
+\## Shared Folder Growth
+
+
+
+`Shared/` should not become a dumping ground.
+
+
+
+A class belongs there because multiple domains genuinely depend on it, not because it is convenient to place it there.
+
+
+
+\## Blueprint Complexity
+
+
+
+Blueprints can legitimately contain composition and simple feature wiring.
+
+
+
+However, increasingly complex gameplay rules should be evaluated for migration into reusable C++ systems when that improves:
+
+
+
+\* reuse,
+
+\* multiplayer correctness,
+
+\* maintainability,
+
+\* state management,
+
+\* performance.
+
+
+
+\---
+
+
+
+\# 26. How This Document Should Be Maintained
+
+
+
+`ARCHITECTURE.md` describes the \*\*current architecture\*\*, not the desired future architecture.
+
+
+
+Update it when a meaningful architectural change occurs, such as:
+
+
+
+\* a new reusable gameplay system,
+
+\* a new architectural domain,
+
+\* a new major component,
+
+\* a significant networking pattern,
+
+\* a new cross-domain dependency,
+
+\* a changed responsibility boundary,
+
+\* a meaningful change to Blueprint/C++ responsibilities.
+
+
+
+Do not update it for:
+
+
+
+\* ordinary bug fixes,
+
+\* individual variable changes,
+
+\* temporary experiments,
+
+\* completed TODOs,
+
+\* minor implementation details.
+
+
+
+When implementation and documentation disagree:
+
+
+
+1\. determine which reflects the intended architecture,
+
+2\. verify the actual implementation,
+
+3\. correct the architecture or implementation as appropriate,
+
+4\. update this document so it describes the resulting real architecture.
+
+
+
+\---
+
+
+
+\# 27. Architectural Source of Truth
+
+
+
+The project uses the following hierarchy:
+
+
+
+\### `CONSTITUTION.md`
+
+
+
+Defines architectural principles, priorities and non-negotiable rules.
+
+
+
+\### `ARCHITECTURE.md`
+
+
+
+Defines the current structural architecture of the repository.
+
+
+
+\### `.context/specs/`
+
+
+
+Defines expected behavior of individual features.
+
+
+
+\### C++ / Blueprint / Content
+
+
+
+Defines the actual implementation.
+
+
+
+\### Unreal MCP
+
+
+
+Provides verification and visibility into Unreal Editor state that cannot be reliably determined from source files alone.
+
+
+
+When these sources disagree, do not silently choose one.
+
+
+
+Investigate the discrepancy and make the intended state explicit.
+
+
+
+\---
+
+
+
+\# 28. Core Architectural Direction
+
+
+
+The project follows a simple principle:
+
+
+
+> \*\*Use Unreal-native architecture to build the game, while keeping responsibilities explicit and systems modular.\*\*
+
+
+
+In practice this means:
+
+
+
+```text
+
+Composition over unnecessary inheritance
+
+Capabilities over concrete-type coupling
+
+Events over unnecessary direct dependencies
+
+C++ for reusable/core gameplay rules
+
+Blueprints for composition, configuration and presentation
+
+Server authority for multiplayer gameplay
+
+Explicit replication
+
+Data-driven configuration where useful
+
+Existing systems before duplicate systems
+
+Simple solutions before abstraction
+
+Specifications before complex implementation
+
+Verification before declaring a feature complete
+
+```
+
+
+
+The architecture should serve the game.
+
+
+
+It should evolve when the game creates a real need for it, not because an abstract architecture pattern suggests that it should.
+
+
+
