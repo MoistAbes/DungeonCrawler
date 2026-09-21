@@ -8,7 +8,73 @@
 
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
+
+namespace
+{
+	/** Sprawdza, czy w danym punkcie fizycznie istnieje płaszczyzna architektury (Drop-off test na krawędziach filarów i ścian) */
+	static bool CheckSurfacePresenceAt(
+		const UWorld* World,
+		const FVector& SamplePoint,
+		const FVector& SurfaceNormal,
+		FHitResult& OutHit,
+		const FCollisionQueryParams& Params)
+	{
+		if (!World)
+		{
+			return false;
+		}
+
+		const FVector ProbeStart = SamplePoint + SurfaceNormal * 20.0f;
+		const FVector ProbeEnd = SamplePoint - SurfaceNormal * 30.0f;
+
+		if (World->LineTraceSingleByChannel(OutHit, ProbeStart, ProbeEnd, ECC_WorldStatic, Params))
+		{
+			if (OutHit.GetActor() && UStatusZoneLibrary::IsValidSurfaceTarget(OutHit.GetActor()))
+			{
+				const float NormalDot = FVector::DotProduct(OutHit.ImpactNormal, SurfaceNormal);
+				if (NormalDot > 0.65f)
+				{
+					const float DistFromPlane = FMath::Abs(FVector::DotProduct(OutHit.ImpactPoint - SamplePoint, SurfaceNormal));
+					return (DistFromPlane < 25.0f);
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/** Sprawdza, czy między punktem uderzenia a próbką na powierzchni nie ma przeszkody pionowej (LoS test - filary, narożniki) */
+	static bool HasSurfaceLineOfSight(
+		const UWorld* World,
+		const FVector& StartLocation,
+		const FVector& TargetLocation,
+		const FVector& SurfaceNormal,
+		const FCollisionQueryParams& Params)
+	{
+		if (!World)
+		{
+			return false;
+		}
+
+		const FVector LoSStart = StartLocation + SurfaceNormal * 10.0f;
+		const FVector LoSEnd = TargetLocation + SurfaceNormal * 10.0f;
+
+		FHitResult LoSHit;
+		if (World->LineTraceSingleByChannel(LoSHit, LoSStart, LoSEnd, ECC_WorldStatic, Params))
+		{
+			// Wykrywamy przeszkody poprzeczne/pionowe do powierzchni (ściany, kolumny)
+			const bool bIsObstacle = FMath::Abs(FVector::DotProduct(LoSHit.ImpactNormal, SurfaceNormal)) < 0.6f;
+			if (bIsObstacle && LoSHit.Distance < FVector::Dist(LoSStart, LoSEnd) - 10.0f)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+}
 
 UDungeonSurfaceSubsystem::UDungeonSurfaceSubsystem()
 {
@@ -105,6 +171,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 
 	int32 AffectedCount = 0;
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfacePaintValidation), false, Instigator);
 
 	for (int32 du = -StepRadius; du <= StepRadius; ++du)
 	{
@@ -117,7 +184,24 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 			}
 
 			const FVector SamplePoint = HitLocation + Offset;
-			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
+
+			// 1. Line of Sight (LoS): Sprawdzamy, czy między punktem uderzenia a próbką nie ma przeszkody (filar, narożnik)
+			if (!Offset.IsNearlyZero())
+			{
+				if (!HasSurfaceLineOfSight(GetWorld(), HitLocation, SamplePoint, Normal, TraceParams))
+				{
+					continue;
+				}
+			}
+
+			// 2. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura (brak wiszenia w powietrzu poza filarem)
+			FHitResult SurfaceHit;
+			if (!CheckSurfacePresenceAt(GetWorld(), SamplePoint, Normal, SurfaceHit, TraceParams))
+			{
+				continue;
+			}
+
+			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
 
 			if (FSurfaceCellData* Existing = ActiveCells.Find(Coord))
 			{
@@ -393,6 +477,19 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 		const FVector CellWorldPos = Coord.ToWorldLocation(SafeCellSize);
 		if (FVector::DistSquared(Origin, CellWorldPos) <= RadiusSq)
 		{
+			// Line of Sight: czy fala wybuchu widzi tę komórkę bez przeszkód (np. filara lub narożnika ściany)?
+			const FVector CellSurfacePos = CellWorldPos + SurfaceGridUtils::FaceDirectionToNormal(Coord.Face) * (SafeCellSize * 0.45f);
+			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(BurstCellLoS), false, Instigator);
+			FHitResult LoSHit;
+			if (GetWorld()->LineTraceSingleByChannel(LoSHit, Origin, CellSurfacePos, ECC_WorldStatic, LoSParams))
+			{
+				if (LoSHit.bBlockingHit && LoSHit.Distance < FVector::Dist(Origin, CellSurfacePos) - 15.0f)
+				{
+					// Przeszkoda zasłania tę komórkę przed falą wybuchu!
+					continue;
+				}
+			}
+
 			if (Data.Status == Status)
 			{
 				Data.ServerEndTime = FMath::Max(Data.ServerEndTime, CurrentTime + Duration);
