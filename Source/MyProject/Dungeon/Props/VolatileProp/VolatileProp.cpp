@@ -9,6 +9,9 @@
 #include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
 
 AVolatileProp::AVolatileProp()
 {
@@ -18,6 +21,11 @@ AVolatileProp::AVolatileProp()
     ZoneDuration = 8.0f;
     SurfaceSplashHeight = 25.0f;
 
+    // Fizyka i detonacja kinetyczna
+    bDetonateOnThrownImpact = true;
+    MinImpactSpeedToDetonate = 300.0f;
+    MaxSafeDropSpeed = 650.0f;
+
     // Zunifikowana konfiguracja efektu i wybuchu
     ZoneEffectConfig.AppliedStatus = EStatusEffectType::Burning;
     ZoneEffectConfig.InstantDamage = 25.0f;
@@ -26,6 +34,90 @@ AVolatileProp::AVolatileProp()
 
     bDrawDebugRadius = true;
     bHasDetonated = false;
+    bWasThrown = false;
+    bDroppedSafely = false;
+}
+
+void AVolatileProp::OnGrabbed(AActor* Grabber)
+{
+    Super::OnGrabbed(Grabber);
+    REQUIRE_AUTHORITY();
+
+    bWasThrown = false;
+    bDroppedSafely = false;
+}
+
+void AVolatileProp::OnDropped(AActor* Dropper, const FVector& LaunchVelocity)
+{
+    Super::OnDropped(Dropper, LaunchVelocity);
+    REQUIRE_AUTHORITY();
+
+    const bool bHasThrowForce = (LaunchVelocity.SizeSquared() > FMath::Square(300.0f));
+    bWasThrown = bHasThrowForce;
+    bDroppedSafely = !bHasThrowForce;
+}
+
+void AVolatileProp::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+                                     UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
+                                     const FHitResult& Hit)
+{
+    REQUIRE_AUTHORITY();
+
+    if (!MeshComponent || CarryingActor != nullptr || !OtherActor || OtherActor == this || bHasDetonated)
+    {
+        return;
+    }
+
+    // Jeśli uderzający aktor jest aktualnie trzymany przez postać - ignorujemy ocieranie w dłoniach
+    if (const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(OtherActor))
+    {
+        if (Grabbable->IsGrabbed())
+        {
+            return;
+        }
+    }
+
+    // 1. Obliczamy efektywną prędkość zderzenia (kombinacja prędkości względnych oraz impulsu fizycznego Chaos)
+    const float KineticImpactSpeed = UKineticForceLibrary::CalculateImpactSpeed(MeshComponent, OtherActor, OtherComp, Hit.ImpactNormal);
+    const float ImpulseSpeed = NormalImpulse.Size() / FMath::Max(1.0f, GetMass());
+    const float EffectiveImpactSpeed = FMath::Max(KineticImpactSpeed, ImpulseSpeed);
+
+    // 2. Obsługa pierwszego lądowania po upuszczeniu klawiszem E (bezpieczny spadek pod nogi)
+    if (bDroppedSafely)
+    {
+        bDroppedSafely = false;
+        // Jeśli upadek był z bezpiecznej wysokości pod nogi (np. < 650 cm/s), amortyzujemy uderzenie i nie detonujemy
+        if (EffectiveImpactSpeed <= MaxSafeDropSpeed)
+        {
+            Super::HandleImpactDamage(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
+            return;
+        }
+    }
+
+    // 3. Weryfikacja rzutu klawiszem R (zużywamy flagę przy pierwszym zderzeniu)
+    const bool bIsThrownImpact = bWasThrown;
+    bWasThrown = false;
+
+    // 4. Warunki natychmiastowej detonacji:
+    // a) Celowy rzut gracza (klawisz R) przy uderzeniu w ścianę/podłogę/przeszkodę/postać
+    // b) Zderzenie kinetyczne (rzucony kamień, inna detonująca/uderzająca bomba, upadek z dużej wysokości)
+    const bool bDetonateFromThrow = bIsThrownImpact && bDetonateOnThrownImpact && (EffectiveImpactSpeed >= 150.0f);
+    const bool bDetonateFromKineticHit = (EffectiveImpactSpeed >= MinImpactSpeedToDetonate);
+
+    if (bDetonateFromThrow || bDetonateFromKineticHit)
+    {
+        UE_LOG(LogDungeonElements, Log, TEXT("[VolatileProp]%s Detonation triggered by impact with %s! (Speed: %.1f cm/s | Thrown: %d, KineticHit: %d)"),
+            *NetUtils::GetNetRolePrefix(this), *GetNameSafe(OtherActor), EffectiveImpactSpeed, bDetonateFromThrow, bDetonateFromKineticHit);
+
+        if (DamageableComponent)
+        {
+            DamageableComponent->ApplyDamage(DamageableComponent->GetMaxDurability());
+        }
+        return;
+    }
+
+    // 5. Standardowe lekkie uderzenia, turlanie i ocieranie
+    Super::HandleImpactDamage(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
 }
 
 void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)

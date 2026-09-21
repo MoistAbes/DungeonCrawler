@@ -40,8 +40,15 @@ class MYPROJECT_API AVolatileProp : public AInteractivePropBase
 public:
     AVolatileProp();
 
+    virtual void OnGrabbed(AActor* Grabber) override;
+    virtual void OnDropped(AActor* Dropper, const FVector& LaunchVelocity = FVector::ZeroVector) override;
+
 protected:
     virtual void HandleOnDestroyed(AActor* DestroyedActor) override;
+
+    virtual void HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+                                   UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
+                                   const FHitResult& Hit) override;
 
     /** Lekki RPC rozsyłający do wszystkich połączonych graczy sygnał o wybuchu (FX, dźwięki, debug) */
     UFUNCTION(NetMulticast, Reliable)
@@ -49,6 +56,22 @@ protected:
 
     /** Obsługa tworzenia powłok powierzchniowych (posadzka + pobliskie pionowe ściany) */
     void SpawnSurfaceSplashes(const FVector& DetonationCenter);
+
+    // -------------------------------------------------------------------------
+    // Fizyka i Detonacja Kinetyczna
+    // -------------------------------------------------------------------------
+
+    /** Czy obiekt ma natychmiast detonować przy pierwszym zderzeniu po rzucie (klawisz R) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Kinetic")
+    bool bDetonateOnThrownImpact = true;
+
+    /** Minimalna prędkość zderzenia (cm/s) wywołująca detonację przy uderzeniu zewnętrznym (np. rzucony kamień, inna bomba, upadek z wysokości) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Kinetic", meta = (ClampMin = "50.0"))
+    float MinImpactSpeedToDetonate = 300.0f;
+
+    /** Maksymalna prędkość bezpiecznego opadania pod nogi przy upuszczeniu (klawisz E). Zapobiega wybuchowi pod nogami gracza przy lądowaniu */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Kinetic", meta = (ClampMin = "300.0"))
+    float MaxSafeDropSpeed = 650.0f;
 
     // -------------------------------------------------------------------------
     // Zasięg Efektu
@@ -88,4 +111,6 @@ protected:
 
 private:
     bool bHasDetonated = false;
+    bool bWasThrown = false;
+    bool bDroppedSafely = false;
 };
