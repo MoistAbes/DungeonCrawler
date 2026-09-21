@@ -1,4 +1,4 @@
-﻿#include "DungeonStructureBase.h"
+#include "DungeonStructureBase.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/OverlapResult.h"
@@ -9,6 +9,7 @@
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 
 ADungeonStructureBase::ADungeonStructureBase()
 {
@@ -113,11 +114,32 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 	// natychmiast zatrzymany w miejscu przez nagłą kolizję, lecz kontynuował ruch przez powstałą wyrwę.
 	// -------------------------------------------------------------------------------------------------
 
+	// 0. Czyszczenie komórek powierzchniowych w zniszczonym obszarze fundamentu
+	const FBox StructureBounds = StructureMesh ? StructureMesh->Bounds.GetBox() : GetComponentsBoundingBox(true);
+	if (UWorld* World = GetWorld())
+	{
+		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+		{
+			SurfaceSubsystem->ClearCellsInBounds(StructureBounds);
+		}
+	}
+
 	// 1. Natychmiastowe usunięcie kolizji bryły, by przepuścić obiekty w locie
 	if (StructureMesh)
 	{
 		StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		StructureMesh->SetVisibility(false);
+	}
+
+	// 1b. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych), by nie lewitowały w powietrzu
+	TArray<AActor*> AttachedActors;
+	GetAttachedActors(AttachedActors);
+	for (AActor* Attached : AttachedActors)
+	{
+		if (Attached && !Attached->IsActorBeingDestroyed())
+		{
+			Attached->Destroy();
+		}
 	}
 
 	// 2. Wykrywamy obiekty w bezpośrednim punkcie zniszczenia, by zredukować ich prędkość jedynie częściowo

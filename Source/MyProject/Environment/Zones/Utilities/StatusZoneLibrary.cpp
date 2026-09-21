@@ -15,7 +15,10 @@
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 #include "Engine/Brush.h"
+
+bool UStatusZoneLibrary::bEnableLegacySurfaceSplashZone = false;
 
 bool UStatusZoneLibrary::IsValidSurfaceTarget(const AActor* Actor)
 {
@@ -115,7 +118,25 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 	// 2. Wyliczenie pozycji i orientacji powłoki powierzchniowej
 	const FVector SurfaceNormal = HitResult.ImpactNormal.IsNearlyZero() ? FVector::UpVector : HitResult.ImpactNormal.GetSafeNormal();
 
-	// 2a. Zone Merging: Sprawdzamy, czy na tej samej powierzchni istnieje już strefa tego samego żywiołu
+	// 2a. Rejestracja w rzadkiej siatce komórek powierzchniowych UDungeonSurfaceSubsystem
+	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+	{
+		SurfaceSubsystem->PaintSurface(
+			HitResult.ImpactPoint,
+			SurfaceNormal,
+			SplashRadius,
+			EffectConfig.AppliedStatus,
+			Duration,
+			InstigatorActor);
+	}
+
+	// 2b. Jeśli stary system jest odłączony na czas testów nowej siatki komórek, pomijamy spawnowanie aktora ASurfaceSplashZone
+	if (!bEnableLegacySurfaceSplashZone)
+	{
+		return nullptr;
+	}
+
+	// 3a. Zone Merging: Sprawdzamy, czy na tej samej powierzchni istnieje już strefa tego samego żywiołu
 	if (EffectConfig.AppliedStatus != EStatusEffectType::None)
 	{
 		TArray<FOverlapResult> Overlaps;
@@ -162,7 +183,7 @@ ASurfaceSplashZone* UStatusZoneLibrary::ApplySurfaceSplash(
 		return nullptr;
 	}
 
-	// 3. Przyczepienie strefy do trafionej ściany/podłogi (AttachToComponent)
+	// 3b. Przyczepienie strefy do trafionej ściany/podłogi (AttachToComponent)
 	if (UPrimitiveComponent* HitComponent = HitResult.GetComponent())
 	{
 		Zone->AttachToComponent(HitComponent, FAttachmentTransformRules::KeepWorldTransform);
@@ -250,6 +271,12 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 	if (!World || World->GetNetMode() == NM_Client || Radius <= 0.0f)
 	{
 		return;
+	}
+
+	// Propagacja impulsu wybuchu na rzadką siatkę komórek powierzchniowych (np. podpalenie plam oleju na posadzce)
+	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+	{
+		SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
 	}
 
 	// 1. Zunifikowany pojedynczy przebieg przestrzenny (Single-Pass Query)
@@ -380,6 +407,15 @@ bool UStatusZoneLibrary::ApplyPointHit(
 	{
 		Zone->ApplyElementalHit(StatusType, 15.0f, InstigatorActor);
 		return true;
+	}
+
+	// 1b. Jeśli uderzyliśmy w powierzchnię fundamentu lochu (np. strzała ogniowa w plamę na ścianie/podłodze)
+	if (UWorld* World = TargetActor->GetWorld())
+	{
+		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+		{
+			SurfaceSubsystem->PaintSurface(HitLocation, HitNormal, 45.0f, StatusType, Duration, InstigatorActor);
+		}
 	}
 
 	// 2. Postać lub prop z komponentem statusów

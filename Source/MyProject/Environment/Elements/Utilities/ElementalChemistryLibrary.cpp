@@ -1,4 +1,4 @@
-﻿#include "ElementalChemistryLibrary.h"
+#include "ElementalChemistryLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
 
 bool UElementalChemistryLibrary::IsLiquidStatus(EStatusEffectType Status)
@@ -49,6 +49,9 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
             Result.bReactionOccurred = true;
             Result.bConsumeIncomingStatus = Rule->bConsumeIncomingStatus;
             Result.ExistingStatusToRemove = Rule->bRemoveExistingStatus ? ActiveStatus : EStatusEffectType::None;
+            Result.ResultingStatus = (Rule->ResultingStatus != EStatusEffectType::None) ? Rule->ResultingStatus : (Rule->bRemoveExistingStatus ? IncomingStatus : EStatusEffectType::None);
+            Result.bCanSpreadToNeighbor = Rule->bCanSpreadToNeighbor;
+            Result.ResultingDuration = Rule->ResultingDuration;
             Result.BonusInstantDamage = Rule->BonusInstantDamage;
             Result.ReactionTag = Rule->ReactionTag;
             return Result;
@@ -68,6 +71,9 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
                 Result.bReactionOccurred = true;
                 Result.bConsumeIncomingStatus = false; // Nowy płyn nakłada się na cel
                 Result.ExistingStatusToRemove = ActiveStatus; // Poprzedni płyn zostaje wyparty/zmyty
+                Result.ResultingStatus = IncomingStatus;
+                Result.bCanSpreadToNeighbor = false;
+                Result.ResultingDuration = 0.0f;
                 Result.BonusInstantDamage = 0.0f;
                 Result.ReactionTag = FName(TEXT("Liquid_Displaced"));
                 return Result;
@@ -76,4 +82,20 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
     }
 
     return Result;
+}
+
+bool UElementalChemistryLibrary::CanSpreadToNeighbor(
+    EStatusEffectType SourceStatus,
+    EStatusEffectType TargetStatus,
+    FElementalReactionResult& OutReactionResult)
+{
+    OutReactionResult = FElementalReactionResult();
+
+    if (SourceStatus == EStatusEffectType::None || TargetStatus == EStatusEffectType::None || SourceStatus == TargetStatus)
+    {
+        return false;
+    }
+
+    OutReactionResult = EvaluateReaction(SourceStatus, { TargetStatus });
+    return OutReactionResult.bReactionOccurred && OutReactionResult.bCanSpreadToNeighbor;
 }

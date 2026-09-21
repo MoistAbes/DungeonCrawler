@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
@@ -21,6 +21,15 @@ struct FStatusReactionRule
 
     /** Unikalny identyfikator reakcji (np. "Oil_Ignition", "Steam_Extinguish", "Conductive_Shock") */
     FName ReactionTag = NAME_None;
+
+    /** Nowy status, jaki powstaje na komórce/celu w wyniku reakcji (np. Burning gdy ogień podpala olej) */
+    EStatusEffectType ResultingStatus = EStatusEffectType::None;
+
+    /** Czy ta reakcja może propagować się przestrzennie na sąsiednie komórki w siatce powierzchniowej */
+    bool bCanSpreadToNeighbor = false;
+
+    /** Czas trwania nowego statusu powstałego w wyniku propagacji/reakcji (w sekundach) */
+    float ResultingDuration = 5.0f;
 };
 
 /**
@@ -113,7 +122,10 @@ private:
                 /* bConsumeIncomingStatus */ false,
                 /* bRemoveExistingStatus  */ true,
                 /* BonusInstantDamage     */ 25.0f,
-                /* ReactionTag            */ FName(TEXT("Oil_Ignition"))
+                /* ReactionTag            */ FName(TEXT("Oil_Ignition")),
+                /* ResultingStatus        */ EStatusEffectType::Burning,
+                /* bCanSpreadToNeighbor   */ true,
+                /* ResultingDuration      */ 6.0f
             });
 
             Definitions.Add(EStatusEffectType::Burning, Burning);
@@ -155,7 +167,10 @@ private:
                 /* bConsumeIncomingStatus */ true,
                 /* bRemoveExistingStatus  */ false,
                 /* BonusInstantDamage     */ 25.0f,
-                /* ReactionTag            */ FName(TEXT("Oil_Ignition"))
+                /* ReactionTag            */ FName(TEXT("Oil_Ignition")),
+                /* ResultingStatus        */ EStatusEffectType::Burning,
+                /* bCanSpreadToNeighbor   */ true,
+                /* ResultingDuration      */ 6.0f
             });
 
             Definitions.Add(EStatusEffectType::Oiled, Oiled);

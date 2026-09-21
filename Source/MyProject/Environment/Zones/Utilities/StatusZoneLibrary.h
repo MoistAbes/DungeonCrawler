@@ -46,6 +46,15 @@ public:
 		float Duration,
 		AActor* InstigatorActor = nullptr);
 
+	/** Flaga przejściowa: włącza/wyłącza stary aktor ASurfaceSplashZone na czas testów nowej siatki komórek */
+	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Debug")
+	static void SetEnableLegacySurfaceSplashZone(bool bEnable) { bEnableLegacySurfaceSplashZone = bEnable; }
+
+	UFUNCTION(BlueprintPure, Category = "Environment|Zones|Debug")
+	static bool IsLegacySurfaceSplashZoneEnabled() { return bEnableLegacySurfaceSplashZone; }
+
+	static bool bEnableLegacySurfaceSplashZone;
+
 	/**
 	 * 2. VOLUMETRIC ZONE (Przestrzenna strefa 3D)
 	 * Tworzy pełną bryłę sferyczną AVolumetricStatusZone zawieszoną w powietrzu na określony czas (np. trujący gaz, dym, strefa uciszenia magii).

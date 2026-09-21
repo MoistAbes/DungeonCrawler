@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -26,6 +26,18 @@ struct FElementalReactionResult
     /** Typ istniejącego statusu, który został zużyty/usunięty przez reakcję (None jeśli żaden) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ElementalChemistry")
     EStatusEffectType ExistingStatusToRemove = EStatusEffectType::None;
+
+    /** Nowy status, jaki powstaje na komórce/celu w wyniku reakcji (None jeśli brak zmiany lub usunięcie) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ElementalChemistry")
+    EStatusEffectType ResultingStatus = EStatusEffectType::None;
+
+    /** Czy ta reakcja może rozprzestrzeniać się na sąsiednie komórki w siatce powierzchniowej */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ElementalChemistry")
+    bool bCanSpreadToNeighbor = false;
+
+    /** Czas trwania nowego statusu powstałego w wyniku propagacji/reakcji */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ElementalChemistry")
+    float ResultingDuration = 0.0f;
 
     /** Natychmiastowe obrażenia bonusowe wywołane reakcją (np. wybuch oleju, szok elektryczny) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "ElementalChemistry")
@@ -73,4 +85,15 @@ public:
     static FElementalReactionResult EvaluateReaction(
         EStatusEffectType IncomingStatus, 
         const TArray<EStatusEffectType>& ActiveStatuses);
+
+    /**
+     * Sprawdza, czy żywioł ze źródłowej komórki może rozprzestrzenić się na sąsiednią komórkę
+     * o zadanym statusie i zwraca wynik reakcji.
+     * Zapewnia całkowitą niezależność podsystemu powierzchni od twardych reguł żywiołów.
+     */
+    UFUNCTION(BlueprintPure, Category = "Environment|Elements|Chemistry")
+    static bool CanSpreadToNeighbor(
+        EStatusEffectType SourceStatus,
+        EStatusEffectType TargetStatus,
+        FElementalReactionResult& OutReactionResult);
 };

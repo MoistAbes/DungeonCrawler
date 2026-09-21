@@ -231,10 +231,10 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
                 ZoneDuration,
                 this);
 
+            SpawnedSurfaces.Add(FloorHit);
             if (FloorZone)
             {
                 TraceParams.AddIgnoredActor(FloorZone);
-                SpawnedSurfaces.Add(FloorHit);
             }
         }
     }
@@ -341,10 +341,10 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
                 ZoneDuration,
                 this);
 
+            SpawnedSurfaces.Add(SurfaceHit);
             if (SurfaceZone)
             {
                 TraceParams.AddIgnoredActor(SurfaceZone);
-                SpawnedSurfaces.Add(SurfaceHit);
             }
         }
     }
