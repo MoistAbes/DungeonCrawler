@@ -110,7 +110,7 @@ protected:
 	float ZoneCreationTime = 0.0f;
 
 	UPROPERTY(Replicated)
-	EZoneShapeType ShapeType = EZoneShapeType::SurfaceSplash;
+	EZoneShapeType ShapeType = EZoneShapeType::VolumetricSphere;
 
 	UFUNCTION()
 	virtual void OnRep_EffectConfig();

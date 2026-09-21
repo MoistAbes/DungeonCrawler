@@ -8,7 +8,10 @@
 
 #include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
-#include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
+#include "MyProject/Environment/Zones/StatusZoneBase.h"
+#include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "Engine/Brush.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 
 namespace
@@ -31,7 +34,7 @@ namespace
 
 		if (World->LineTraceSingleByChannel(OutHit, ProbeStart, ProbeEnd, ECC_WorldStatic, Params))
 		{
-			if (OutHit.GetActor() && UStatusZoneLibrary::IsValidSurfaceTarget(OutHit.GetActor()))
+			if (OutHit.GetActor() && UDungeonSurfaceSubsystem::IsValidSurfaceTarget(OutHit.GetActor()))
 			{
 				const float NormalDot = FVector::DotProduct(OutHit.ImpactNormal, SurfaceNormal);
 				if (NormalDot > 0.65f)
@@ -127,6 +130,111 @@ void UDungeonSurfaceSubsystem::Deinitialize()
 
 	ActiveCells.Empty();
 	Super::Deinitialize();
+}
+
+bool UDungeonSurfaceSubsystem::IsValidSurfaceTarget(const AActor* Actor)
+{
+	if (!Actor)
+	{
+		return false;
+	}
+
+	// 1. Wykluczamy postacie oraz dynamiczne/interaktywne rekwizyty lochu (beczki, skrzynie)
+	if (Actor->IsA<APawn>() || Actor->IsA<AInteractivePropBase>())
+	{
+		return false;
+	}
+
+	// 2. Akceptujemy oficjalne fundamenty i architekturę lochu (ściany, podłogi, sufity)
+	if (Actor->IsA<ADungeonStructureBase>())
+	{
+		return true;
+	}
+
+	// 3. Akceptujemy geometrię poziomu (BSP Brushes map testowych i prototypowych)
+	if (Actor->IsA<ABrush>())
+	{
+		return true;
+	}
+
+	return false;
+}
+
+int32 UDungeonSurfaceSubsystem::PaintSurfaceFromHit(
+	const FHitResult& HitResult,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	AActor* Instigator)
+{
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Client || !HitResult.bBlockingHit)
+	{
+		return 0;
+	}
+
+	AActor* HitActor = HitResult.GetActor();
+
+	// 1. Jeśli uderzono bezpośrednio w postać lub rekwizyt
+	if (HitActor)
+	{
+		// Trafienie w istniejącą strefę przestrzenną (np. gaz, dym)
+		if (AStatusZoneBase* ExistingZone = Cast<AStatusZoneBase>(HitActor))
+		{
+			ExistingZone->ApplyElementalHit(Status, 0.0f, Instigator);
+			return 0;
+		}
+
+		if (Status != EStatusEffectType::None)
+		{
+			if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
+			{
+				StatusComp->ApplyStatus(Status, Duration, Instigator);
+			}
+		}
+
+		// Jeśli trafiliśmy w postać lub rekwizyt, szukamy posadzki pod nim, aby rozlać ciecz pod stopami
+		if (HitActor->IsA<APawn>() || HitActor->IsA<AInteractivePropBase>())
+		{
+			const FVector ActorLocation = HitActor->GetActorLocation();
+			FHitResult FloorHit;
+			FCollisionQueryParams FloorTraceParams(SCENE_QUERY_STAT(SurfaceGridFloorTrace), false, HitActor);
+			FloorTraceParams.AddIgnoredActor(HitActor);
+			if (Instigator)
+			{
+				FloorTraceParams.AddIgnoredActor(Instigator);
+			}
+
+			const FVector TraceStart = ActorLocation;
+			const FVector TraceEnd = ActorLocation - FVector(0.0f, 0.0f, 300.0f);
+
+			if (World->LineTraceSingleByChannel(FloorHit, TraceStart, TraceEnd, ECC_WorldStatic, FloorTraceParams))
+			{
+				return PaintSurfaceFromHit(FloorHit, Radius, Status, Duration, Instigator);
+			}
+			else
+			{
+				return 0;
+			}
+		}
+	}
+
+	// Strefa powierzchniowa może powstać WYŁĄCZNIE na fundamentach lochu lub geometrii poziomu
+	if (!IsValidSurfaceTarget(HitActor))
+	{
+		return 0;
+	}
+
+	// 2. Wyliczenie orientacji powłoki powierzchniowej i namalowanie komórek
+	const FVector SurfaceNormal = HitResult.ImpactNormal.IsNearlyZero() ? FVector::UpVector : HitResult.ImpactNormal.GetSafeNormal();
+
+	return PaintSurface(
+		HitResult.ImpactPoint,
+		SurfaceNormal,
+		Radius,
+		Status,
+		Duration,
+		Instigator);
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurface(

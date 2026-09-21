@@ -7,6 +7,7 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
@@ -17,9 +18,8 @@ AVolatileProp::AVolatileProp()
 {
     // Konfiguracja domyślna
     EffectRadius = 600.0f;
-    ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceSplash;
+    ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceGrid;
     ZoneDuration = 8.0f;
-    SurfaceSplashHeight = 25.0f;
 
     // Fizyka i detonacja kinetyczna
     bDetonateOnThrownImpact = true;
@@ -158,10 +158,10 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
         }
         break;
 
-    case EVolatileZoneSpawnMode::SurfaceSplash:
+    case EVolatileZoneSpawnMode::SurfaceGrid:
         {
-            // Tryb 2: Powłoka powierzchniowa (posadzka + pobliskie pionowe ściany)
-            SpawnSurfaceSplashes(DetonationCenter);
+            // Tryb 2: Powłoka powierzchniowa (posadzka + pobliskie pionowe ściany w siatce)
+            CoatSurfaces(DetonationCenter);
         }
         break;
 
@@ -202,9 +202,16 @@ void AVolatileProp::Multicast_PlayExplosionEffects_Implementation(const FVector&
     // Tutaj wpięte zostaną UNiagaraFunctionLibrary::SpawnSystemAtLocation oraz UGameplayStatics::PlaySoundAtLocation
 }
 
-void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
+void AVolatileProp::CoatSurfaces(const FVector& DetonationCenter)
 {
-    if (!GetWorld())
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+
+    UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>();
+    if (!SurfaceSubsystem)
     {
         return;
     }
@@ -214,28 +221,22 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
 
     TArray<FHitResult> SpawnedSurfaces;
 
-    // 1. Główny splash na posadzce (grawitacyjny opad cieczy)
+    // 1. Główna powłoka na posadzce (grawitacyjny opad cieczy)
     const float FloorTraceDist = FMath::Max(500.0f, EffectRadius + 100.0f);
     FHitResult FloorHit;
-    if (GetWorld()->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, FloorTraceDist), ECC_Visibility, TraceParams))
+    if (World->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, FloorTraceDist), ECC_Visibility, TraceParams))
     {
         AActor* HitActor = FloorHit.GetActor();
         if (HitActor)
         {
-            ASurfaceSplashZone* FloorZone = UStatusZoneLibrary::ApplySurfaceSplash(
-                this,
+            SurfaceSubsystem->PaintSurfaceFromHit(
                 FloorHit,
                 EffectRadius,
-                SurfaceSplashHeight,
-                ZoneEffectConfig,
+                ZoneEffectConfig.AppliedStatus,
                 ZoneDuration,
                 this);
 
             SpawnedSurfaces.Add(FloorHit);
-            if (FloorZone)
-            {
-                TraceParams.AddIgnoredActor(FloorZone);
-            }
         }
     }
 
@@ -287,7 +288,7 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
 
             // Jeśli promień trafił w postać lub interaktywny rekwizyt:
             // Obiekt fizycznie blokuje strugę cieczy przed dotarciem do ściany, więc ZAWSZE otrzymuje status!
-            if (!UStatusZoneLibrary::IsValidSurfaceTarget(HitActor))
+            if (!UDungeonSurfaceSubsystem::IsValidSurfaceTarget(HitActor))
             {
                 if (ZoneEffectConfig.AppliedStatus != EStatusEffectType::None)
                 {
@@ -327,25 +328,19 @@ void AVolatileProp::SpawnSurfaceSplashes(const FVector& DetonationCenter)
                 continue;
             }
 
-            // Promień rozbryzgu naściennego (bryzgi cieczy na przeszkodach są wtórne względem kałuży na posadzce)
+            // Promień powłoki naściennej (pokrycie cieczą na przeszkodach)
             const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, EffectRadius);
             const float BaseRadius = FMath::Sqrt(FMath::Max(0.0f, FMath::Square(EffectRadius) - FMath::Square(DistToSurface)));
-            const float SplashRadius = FMath::Clamp(BaseRadius * 0.45f, 60.0f, 220.0f);
+            const float CoatRadius = FMath::Clamp(BaseRadius * 0.45f, 60.0f, 220.0f);
 
-            ASurfaceSplashZone* SurfaceZone = UStatusZoneLibrary::ApplySurfaceSplash(
-                this,
+            SurfaceSubsystem->PaintSurfaceFromHit(
                 SurfaceHit,
-                SplashRadius,
-                SurfaceSplashHeight,
-                ZoneEffectConfig,
+                CoatRadius,
+                ZoneEffectConfig.AppliedStatus,
                 ZoneDuration,
                 this);
 
             SpawnedSurfaces.Add(SurfaceHit);
-            if (SurfaceZone)
-            {
-                TraceParams.AddIgnoredActor(SurfaceZone);
-            }
         }
     }
 }

@@ -54,6 +54,30 @@ public:
 	// -------------------------------------------------------------------------
 
 	/**
+	 * Kwalifikuje, czy dany aktor może być podłożem pod komórki powierzchniowe.
+	 * Akceptuje fundamenty lochu (ADungeonStructureBase) oraz geometrię poziomu (ABrush).
+	 * Odrzuca dynamiczne rekwizyty (AInteractivePropBase) oraz postacie (APawn).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
+	static bool IsValidSurfaceTarget(const AActor* Actor);
+
+	/**
+	 * Rozwiązuje uderzenie żywiołem w świecie (Hit Resolver):
+	 * - Trafienie w postać/rekwizyt: nakłada status na cel i szuka podłogi pod jego stopami (FloorTrace), malując podłoże.
+	 * - Trafienie w strefę przestrzenną (np. chmurę): przekazuje trafienie żywiołowe strefie.
+	 * - Trafienie w ścianę/podłogę: weryfikuje podłoże i wywołuje PaintSurface.
+	 * 
+	 * @return Liczba pomalowanych komórek powierzchniowych.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	int32 PaintSurfaceFromHit(
+		const FHitResult& HitResult,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator = nullptr);
+
+	/**
 	 * Maluje strefę żywiołu na powierzchniach wokół punktu uderzenia.
 	 * Wyznacza komórki w promieniu Radius, uwzględnia orientację ściany/podłogi
 	 * i przeprowadza ewaluację reakcji chemicznych z istniejącymi na nich statusami.

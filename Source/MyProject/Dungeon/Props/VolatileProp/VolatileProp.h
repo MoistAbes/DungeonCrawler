@@ -16,8 +16,8 @@ enum class EVolatileZoneSpawnMode : uint8
     /** 1. Chwilowy wybuch / impuls LoS w klatce t0 bez tworzenia trwałego aktora strefy (granaty, bomby kinetyczne) */
     InstantBurstOnly     UMETA(DisplayName = "Instant Burst Only (One-Hit Explosion)"),
 
-    /** 2. Płaska powłoka 10-30 cm na ścianie/podłodze podpięta pod obiekt (rozlany olej/woda, kwas) */
-    SurfaceSplash        UMETA(DisplayName = "Surface Splash (10-30cm Coat)"),
+    /** 2. Rozlanie cieczy na powierzchniach (posadzka, ściany) w siatce UDungeonSurfaceSubsystem */
+    SurfaceGrid          UMETA(DisplayName = "Surface Grid (Floor & Wall Coating)"),
 
     /** 3. Przestrzenna strefa 3D wisząca w powietrzu przez czas T (chmura trującego gazu, dym, mgła) */
     VolumetricZone       UMETA(DisplayName = "Volumetric Zone (3D Area)")
@@ -27,7 +27,7 @@ enum class EVolatileZoneSpawnMode : uint8
  * Uniwersalny niestabilny rekwizyt lochu (beczka, mina, bomba, baniak, kryształ, butla).
  * Po zniszczeniu (spadek HP do 0 / silne zderzenie) detonuje lub uwalnia energię w wybranym trybie strefy:
  * - Instant Burst Only: jednorazowy wybuch z LoS, obrażenia i odrzut w klatce t0
- * - Surface Splash: cienka powłoka na ścianie/podłodze przyczepiona do geometrii
+ * - Surface Grid: powłoka cieczy na powierzchniach (siatka komórek)
  * - Volumetric Zone: przestrzenna bryła 3D w powietrzu
  * Logika i obrażenia: Server-Authoritative.
  * Efekty wizualne i dźwiękowe: Zdarzeniowy NetMulticast.
@@ -54,8 +54,8 @@ protected:
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_PlayExplosionEffects(const FVector& DetonationCenter);
 
-    /** Obsługa tworzenia powłok powierzchniowych (posadzka + pobliskie pionowe ściany) */
-    void SpawnSurfaceSplashes(const FVector& DetonationCenter);
+    /** Obsługa tworzenia powłok powierzchniowych w siatce lochu (posadzka + pobliskie pionowe ściany) */
+    void CoatSurfaces(const FVector& DetonationCenter);
 
     // -------------------------------------------------------------------------
     // Fizyka i Detonacja Kinetyczna
@@ -85,21 +85,17 @@ protected:
     // Tryb Strefy (1 jednoznaczna forma na Blueprint pod czyste testy)
     // -------------------------------------------------------------------------
 
-    /** Wybór formy efektu: chwilowy wybuch (Instant Burst), powłoka na ścianie/podłodze (Surface Splash) czy chmura 3D (Volumetric Area) */
+    /** Wybór formy efektu: chwilowy wybuch (Instant Burst), powłoka na powierzchniach (Surface Grid) czy chmura 3D (Volumetric Area) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
-    EVolatileZoneSpawnMode ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceSplash;
+    EVolatileZoneSpawnMode ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceGrid;
 
     /** Zunifikowana konfiguracja efektu (InstantDamage, KnockbackForce, AppliedStatus, DoT) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
     FZoneEffectConfig ZoneEffectConfig;
 
-    /** Czas trwania trwałej strefy w sekundach (dla Surface Splash oraz Volumetric Zone) */
+    /** Czas trwania trwałej strefy w sekundach (dla Surface Grid oraz Volumetric Zone) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone", meta = (ClampMin = "0.5"))
     float ZoneDuration = 8.0f;
-
-    /** Grubość powłoki przy ścianie/podłodze w cm (używane tylko w trybie Surface Splash, domyślnie 25 cm) */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone", meta = (ClampMin = "10.0", ClampMax = "100.0"))
-    float SurfaceSplashHeight = 25.0f;
 
     // -------------------------------------------------------------------------
     // Debug & Wizualizacja

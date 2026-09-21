@@ -22,7 +22,7 @@ AStatusZoneBase::AStatusZoneBase()
 	NetDormancy = DORM_DormantAll;
 
 	Radius = 300.0f;
-	ShapeType = EZoneShapeType::SurfaceSplash;
+	ShapeType = EZoneShapeType::VolumetricSphere;
 	ZoneCreationTime = 0.0f;
 	bDrawDebugZone = true;
 
@@ -241,17 +241,12 @@ bool AStatusZoneBase::IsActorEligibleForZoneEffect(AActor* TargetActor, UPrimiti
 		return false;
 	}
 
-	// 2. Weryfikacja geometryczna Line of Sight
-	// Dla stref przestrzennych 3D (chmury gazu, dym) sprawdzamy widoczność do środka sfery.
-	// Dla stref powierzchniowych (Surface Splash) obrys wielokąta z 48 promieniami już w pełni uwzględnił architekturę i przeszkody.
-	if (ShapeType != EZoneShapeType::SurfaceSplash)
+	// 2. Weryfikacja geometryczna Line of Sight dla stref przestrzennych 3D
+	FHitResult LoSHit;
+	const AActor* IgnoredActor = ZoneInstigator.IsValid() ? ZoneInstigator.Get() : this;
+	if (!UKineticForceLibrary::HasExplosionLineOfSight(GetWorld(), ZoneCenter, TargetActor, TargetComp, LoSHit, IgnoredActor))
 	{
-		FHitResult LoSHit;
-		const AActor* IgnoredActor = ZoneInstigator.IsValid() ? ZoneInstigator.Get() : this;
-		if (!UKineticForceLibrary::HasExplosionLineOfSight(GetWorld(), ZoneCenter, TargetActor, TargetComp, LoSHit, IgnoredActor))
-		{
-			return false;
-		}
+		return false;
 	}
 
 	// 3. Rozwiązywanie konfliktów nakładających się płynów

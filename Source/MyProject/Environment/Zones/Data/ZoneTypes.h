@@ -10,9 +10,6 @@
 UENUM(BlueprintType)
 enum class EZoneShapeType : uint8
 {
-	/** Cienka powłoka powierzchniowa (10-30 cm) przylegająca do geometrii ściany, podłogi lub mechanizmu */
-	SurfaceSplash UMETA(DisplayName = "Surface Splash"),
-
 	/** Przestrzenna, pełna bryła sferyczna w powietrzu (chmury, gazy, mgła, silence) */
 	VolumetricSphere UMETA(DisplayName = "Volumetric Sphere")
 };
