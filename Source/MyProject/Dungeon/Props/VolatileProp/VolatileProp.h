@@ -13,11 +13,11 @@
 UENUM(BlueprintType)
 enum class EVolatileZoneSpawnMode : uint8
 {
-    /** 1. Chwilowy wybuch / impuls LoS w klatce t0 bez tworzenia trwałego aktora strefy (granaty, bomby kinetyczne) */
-    InstantBurstOnly     UMETA(DisplayName = "Instant Burst Only (One-Hit Explosion)"),
+    /** 1. Pełny trójwymiarowy wybuch radialny (obrażenia, odrzut, obryzganie widocznych ścian i podłogi w promieniu) */
+    RadialBurst          UMETA(DisplayName = "Radial Burst (3D Explosion & Splash)"),
 
-    /** 2. Rozlanie cieczy na powierzchniach (posadzka, ściany) w siatce UDungeonSurfaceSubsystem */
-    SurfaceGrid          UMETA(DisplayName = "Surface Grid (Floor & Wall Coating)"),
+    /** 2. Uderzenie punktowe w pojedynczą powierzchnię (np. rzucona butelka, ampułka, koktajl, bełt) */
+    PointImpact          UMETA(DisplayName = "Point Impact (Single Surface Hit)"),
 
     /** 3. Przestrzenna strefa 3D wisząca w powietrzu przez czas T (chmura trującego gazu, dym, mgła) */
     VolumetricZone       UMETA(DisplayName = "Volumetric Zone (3D Area)")
@@ -26,9 +26,9 @@ enum class EVolatileZoneSpawnMode : uint8
 /**
  * Uniwersalny niestabilny rekwizyt lochu (beczka, mina, bomba, baniak, kryształ, butla).
  * Po zniszczeniu (spadek HP do 0 / silne zderzenie) detonuje lub uwalnia energię w wybranym trybie strefy:
- * - Instant Burst Only: jednorazowy wybuch z LoS, obrażenia i odrzut w klatce t0
- * - Surface Grid: powłoka cieczy na powierzchniach (siatka komórek)
- * - Volumetric Zone: przestrzenna bryła 3D w powietrzu
+ * - Radial Burst: pełny wybuch 3D z LoS, obrażenia, odrzut i powłoka na posadzce/ścianach/suficie
+ * - Point Impact: uderzenie punktowe w trafioną powierzchnię (np. rzucana butelka, ampułka)
+ * - Volumetric Zone: przestrzenna bryła 3D w powietrzu (gaz, dym)
  * Logika i obrażenia: Server-Authoritative.
  * Efekty wizualne i dźwiękowe: Zdarzeniowy NetMulticast.
  */
@@ -53,9 +53,6 @@ protected:
     /** Lekki RPC rozsyłający do wszystkich połączonych graczy sygnał o wybuchu (FX, dźwięki, debug) */
     UFUNCTION(NetMulticast, Reliable)
     void Multicast_PlayExplosionEffects(const FVector& DetonationCenter);
-
-    /** Obsługa tworzenia powłok powierzchniowych w siatce lochu (posadzka + pobliskie pionowe ściany) */
-    void CoatSurfaces(const FVector& DetonationCenter);
 
     // -------------------------------------------------------------------------
     // Fizyka i Detonacja Kinetyczna
@@ -85,9 +82,9 @@ protected:
     // Tryb Strefy (1 jednoznaczna forma na Blueprint pod czyste testy)
     // -------------------------------------------------------------------------
 
-    /** Wybór formy efektu: chwilowy wybuch (Instant Burst), powłoka na powierzchniach (Surface Grid) czy chmura 3D (Volumetric Area) */
+    /** Wybór formy efektu: wybuch radialny 3D (Radial Burst), uderzenie punktowe (Point Impact) czy chmura 3D (Volumetric Area) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
-    EVolatileZoneSpawnMode ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceGrid;
+    EVolatileZoneSpawnMode ZoneSpawnMode = EVolatileZoneSpawnMode::RadialBurst;
 
     /** Zunifikowana konfiguracja efektu (InstantDamage, KnockbackForce, AppliedStatus, DoT) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Volatile|Zone")
@@ -109,4 +106,7 @@ private:
     bool bHasDetonated = false;
     bool bWasThrown = false;
     bool bDroppedSafely = false;
+
+    /** Zapamiętany punkt uderzenia kinetycznego wywołującego detonację (dla PointImpact) */
+    FHitResult LastImpactHit;
 };

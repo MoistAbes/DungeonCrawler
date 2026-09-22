@@ -52,6 +52,8 @@
 
 \* Do not introduce abstractions without a concrete architectural or gameplay need.
 
+* Never implement workaround code or temporary fallbacks solely to avoid restarting the Unreal Editor. Restarting the editor takes seconds; temporary crutches introduce dead code, mask real bugs, and pollute the codebase.
+
 
 
 \---

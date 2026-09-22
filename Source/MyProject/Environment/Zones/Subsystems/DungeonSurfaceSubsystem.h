@@ -94,8 +94,22 @@ public:
 		AActor* Instigator = nullptr);
 
 	/**
-	 * Wewnętrzna wersja metody PaintSurface z możliwością wykluczenia wybranych koordynatów
-	 * (np. komórek, które przed chwilą wygasły w wyniku reakcji wybuchu).
+	 * JEDYNY ATOMOWY PUNKT STYKU (Single Point of Truth) dla stanu komórki w siatce.
+	 * Przyjmuje status z dowolnego źródła (wybuch, plama, pocisk, postać, propagacja),
+	 * odpytuje bibliotekę UElementalChemistryLibrary, aplikuje wynik reakcji i zarządza ActiveCells.
+	 *
+	 * @return true jeśli komórka została zmodyfikowana (dodana, odświeżona, przereagowana lub usunięta).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	bool ApplyStatusToCell(
+		const FSurfaceCellCoord& Coord,
+		EStatusEffectType IncomingStatus,
+		float Duration,
+		AActor* Instigator = nullptr);
+
+	/**
+	 * Wewnętrzna wersja metody PaintSurface z możliwością przekazania zbioru przetworzonych koordynatów
+	 * w ramach jednego złożonego zdarzenia (np. wybuchu 3D) dla uniknięcia wielokrotnego przetwarzania kafelka.
 	 */
 	int32 PaintSurfaceInternal(
 		const FVector& HitLocation,
@@ -104,7 +118,7 @@ public:
 		EStatusEffectType Status,
 		float Duration,
 		AActor* Instigator = nullptr,
-		const TSet<FSurfaceCellCoord>* ExcludedCoords = nullptr);
+		TSet<FSurfaceCellCoord>* ProcessedCoords = nullptr);
 
 	/**
 	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.

@@ -18,7 +18,7 @@ AVolatileProp::AVolatileProp()
 {
     // Konfiguracja domyślna
     EffectRadius = 600.0f;
-    ZoneSpawnMode = EVolatileZoneSpawnMode::SurfaceGrid;
+    ZoneSpawnMode = EVolatileZoneSpawnMode::RadialBurst;
     ZoneDuration = 8.0f;
 
     // Fizyka i detonacja kinetyczna
@@ -106,6 +106,7 @@ void AVolatileProp::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor
 
     if (bDetonateFromThrow || bDetonateFromKineticHit)
     {
+        LastImpactHit = Hit;
         UE_LOG(LogDungeonElements, Log, TEXT("[VolatileProp]%s Detonation triggered by impact with %s! (Speed: %.1f cm/s | Thrown: %d, KineticHit: %d)"),
             *NetUtils::GetNetRolePrefix(this), *GetNameSafe(OtherActor), EffectiveImpactSpeed, bDetonateFromThrow, bDetonateFromKineticHit);
 
@@ -145,10 +146,10 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     // 2. Wykonanie dokładnie jednego wybranego trybu strefy (czyste testowanie pojedynczych form)
     switch (ZoneSpawnMode)
     {
-    case EVolatileZoneSpawnMode::InstantBurstOnly:
+    case EVolatileZoneSpawnMode::RadialBurst:
         {
-            // Tryb 1: Jednorazowy wybuch z LoS w klatce t0 (brak trwałego aktora)
-            UStatusZoneLibrary::ApplyInstantBurst(
+            // Tryb 1: Wszechkierunkowy wybuch 3D z LoS (obrażenia, odrzut, obryzganie ścian/podłóg w siatce)
+            UStatusZoneLibrary::ApplyRadialBurst(
                 this,
                 DetonationCenter,
                 EffectRadius,
@@ -158,10 +159,30 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
         }
         break;
 
-    case EVolatileZoneSpawnMode::SurfaceGrid:
+    case EVolatileZoneSpawnMode::PointImpact:
         {
-            // Tryb 2: Powłoka powierzchniowa (posadzka + pobliskie pionowe ściany w siatce)
-            CoatSurfaces(DetonationCenter);
+            // Tryb 2: Uderzenie punktowe w pojedynczą powierzchnię (np. rzucona butelka, ampułka, koktajl)
+            FHitResult HitToUse = LastImpactHit;
+            if (!HitToUse.bBlockingHit && GetWorld())
+            {
+                FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(VolatilePropPointTrace), false, this);
+                TraceParams.AddIgnoredActor(this);
+                GetWorld()->LineTraceSingleByChannel(
+                    HitToUse,
+                    DetonationCenter,
+                    DetonationCenter - FVector(0.0f, 0.0f, EffectRadius + 100.0f),
+                    ECC_Visibility,
+                    TraceParams);
+            }
+
+            UStatusZoneLibrary::ApplyPointImpact(
+                this,
+                HitToUse,
+                EffectRadius,
+                ZoneEffectConfig.AppliedStatus,
+                ZoneDuration,
+                ZoneEffectConfig.InstantDamage,
+                this);
         }
         break;
 
@@ -178,7 +199,11 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
         }
         break;
 
+
+
     default:
+        UE_LOG(LogDungeonElements, Error, TEXT("[VolatileProp]%s Unhandled or invalid ZoneSpawnMode (%d) on %s! Detonation aborted."),
+            *NetUtils::GetNetRolePrefix(this), static_cast<int32>(ZoneSpawnMode), *GetName());
         break;
     }
 
@@ -200,147 +225,4 @@ void AVolatileProp::Multicast_PlayExplosionEffects_Implementation(const FVector&
     }
 
     // Tutaj wpięte zostaną UNiagaraFunctionLibrary::SpawnSystemAtLocation oraz UGameplayStatics::PlaySoundAtLocation
-}
-
-void AVolatileProp::CoatSurfaces(const FVector& DetonationCenter)
-{
-    UWorld* World = GetWorld();
-    if (!World)
-    {
-        return;
-    }
-
-    UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>();
-    if (!SurfaceSubsystem)
-    {
-        return;
-    }
-
-    FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(VolatilePropSurfaceTrace), false, this);
-    TraceParams.AddIgnoredActor(this);
-
-    TArray<FHitResult> SpawnedSurfaces;
-
-    // 1. Główna powłoka na posadzce (grawitacyjny opad cieczy)
-    const float FloorTraceDist = FMath::Max(500.0f, EffectRadius + 100.0f);
-    FHitResult FloorHit;
-    if (World->LineTraceSingleByChannel(FloorHit, DetonationCenter, DetonationCenter - FVector(0.0f, 0.0f, FloorTraceDist), ECC_Visibility, TraceParams))
-    {
-        AActor* HitActor = FloorHit.GetActor();
-        if (HitActor)
-        {
-            SurfaceSubsystem->PaintSurfaceFromHit(
-                FloorHit,
-                EffectRadius,
-                ZoneEffectConfig.AppliedStatus,
-                ZoneDuration,
-                this);
-
-            SpawnedSurfaces.Add(FloorHit);
-        }
-    }
-
-    // 2. Wszechkierunkowe skanowanie 3D (sufit, pionowe ściany, skośne rampy 30-45°, zadaszenia)
-    TArray<FVector> ScanDirections;
-    ScanDirections.Reserve(18);
-
-    // 2a. Pionowo w górę (sufit lochu)
-    ScanDirections.Add(FVector(0.0f, 0.0f, 1.0f));
-
-    // 2b. 8 kierunków horyzontalnych (pionowe ściany)
-    constexpr int32 NumHorizontal = 8;
-    for (int32 i = 0; i < NumHorizontal; ++i)
-    {
-        const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * (360.0f / static_cast<float>(NumHorizontal)));
-        ScanDirections.Add(FVector(FMath::Cos(AngleRad), FMath::Sin(AngleRad), 0.0f));
-    }
-
-    // 2c. 4 kierunki skośne w dół (Pitch -35 deg) - wykrywanie ramp 30-45° i spadków terenu wokół beczki
-    constexpr float PitchDown = -0.5736f;     // sin(-35 deg)
-    constexpr float HorizScaleDown = 0.8192f; // cos(-35 deg)
-    for (int32 i = 0; i < 4; ++i)
-    {
-        const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * 90.0f + 22.5f);
-        ScanDirections.Add(FVector(FMath::Cos(AngleRad) * HorizScaleDown, FMath::Sin(AngleRad) * HorizScaleDown, PitchDown));
-    }
-
-    // 2d. 4 kierunki skośne w górę (Pitch +35 deg) - sklepienia łukowe i zadaszenia
-    constexpr float PitchUp = 0.5736f;       // sin(35 deg)
-    constexpr float HorizScaleUp = 0.8192f;  // cos(35 deg)
-    for (int32 i = 0; i < 4; ++i)
-    {
-        const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * 90.0f + 22.5f);
-        ScanDirections.Add(FVector(FMath::Cos(AngleRad) * HorizScaleUp, FMath::Sin(AngleRad) * HorizScaleUp, PitchUp));
-    }
-
-    for (const FVector& RayDir : ScanDirections)
-    {
-        const FVector TraceEnd = DetonationCenter + RayDir * EffectRadius;
-
-        FHitResult SurfaceHit;
-        if (GetWorld()->LineTraceSingleByChannel(SurfaceHit, DetonationCenter, TraceEnd, ECC_Visibility, TraceParams))
-        {
-            AActor* HitActor = SurfaceHit.GetActor();
-            if (!HitActor)
-            {
-                continue;
-            }
-
-            // Jeśli promień trafił w postać lub interaktywny rekwizyt:
-            // Obiekt fizycznie blokuje strugę cieczy przed dotarciem do ściany, więc ZAWSZE otrzymuje status!
-            if (!UDungeonSurfaceSubsystem::IsValidSurfaceTarget(HitActor))
-            {
-                if (ZoneEffectConfig.AppliedStatus != EStatusEffectType::None)
-                {
-                    if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
-                    {
-                        StatusComp->ApplyStatus(ZoneEffectConfig.AppliedStatus, ZoneDuration, this);
-                    }
-                }
-                continue; // Ciecz została zatrzymana na obiekcie i nie leci na ścianę za nim
-            }
-
-            // Ograniczenie liczby wtórnych stref na ścianach/suficie (1 podłogowa + max 3 naścienne)
-            constexpr int32 MaxTotalSplashes = 4;
-            if (SpawnedSurfaces.Num() >= MaxTotalSplashes)
-            {
-                break;
-            }
-
-            // Deduplikacja: sprawdzamy, czy ten punkt nie leży na tej samej płaszczyźnie co już utworzona strefa
-            bool bAlreadySplashed = false;
-            for (const FHitResult& ExistingHit : SpawnedSurfaces)
-            {
-                const float NormalDot = FVector::DotProduct(SurfaceHit.ImpactNormal, ExistingHit.ImpactNormal);
-                const float PlaneDist = FMath::Abs(FVector::DotProduct(SurfaceHit.ImpactPoint - ExistingHit.ImpactPoint, ExistingHit.ImpactNormal));
-                const float DistSq = FVector::DistSquared(SurfaceHit.ImpactPoint, ExistingHit.ImpactPoint);
-
-                // Ta sama orientacja powierzchni, ta sama płaszczyzna geometryczna i odległość w zasięgu strefy
-                if (NormalDot > 0.92f && PlaneDist < 25.0f && DistSq < FMath::Square(EffectRadius * 0.85f))
-                {
-                    bAlreadySplashed = true;
-                    break;
-                }
-            }
-
-            if (bAlreadySplashed)
-            {
-                continue;
-            }
-
-            // Promień powłoki naściennej (pokrycie cieczą na przeszkodach)
-            const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, EffectRadius);
-            const float BaseRadius = FMath::Sqrt(FMath::Max(0.0f, FMath::Square(EffectRadius) - FMath::Square(DistToSurface)));
-            const float CoatRadius = FMath::Clamp(BaseRadius * 0.45f, 60.0f, 220.0f);
-
-            SurfaceSubsystem->PaintSurfaceFromHit(
-                SurfaceHit,
-                CoatRadius,
-                ZoneEffectConfig.AppliedStatus,
-                ZoneDuration,
-                this);
-
-            SpawnedSurfaces.Add(SurfaceHit);
-        }
-    }
 }

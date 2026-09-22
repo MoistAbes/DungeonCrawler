@@ -36,9 +36,22 @@ public:
 		AActor* InstigatorActor = nullptr);
 
 	/**
-	 * 3. INSTANT RADIAL BURST (Chwilowa fala uderzeniowa / wybuch)
-	 * Wykonuje natychmiastowy test Line-of-Sight w promieniu Radius. Aplikuje obrażenia (InstantDamage), fizyczny odrzut (KnockbackForce)
-	 * oraz status z EffectConfig do wszystkich celów w zasięgu wzroku. Nie tworzy trwałego aktora strefy (Zero-Alloc).
+	 * 2. RADIAL BURST (Chwilowa fala uderzeniowa / wybuch 3D)
+	 * Wykonuje test Line-of-Sight w promieniu Radius. Aplikuje obrażenia (InstantDamage), fizyczny odrzut (KnockbackForce)
+	 * oraz status z EffectConfig do celów (postacie, propy) w zasięgu wzroku.
+	 * Wykonuje wszechkierunkową projekcję 3D na otaczające powierzchnie lochu (posadzka, sufit, ściany) w UDungeonSurfaceSubsystem.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (WorldContext = "WorldContextObject"))
+	static void ApplyRadialBurst(
+		const UObject* WorldContextObject,
+		const FVector& Origin,
+		float Radius,
+		const FZoneEffectConfig& EffectConfig,
+		float Duration = 4.0f,
+		AActor* InstigatorActor = nullptr);
+
+	/**
+	 * Alias wsteczny dla ApplyRadialBurst (zachowanie pełnej kompatybilności wstecznej).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (WorldContext = "WorldContextObject"))
 	static void ApplyInstantBurst(
@@ -50,7 +63,23 @@ public:
 		AActor* InstigatorActor = nullptr);
 
 	/**
-	 * 4. POINT HIT (Uderzenie punktowe / bezpośrednie trafienie pociskiem)
+	 * 3. POINT IMPACT (Uderzenie punktowe w pojedynczą powierzchnię lub cel)
+	 * Dedykowane dla rzucanych butelek wody/oleju, koktajli Mołotowa, strzał żywiołowych, bełtów, pułapek naciskowych.
+	 * Maluje wyłącznie uderzoną powierzchnię (od precyzyjnego 1-komórkowego trafienia przy SplashRadius <= 25cm do szerokiej plamy).
+	 * Aplikuje obrażenia bezpośrednie i status celowi (postać, prop, struktura drewniana).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (WorldContext = "WorldContextObject"))
+	static bool ApplyPointImpact(
+		const UObject* WorldContextObject,
+		const FHitResult& HitResult,
+		float SplashRadius,
+		EStatusEffectType StatusType,
+		float Duration,
+		float DirectDamage = 0.0f,
+		AActor* InstigatorActor = nullptr);
+
+	/**
+	 * 4. POINT HIT (Uderzenie punktowe / bezpośrednie trafienie pociskiem - prosty wrapper)
 	 * Trafienie pojedynczym pociskiem w cel (postać, strefa, niszczalna drewniana struktura).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (DefaultToSelf = "InstigatorActor"))

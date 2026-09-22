@@ -73,7 +73,7 @@ AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 	return Zone;
 }
 
-void UStatusZoneLibrary::ApplyInstantBurst(
+void UStatusZoneLibrary::ApplyRadialBurst(
 	const UObject* WorldContextObject,
 	const FVector& Origin,
 	float Radius,
@@ -87,7 +87,7 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 		return;
 	}
 
-	// Propagacja impulsu wybuchu na rzadką siatkę komórek powierzchniowych (np. podpalenie plam oleju na posadzce)
+	// Propagacja impulsu wybuchu na rzadką siatkę komórek powierzchniowych (projekcja 3D na posadzkę, ściany, sufit)
 	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
 	{
 		SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
@@ -97,7 +97,7 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 	// Wykrywamy: postacie (Pawn), obiekty fizyczne (PhysicsBody), dynamiczne (WorldDynamic) oraz niszczalne struktury (WorldStatic)
 	TArray<FOverlapResult> Overlaps;
 	FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius);
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneInstantBurst), false);
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneRadialBurst), false);
 	if (InstigatorActor)
 	{
 		QueryParams.AddIgnoredActor(InstigatorActor);
@@ -192,7 +192,7 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 			}
 		}
 
-		// C. Aplikacja statusu żywiołowego
+		// C. Aplikacja statusu żywiołowego (na postacie i propy z weryfikacją kompatybilności materiału)
 		if (EffectConfig.AppliedStatus != EStatusEffectType::None)
 		{
 			if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
@@ -201,6 +201,95 @@ void UStatusZoneLibrary::ApplyInstantBurst(
 			}
 		}
 	}
+}
+
+void UStatusZoneLibrary::ApplyInstantBurst(
+	const UObject* WorldContextObject,
+	const FVector& Origin,
+	float Radius,
+	const FZoneEffectConfig& EffectConfig,
+	float Duration,
+	AActor* InstigatorActor)
+{
+	ApplyRadialBurst(WorldContextObject, Origin, Radius, EffectConfig, Duration, InstigatorActor);
+}
+
+bool UStatusZoneLibrary::ApplyPointImpact(
+	const UObject* WorldContextObject,
+	const FHitResult& HitResult,
+	float SplashRadius,
+	EStatusEffectType StatusType,
+	float Duration,
+	float DirectDamage,
+	AActor* InstigatorActor)
+{
+	UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
+	if (!World || World->GetNetMode() == NM_Client || !HitResult.bBlockingHit)
+	{
+		return false;
+	}
+
+	AActor* TargetActor = HitResult.GetActor();
+
+	// 1. Uderzenie w istniejący aktor strefy (np. strzała ogniowa w strefę wolumetryczną lub powierzchniową)
+	if (AStatusZoneBase* Zone = Cast<AStatusZoneBase>(TargetActor))
+	{
+		Zone->ApplyElementalHit(StatusType, DirectDamage, InstigatorActor);
+		return true;
+	}
+
+	// 2. Bezpośrednie obrażenia i status na trafionym celu (postać, prop, struktura niszczalna)
+	if (TargetActor)
+	{
+		if (DirectDamage > 0.0f)
+		{
+			if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
+			{
+				Damageable->ApplyDamage(DirectDamage);
+			}
+		}
+
+		if (StatusType != EStatusEffectType::None)
+		{
+			if (UStatusEffectComponent* StatusComp = TargetActor->FindComponentByClass<UStatusEffectComponent>())
+			{
+				StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
+			}
+			else if (StatusType == EStatusEffectType::Burning)
+			{
+				// Obiekty podatne na ogień bez StatusEffectComponent (np. drewniane barykady)
+				if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
+				{
+					EPhysicalMaterialType MatType = EPhysicalMaterialType::Default;
+					if (TargetActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
+					{
+						MatType = IMaterialProviderInterface::Execute_GetMaterialType(TargetActor);
+					}
+
+					if (MatType == EPhysicalMaterialType::Wood)
+					{
+						Damageable->ApplyDamage(25.0f);
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Pokrycie powierzchni w siatce lochu (posadzka, ściana, sufit)
+	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+	{
+		if (StatusType != EStatusEffectType::None && SplashRadius > 0.0f)
+		{
+			SurfaceSubsystem->PaintSurfaceFromHit(HitResult, SplashRadius, StatusType, Duration, InstigatorActor);
+		}
+	}
+
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	DrawDebugPoint(World, HitResult.ImpactPoint, 10.0f, FColor::Cyan, false, 2.0f);
+	DrawDebugDirectionalArrow(World, HitResult.ImpactPoint, HitResult.ImpactPoint + HitResult.ImpactNormal * 30.0f, 12.0f, FColor::Cyan, false, 2.0f, 0, 2.0f);
+#endif
+
+	return true;
 }
 
 bool UStatusZoneLibrary::ApplyPointHit(
@@ -216,56 +305,21 @@ bool UStatusZoneLibrary::ApplyPointHit(
 		return false;
 	}
 
-	// 1. Jeśli uderzyliśmy w strefę (np. płonąca strzała w plamę oleju)
-	if (AStatusZoneBase* Zone = Cast<AStatusZoneBase>(TargetActor))
-	{
-		Zone->ApplyElementalHit(StatusType, 15.0f, InstigatorActor);
-		return true;
-	}
+	FHitResult SyntheticHit;
+	SyntheticHit.bBlockingHit = true;
+	SyntheticHit.HitObjectHandle = FActorInstanceHandle(TargetActor);
+	SyntheticHit.ImpactPoint = HitLocation;
+	SyntheticHit.ImpactNormal = HitNormal;
+	SyntheticHit.Location = HitLocation;
+	SyntheticHit.Normal = HitNormal;
 
-	// 1b. Jeśli uderzyliśmy w powierzchnię fundamentu lochu (np. strzała ogniowa w plamę na ścianie/podłodze)
-	if (UWorld* World = TargetActor->GetWorld())
-	{
-		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
-		{
-			SurfaceSubsystem->PaintSurface(HitLocation, HitNormal, 45.0f, StatusType, Duration, InstigatorActor);
-		}
-	}
-
-	// 2. Postać lub prop z komponentem statusów
-	if (UStatusEffectComponent* StatusComp = TargetActor->FindComponentByClass<UStatusEffectComponent>())
-	{
-		StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
-		return true;
-	}
-
-	// 3. Obiekty podatne na zniszczenie bez komponentu statusów (np. drewniane barykady/struktury pod wpływem ognia)
-	if (StatusType == EStatusEffectType::Burning)
-	{
-		if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
-		{
-			EPhysicalMaterialType MatType = EPhysicalMaterialType::Default;
-			if (TargetActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
-			{
-				MatType = IMaterialProviderInterface::Execute_GetMaterialType(TargetActor);
-			}
-
-			if (MatType == EPhysicalMaterialType::Wood)
-			{
-				Damageable->ApplyDamage(25.0f);
-				return true;
-			}
-		}
-	}
-
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-	if (UWorld* World = TargetActor->GetWorld())
-	{
-		DrawDebugPoint(World, HitLocation, 12.0f, FColor::Yellow, false, 2.0f);
-		DrawDebugDirectionalArrow(World, HitLocation, HitLocation + HitNormal * 30.0f, 15.0f, FColor::Yellow, false, 2.0f, 0, 2.0f);
-	}
-#endif
-
-	return false;
+	return ApplyPointImpact(
+		TargetActor,
+		SyntheticHit,
+		45.0f,
+		StatusType,
+		Duration,
+		15.0f,
+		InstigatorActor);
 }
 

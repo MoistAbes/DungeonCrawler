@@ -88,10 +88,14 @@ struct MYPROJECT_API FSurfaceCellCoord
 	{
 		const float SafeCellSize = FMath::Max(1.0f, CellSize);
 		const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(Normal);
+		const FVector SurfaceNormal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
+		// Przesuwamy punkt o niewielki margines w głąb komórki (wzdłuż jej normalnej),
+		// co eliminuje błędy zaokrągleń zmiennoprzecinkowych na granicy siatki (np. Z=-0.0001 dające Floor=-1 zamiast 0).
+		const FVector BiasedLocation = WorldLocation + SurfaceNormal * 2.0f;
 		return FSurfaceCellCoord(
-			FMath::FloorToInt(WorldLocation.X / SafeCellSize),
-			FMath::FloorToInt(WorldLocation.Y / SafeCellSize),
-			FMath::FloorToInt(WorldLocation.Z / SafeCellSize),
+			FMath::FloorToInt(BiasedLocation.X / SafeCellSize),
+			FMath::FloorToInt(BiasedLocation.Y / SafeCellSize),
+			FMath::FloorToInt(BiasedLocation.Z / SafeCellSize),
 			FaceDir
 		);
 	}

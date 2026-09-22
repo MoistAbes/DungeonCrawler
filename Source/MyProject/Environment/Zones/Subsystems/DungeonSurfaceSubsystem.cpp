@@ -238,6 +238,76 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceFromHit(
 		Instigator);
 }
 
+bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
+	const FSurfaceCellCoord& Coord,
+	EStatusEffectType IncomingStatus,
+	float Duration,
+	AActor* Instigator)
+{
+	if (!GetWorld() || IncomingStatus == EStatusEffectType::None || Duration <= 0.0f)
+	{
+		return false;
+	}
+
+	const float CurrentTime = GetWorld()->GetTimeSeconds();
+	FSurfaceCellData* Existing = ActiveCells.Find(Coord);
+
+	// 1. Pusta komórka: dodajemy nowy wpis do siatki
+	if (!Existing || Existing->Status == EStatusEffectType::None)
+	{
+		FSurfaceCellData& NewCell = ActiveCells.FindOrAdd(Coord);
+		NewCell.Status = IncomingStatus;
+		NewCell.ServerEndTime = CurrentTime + Duration;
+		NewCell.Instigator = Instigator;
+
+		OnSurfaceCellChanged.Broadcast(Coord, IncomingStatus, Instigator);
+		return true;
+	}
+
+	// 2. Identyczny żywioł: odświeżamy czas trwania i instigatora
+	if (Existing->Status == IncomingStatus)
+	{
+		Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, CurrentTime + Duration);
+		Existing->Instigator = Instigator;
+		return true;
+	}
+
+	// 3. Różny żywioł: ewaluacja w centralnej bibliotece chemicznej
+	const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(IncomingStatus, { Existing->Status });
+	if (Reaction.bReactionOccurred)
+	{
+		if (Reaction.ResultingStatus != EStatusEffectType::None)
+		{
+			// Nowy status powstały w wyniku reakcji (np. Olej + Ogień -> Burning)
+			const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
+			Existing->Status = Reaction.ResultingStatus;
+			Existing->ServerEndTime = CurrentTime + NewDuration;
+			Existing->Instigator = Instigator;
+			OnSurfaceCellChanged.Broadcast(Coord, Reaction.ResultingStatus, Instigator);
+			return true;
+		}
+		else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+		{
+			// Wzajemna neutralizacja / anihilacja (np. Woda gasi Ogień / Ogień odparowuje Wodę)
+			OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
+			ActiveCells.Remove(Coord);
+			return true;
+		}
+		else if (Reaction.bConsumeIncomingStatus)
+		{
+			// Przychodzący status uległ zużyciu, dotychczasowy stan komórki pozostaje
+			return true;
+		}
+	}
+
+	// 4. Brak dedykowanej reakcji: nowy status zastępuje poprzedni (np. wypieranie płynów)
+	Existing->Status = IncomingStatus;
+	Existing->ServerEndTime = CurrentTime + Duration;
+	Existing->Instigator = Instigator;
+	OnSurfaceCellChanged.Broadcast(Coord, IncomingStatus, Instigator);
+	return true;
+}
+
 int32 UDungeonSurfaceSubsystem::PaintSurface(
 	const FVector& HitLocation,
 	const FVector& HitNormal,
@@ -246,7 +316,8 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	float Duration,
 	AActor* Instigator)
 {
-	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr);
+	TSet<FSurfaceCellCoord> ProcessedCoords;
+	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, &ProcessedCoords);
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
@@ -256,7 +327,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 	EStatusEffectType Status,
 	float Duration,
 	AActor* Instigator,
-	const TSet<FSurfaceCellCoord>* ExcludedCoords)
+	TSet<FSurfaceCellCoord>* ProcessedCoords)
 {
 	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
 	{
@@ -287,9 +358,8 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 	}
 
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-	const int32 StepRadius = FMath::CeilToInt(Radius / SafeCellSize);
+	const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
 	const float RadiusSq = FMath::Square(Radius);
-	const float CurrentTime = GetWorld()->GetTimeSeconds();
 
 	int32 AffectedCount = 0;
 	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfacePaintValidation), false, Instigator);
@@ -324,70 +394,20 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
 
-			// Pomijamy koordynaty wykluczone (np. skasowane przed chwilą przez wybuch)
-			if (ExcludedCoords && ExcludedCoords->Contains(Coord))
+			// Pomijamy koordynaty już przetworzone w tym samym złożonym zdarzeniu (np. wybuch wielopromieniowy)
+			if (ProcessedCoords && ProcessedCoords->Contains(Coord))
 			{
 				continue;
 			}
 
-			if (FSurfaceCellData* Existing = ActiveCells.Find(Coord))
+			if (ProcessedCoords)
 			{
-				if (Existing->Status == Status)
-				{
-					// Identyczny żywioł: odświeżamy czas trwania
-					Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, CurrentTime + Duration);
-					Existing->Instigator = Instigator;
-					AffectedCount++;
-				}
-				else if (Existing->Status != EStatusEffectType::None)
-				{
-					// Różny żywioł: ewaluacja chemiczna przez centralną bibliotekę UElementalChemistryLibrary
-					const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(Status, { Existing->Status });
-					if (Reaction.bReactionOccurred)
-					{
-						if (Reaction.ResultingStatus != EStatusEffectType::None)
-						{
-							// Reakcja wytworzyła nowy status (np. Olej podpalony -> Burning)
-							const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-							Existing->Status = Reaction.ResultingStatus;
-							Existing->ServerEndTime = CurrentTime + NewDuration;
-							Existing->Instigator = Instigator;
-							OnSurfaceCellChanged.Broadcast(Coord, Reaction.ResultingStatus, Instigator);
-							AffectedCount++;
-						}
-						else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-						{
-							// Reakcja przeciwstawna wygasza/neutralizuje status komórki (np. Woda gasi Ogień / Ogień odparowuje Wodę)
-							OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
-							ActiveCells.Remove(Coord);
-							AffectedCount++;
-						}
-						else if (Reaction.bConsumeIncomingStatus)
-						{
-							// Przychodzący status został zneutralizowany (komórka zachowuje dotychczasowy stan)
-						}
-					}
-					else
-					{
-						// Brak reguły specjalnej: nowy status zastępuje poprzedni
-						Existing->Status = Status;
-						Existing->ServerEndTime = CurrentTime + Duration;
-						Existing->Instigator = Instigator;
-						OnSurfaceCellChanged.Broadcast(Coord, Status, Instigator);
-						AffectedCount++;
-					}
-				}
+				ProcessedCoords->Add(Coord);
 			}
-			else
-			{
-				// Nowa komórka w siatce
-				FSurfaceCellData NewCell;
-				NewCell.Status = Status;
-				NewCell.ServerEndTime = CurrentTime + Duration;
-				NewCell.Instigator = Instigator;
 
-				ActiveCells.Add(Coord, NewCell);
-				OnSurfaceCellChanged.Broadcast(Coord, Status, Instigator);
+			// JEDYNY PUNKT STYKU: ApplyStatusToCell decyduje o reakcji i stanie komórki
+			if (ApplyStatusToCell(Coord, Status, Duration, Instigator))
+			{
 				AffectedCount++;
 			}
 		}
@@ -589,13 +609,14 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 	int32 AffectedCount = 0;
 
-	// 1. Reakcja chemiczna ze wszystkimi aktywnymi komórkami w promieniu wybuchu
-	TSet<FSurfaceCellCoord> CoordsToRemove;
-	for (auto& Pair : ActiveCells)
+	// 1. Zbiór komórek przetworzonych w ramach tego wybuchu (brak wyścigów i podwójnego malowania)
+	TSet<FSurfaceCellCoord> ProcessedCoords;
+
+	// 2. Bezpośrednia ewaluacja istniejących aktywnych komórek w sferze wybuchu z Line-of-Sight
+	TArray<FSurfaceCellCoord> CellsInRadius;
+	for (const auto& Pair : ActiveCells)
 	{
 		const FSurfaceCellCoord& Coord = Pair.Key;
-		FSurfaceCellData& Data = Pair.Value;
-
 		const FVector CellWorldPos = Coord.ToWorldLocation(SafeCellSize);
 		if (FVector::DistSquared(Origin, CellWorldPos) <= RadiusSq)
 		{
@@ -607,52 +628,128 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 			{
 				if (LoSHit.bBlockingHit && LoSHit.Distance < FVector::Dist(Origin, CellSurfacePos) - 15.0f)
 				{
-					// Przeszkoda zasłania tę komórkę przed falą wybuchu!
-					continue;
+					// Sprawdzamy, czy uderzenie nie nastąpiło w samą płaszczyznę komórki (np. nierówności/pęknięcia podłogi)
+					const bool bIsParallelSurface = FVector::DotProduct(LoSHit.ImpactNormal, SurfaceGridUtils::FaceDirectionToNormal(Coord.Face)) > 0.6f;
+					if (!bIsParallelSurface)
+					{
+						// Przeszkoda poprzeczna (ściana, filar) zasłania tę komórkę przed falą wybuchu!
+						continue;
+					}
 				}
 			}
 
-			if (Data.Status == Status)
-			{
-				Data.ServerEndTime = FMath::Max(Data.ServerEndTime, CurrentTime + Duration);
-				Data.Instigator = Instigator;
-				AffectedCount++;
-			}
-			else if (Data.Status != EStatusEffectType::None)
-			{
-				const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(Status, { Data.Status });
-				if (Reaction.bReactionOccurred)
-				{
-					if (Reaction.ResultingStatus != EStatusEffectType::None)
-					{
-						Data.Status = Reaction.ResultingStatus;
-						Data.ServerEndTime = CurrentTime + (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : Duration);
-						Data.Instigator = Instigator;
-						OnSurfaceCellChanged.Broadcast(Coord, Reaction.ResultingStatus, Instigator);
-						AffectedCount++;
-					}
-					else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-					{
-						CoordsToRemove.Add(Coord);
-					}
-				}
-			}
+			CellsInRadius.Add(Coord);
 		}
 	}
 
-	for (const FSurfaceCellCoord& Coord : CoordsToRemove)
+	for (const FSurfaceCellCoord& Coord : CellsInRadius)
 	{
-		OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
-		ActiveCells.Remove(Coord);
-		AffectedCount++;
+		ProcessedCoords.Add(Coord);
+		if (ApplyStatusToCell(Coord, Status, Duration, Instigator))
+		{
+			AffectedCount++;
+		}
 	}
 
-	// 2. Jeśli wybuch nastąpił w pobliżu powierzchni (np. posadzka lochu), malujemy strefę żywiołu
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceBurstTrace), false, Instigator);
-	FHitResult FloorHit;
-	if (GetWorld()->LineTraceSingleByChannel(FloorHit, Origin, Origin - FVector(0.0f, 0.0f, Radius + 100.0f), ECC_Visibility, TraceParams))
+	// 3. Wszechkierunkowa projekcja wybuchu na otaczające powierzchnie lochu (posadzka, sufit, ściany, rampy)
+	TArray<FVector> ScanDirections;
+	ScanDirections.Reserve(18);
+
+	// 3a. Posadzka lochu (grawitacyjny opad / dolna strefa)
+	ScanDirections.Add(FVector(0.0f, 0.0f, -1.0f));
+
+	// 3b. Sufit lochu
+	ScanDirections.Add(FVector(0.0f, 0.0f, 1.0f));
+
+	// 3c. 8 kierunków horyzontalnych (pionowe ściany, filary)
+	constexpr int32 NumHorizontal = 8;
+	for (int32 i = 0; i < NumHorizontal; ++i)
 	{
-		AffectedCount += PaintSurfaceInternal(FloorHit.ImpactPoint, FloorHit.ImpactNormal, Radius * 0.75f, Status, Duration, Instigator, &CoordsToRemove);
+		const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * (360.0f / static_cast<float>(NumHorizontal)));
+		ScanDirections.Add(FVector(FMath::Cos(AngleRad), FMath::Sin(AngleRad), 0.0f));
+	}
+
+	// 3d. 4 kierunki skośne w dół (Pitch -35 deg) - rampy 30-45° i spadki terenu
+	constexpr float PitchDown = -0.5736f;     // sin(-35 deg)
+	constexpr float HorizScaleDown = 0.8192f; // cos(-35 deg)
+	for (int32 i = 0; i < 4; ++i)
+	{
+		const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * 90.0f + 22.5f);
+		ScanDirections.Add(FVector(FMath::Cos(AngleRad) * HorizScaleDown, FMath::Sin(AngleRad) * HorizScaleDown, PitchDown));
+	}
+
+	// 3e. 4 kierunki skośne w górę (Pitch +35 deg) - sklepienia łukowe i zadaszenia
+	constexpr float PitchUp = 0.5736f;       // sin(35 deg)
+	constexpr float HorizScaleUp = 0.8192f;  // cos(35 deg)
+	for (int32 i = 0; i < 4; ++i)
+	{
+		const float AngleRad = FMath::DegreesToRadians(static_cast<float>(i) * 90.0f + 22.5f);
+		ScanDirections.Add(FVector(FMath::Cos(AngleRad) * HorizScaleUp, FMath::Sin(AngleRad) * HorizScaleUp, PitchUp));
+	}
+
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceBurstTrace), false, Instigator);
+	if (Instigator)
+	{
+		TraceParams.AddIgnoredActor(Instigator);
+	}
+
+	struct FPaintedSurfaceRecord
+	{
+		FVector ImpactPoint;
+		FVector ImpactNormal;
+		float Radius;
+	};
+	TArray<FPaintedSurfaceRecord> PaintedPlanes;
+
+	for (const FVector& RayDir : ScanDirections)
+	{
+		// Dla podłogi dajemy lekki margines zasięgu (wybuch beczki może być na Z+50)
+		const float TraceDist = (RayDir.Z < -0.9f) ? (Radius + 100.0f) : Radius;
+		const FVector TraceEnd = Origin + RayDir * TraceDist;
+
+		FHitResult SurfaceHit;
+		if (GetWorld()->LineTraceSingleByChannel(SurfaceHit, Origin, TraceEnd, ECC_Visibility, TraceParams))
+		{
+			AActor* HitActor = SurfaceHit.GetActor();
+			if (!HitActor || !IsValidSurfaceTarget(HitActor))
+			{
+				continue;
+			}
+
+			const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, Radius);
+			const float BaseDiscRadius = FMath::Sqrt(FMath::Max(0.0f, RadiusSq - FMath::Square(DistToSurface)));
+			const float SurfaceSplashRadius = (RayDir.Z < -0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
+
+			bool bAlreadyCovered = false;
+			for (const FPaintedSurfaceRecord& Existing : PaintedPlanes)
+			{
+				const float NormalDot = FVector::DotProduct(SurfaceHit.ImpactNormal, Existing.ImpactNormal);
+				const float PlaneDist = FMath::Abs(FVector::DotProduct(SurfaceHit.ImpactPoint - Existing.ImpactPoint, Existing.ImpactNormal));
+				const float DistSq = FVector::DistSquared(SurfaceHit.ImpactPoint, Existing.ImpactPoint);
+
+				if (NormalDot > 0.90f && PlaneDist < 25.0f && DistSq < FMath::Square(FMath::Max(Existing.Radius, SurfaceSplashRadius) * 0.85f))
+				{
+					bAlreadyCovered = true;
+					break;
+				}
+			}
+
+			if (bAlreadyCovered)
+			{
+				continue;
+			}
+
+			AffectedCount += PaintSurfaceInternal(
+				SurfaceHit.ImpactPoint,
+				SurfaceHit.ImpactNormal,
+				SurfaceSplashRadius,
+				Status,
+				Duration,
+				Instigator,
+				&ProcessedCoords);
+
+			PaintedPlanes.Add({ SurfaceHit.ImpactPoint, SurfaceHit.ImpactNormal, SurfaceSplashRadius });
+		}
 	}
 
 	return AffectedCount;
@@ -740,17 +837,11 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 		}
 	}
 
-	// Aplikacja zebranych rozprzestrzenień żywiołów
+	// Aplikacja zebranych rozprzestrzenień żywiołów przez jednolity punkt styku
 	for (const auto& PendingPair : PendingSpreads)
 	{
 		const FPendingSpreadCell& Pending = PendingPair.Value;
-		if (FSurfaceCellData* CellToUpdate = ActiveCells.Find(Pending.Coord))
-		{
-			CellToUpdate->Status = Pending.NewStatus;
-			CellToUpdate->ServerEndTime = CurrentTime + Pending.Duration;
-			CellToUpdate->Instigator = Pending.Instigator;
-			OnSurfaceCellChanged.Broadcast(Pending.Coord, Pending.NewStatus, Pending.Instigator.Get());
-		}
+		ApplyStatusToCell(Pending.Coord, Pending.NewStatus, Pending.Duration, Pending.Instigator.Get());
 	}
 
 	// 3. Server-Authoritative: dwukierunkowa interakcja żywiołowa między postaciami a komórkami
@@ -808,19 +899,8 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 							StatusComp->RemoveStatus(PawnStatus);
 						}
 
-						if (Reaction.ResultingStatus != EStatusEffectType::None)
-						{
-							CellData->Status = Reaction.ResultingStatus;
-							CellData->ServerEndTime = CurrentTime + (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f);
-							CellData->Instigator = Pawn;
-							OnSurfaceCellChanged.Broadcast(CellCoord, Reaction.ResultingStatus, Pawn);
-						}
-						else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-						{
-							OnSurfaceCellChanged.Broadcast(CellCoord, EStatusEffectType::None, Pawn);
-							ActiveCells.Remove(CellCoord);
-							break;
-						}
+						ApplyStatusToCell(CellCoord, PawnStatus, (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f), Pawn);
+						break;
 					}
 				}
 
