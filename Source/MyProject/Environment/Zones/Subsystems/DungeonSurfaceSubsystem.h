@@ -94,6 +94,19 @@ public:
 		AActor* Instigator = nullptr);
 
 	/**
+	 * Wewnętrzna wersja metody PaintSurface z możliwością wykluczenia wybranych koordynatów
+	 * (np. komórek, które przed chwilą wygasły w wyniku reakcji wybuchu).
+	 */
+	int32 PaintSurfaceInternal(
+		const FVector& HitLocation,
+		const FVector& HitNormal,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator = nullptr,
+		const TSet<FSurfaceCellCoord>* ExcludedCoords = nullptr);
+
+	/**
 	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.
 	 * Wywoływane automatycznie przez ADungeonStructureBase w momencie zniszczenia ściany lub podłogi.
 	 * 

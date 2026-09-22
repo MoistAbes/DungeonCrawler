@@ -11,6 +11,7 @@
 #include "MyProject/Environment/Zones/StatusZoneBase.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "Engine/Brush.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 
@@ -245,6 +246,18 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	float Duration,
 	AActor* Instigator)
 {
+	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr);
+}
+
+int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
+	const FVector& HitLocation,
+	const FVector& HitNormal,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	AActor* Instigator,
+	const TSet<FSurfaceCellCoord>* ExcludedCoords)
+{
 	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
 	{
 		return 0;
@@ -311,6 +324,12 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
 
+			// Pomijamy koordynaty wykluczone (np. skasowane przed chwilą przez wybuch)
+			if (ExcludedCoords && ExcludedCoords->Contains(Coord))
+			{
+				continue;
+			}
+
 			if (FSurfaceCellData* Existing = ActiveCells.Find(Coord))
 			{
 				if (Existing->Status == Status)
@@ -326,31 +345,26 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 					const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(Status, { Existing->Status });
 					if (Reaction.bReactionOccurred)
 					{
-						if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+						if (Reaction.ResultingStatus != EStatusEffectType::None)
 						{
-							// Dotychczasowy status uległ spaleniu/wyparciu (np. Olej zamieniony w Ogień)
-							const EStatusEffectType NewStatus = (Reaction.ResultingStatus != EStatusEffectType::None) ? Reaction.ResultingStatus : Status;
+							// Reakcja wytworzyła nowy status (np. Olej podpalony -> Burning)
 							const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-							Existing->Status = NewStatus;
+							Existing->Status = Reaction.ResultingStatus;
 							Existing->ServerEndTime = CurrentTime + NewDuration;
 							Existing->Instigator = Instigator;
-							OnSurfaceCellChanged.Broadcast(Coord, NewStatus, Instigator);
+							OnSurfaceCellChanged.Broadcast(Coord, Reaction.ResultingStatus, Instigator);
+							AffectedCount++;
+						}
+						else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+						{
+							// Reakcja przeciwstawna wygasza/neutralizuje status komórki (np. Woda gasi Ogień / Ogień odparowuje Wodę)
+							OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
+							ActiveCells.Remove(Coord);
 							AffectedCount++;
 						}
 						else if (Reaction.bConsumeIncomingStatus)
 						{
-							// Przychodzący status został zneutralizowany (np. ogień odparowany przez wodę)
-							// Komórka zachowuje dotychczasowy stan
-						}
-						else
-						{
-							const EStatusEffectType NewStatus = (Reaction.ResultingStatus != EStatusEffectType::None) ? Reaction.ResultingStatus : Status;
-							const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-							Existing->Status = NewStatus;
-							Existing->ServerEndTime = CurrentTime + NewDuration;
-							Existing->Instigator = Instigator;
-							OnSurfaceCellChanged.Broadcast(Coord, NewStatus, Instigator);
-							AffectedCount++;
+							// Przychodzący status został zneutralizowany (komórka zachowuje dotychczasowy stan)
 						}
 					}
 					else
@@ -576,7 +590,7 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	int32 AffectedCount = 0;
 
 	// 1. Reakcja chemiczna ze wszystkimi aktywnymi komórkami w promieniu wybuchu
-	TArray<FSurfaceCellCoord> CoordsToRemove;
+	TSet<FSurfaceCellCoord> CoordsToRemove;
 	for (auto& Pair : ActiveCells)
 	{
 		const FSurfaceCellCoord& Coord = Pair.Key;
@@ -638,7 +652,7 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	FHitResult FloorHit;
 	if (GetWorld()->LineTraceSingleByChannel(FloorHit, Origin, Origin - FVector(0.0f, 0.0f, Radius + 100.0f), ECC_Visibility, TraceParams))
 	{
-		AffectedCount += PaintSurface(FloorHit.ImpactPoint, FloorHit.ImpactNormal, Radius * 0.75f, Status, Duration, Instigator);
+		AffectedCount += PaintSurfaceInternal(FloorHit.ImpactPoint, FloorHit.ImpactNormal, Radius * 0.75f, Status, Duration, Instigator, &CoordsToRemove);
 	}
 
 	return AffectedCount;
@@ -779,6 +793,21 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 					const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(PawnStatus, { CellData->Status });
 					if (Reaction.bReactionOccurred)
 					{
+						// Zadawanie natychmiastowych obrażeń reakcji (np. wybuch oleju pod stopami postaci)
+						if (Reaction.BonusInstantDamage > 0.0f)
+						{
+							if (UDamageableComponent* Damageable = Pawn->FindComponentByClass<UDamageableComponent>())
+							{
+								Damageable->ApplyDamage(Reaction.BonusInstantDamage);
+							}
+						}
+
+						// Jeśli status postaci uległ zużyciu w reakcji (np. woda na postaci odparowała przy gaszeniu ognia)
+						if (Reaction.bConsumeIncomingStatus && StatusComp)
+						{
+							StatusComp->RemoveStatus(PawnStatus);
+						}
+
 						if (Reaction.ResultingStatus != EStatusEffectType::None)
 						{
 							CellData->Status = Reaction.ResultingStatus;

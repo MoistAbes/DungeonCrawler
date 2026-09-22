@@ -49,7 +49,26 @@ FElementalReactionResult UElementalChemistryLibrary::EvaluateReaction(
             Result.bReactionOccurred = true;
             Result.bConsumeIncomingStatus = Rule->bConsumeIncomingStatus;
             Result.ExistingStatusToRemove = Rule->bRemoveExistingStatus ? ActiveStatus : EStatusEffectType::None;
-            Result.ResultingStatus = (Rule->ResultingStatus != EStatusEffectType::None) ? Rule->ResultingStatus : (Rule->bRemoveExistingStatus ? IncomingStatus : EStatusEffectType::None);
+
+            if (Rule->ResultingStatus != EStatusEffectType::None)
+            {
+                Result.ResultingStatus = Rule->ResultingStatus;
+            }
+            else if (Rule->bConsumeIncomingStatus)
+            {
+                // Przychodzący status uległ zużyciu/odparowaniu/zgaszeniu - nie pozostaje na celu
+                Result.ResultingStatus = EStatusEffectType::None;
+            }
+            else if (Rule->bRemoveExistingStatus)
+            {
+                // Dotychczasowy status został usunięty, a przychodzący nie został zużyty (przejmuje cel)
+                Result.ResultingStatus = IncomingStatus;
+            }
+            else
+            {
+                Result.ResultingStatus = EStatusEffectType::None;
+            }
+
             Result.bCanSpreadToNeighbor = Rule->bCanSpreadToNeighbor;
             Result.ResultingDuration = Rule->ResultingDuration;
             Result.BonusInstantDamage = Rule->BonusInstantDamage;
