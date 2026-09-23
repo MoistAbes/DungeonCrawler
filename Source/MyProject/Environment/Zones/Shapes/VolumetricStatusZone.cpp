@@ -2,6 +2,7 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 
 AVolumetricStatusZone::AVolumetricStatusZone()
 {
@@ -15,6 +16,19 @@ void AVolumetricStatusZone::InitializeVolumetricZone(
 	AActor* InInstigator)
 {
 	InitializeZoneBase(InConfig, InRadius, InDuration, EZoneShapeType::VolumetricSphere, InInstigator);
+
+	// Wolumetryczna strefa żywiołowa (np. kula prądu, chmura ognia) projektuje swój status
+	// na siatkę powierzchniową lochu (posadzkę / ściany) w swoim geometrycznym zasięgu
+	if (InConfig.AppliedStatus != EStatusEffectType::None)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+			{
+				SurfaceSubsystem->ApplyElementalBurst(GetActorLocation(), Radius, InConfig.AppliedStatus, InDuration, InInstigator);
+			}
+		}
+	}
 }
 
 bool AVolumetricStatusZone::IsActorWithinZoneGeometry(const FBoxSphereBounds& Bounds) const

@@ -82,6 +82,10 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations.
 
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors.
+
+\* `UElementalReactionRules` — centralized elemental reaction physics, material traits, and propagation rules.
+
 
 
 Detailed contracts and implementation belong in `ARCHITECTURE.md` and feature specifications.

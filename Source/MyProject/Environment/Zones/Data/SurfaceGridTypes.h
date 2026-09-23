@@ -331,23 +331,134 @@ struct MYPROJECT_API FSurfaceCellCoord
 };
 
 /**
+ * Pojedynczy aktywny status żywiołowy na komórce siatki wraz z czasem wygaśnięcia i instigatorem.
+ */
+USTRUCT(BlueprintType)
+struct MYPROJECT_API FSurfaceCellStatusEntry
+{
+	GENERATED_BODY()
+
+	/** Typ aktywnego statusu żywiołowego na komórce (Burning, Wet, Oiled, Electrified itd.) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	EStatusEffectType Status = EStatusEffectType::None;
+
+	/** Czas serwera (GetTimeSeconds), w którym ten konkretny status wygasa */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	float ServerEndTime = 0.0f;
+
+	/** Aktor, który nałożył ten status */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	TWeakObjectPtr<AActor> Instigator = nullptr;
+
+	bool operator==(const FSurfaceCellStatusEntry& Other) const
+	{
+		return Status == Other.Status;
+	}
+};
+
+/**
  * Dane pojedynczej aktywnej komórki powierzchniowej w podsystemie.
- * Minimalistyczny rdzeń danych (3 pola) podlegający ewaluacji chemicznej i wygaszaniu.
+ * Zapewnia pełną skalowalność i wielostatusowość (np. [Wet, Electrified])
+ * z zerowym narzutem alokacji pamięci dzięki TInlineAllocator<2>.
  */
 USTRUCT(BlueprintType)
 struct MYPROJECT_API FSurfaceCellData
 {
 	GENERATED_BODY()
 
-	/** Typ aktywnego statusu żywiołowego na komórce (Burning, Wet, Oiled itd.) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
-	EStatusEffectType Status = EStatusEffectType::None;
+	/** Lista aktywnych statusów na komórce (max 2 trzymane bezpośrednio w strukturze inline) */
+	TArray<FSurfaceCellStatusEntry, TInlineAllocator<2>> ActiveStatuses;
 
-	/** Czas serwera (GetTimeSeconds), w którym żywioł wygasa */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
-	float ServerEndTime = 0.0f;
+	bool IsEmpty() const
+	{
+		return ActiveStatuses.Num() == 0;
+	}
 
-	/** Aktor, który nałożył ten status (do naliczania zabójstw, expa i combat logu) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
-	TWeakObjectPtr<AActor> Instigator = nullptr;
+	bool HasStatus(EStatusEffectType InStatus) const
+	{
+		for (const FSurfaceCellStatusEntry& Entry : ActiveStatuses)
+		{
+			if (Entry.Status == InStatus)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	FSurfaceCellStatusEntry* FindStatus(EStatusEffectType InStatus)
+	{
+		for (FSurfaceCellStatusEntry& Entry : ActiveStatuses)
+		{
+			if (Entry.Status == InStatus)
+			{
+				return &Entry;
+			}
+		}
+		return nullptr;
+	}
+
+	const FSurfaceCellStatusEntry* FindStatus(EStatusEffectType InStatus) const
+	{
+		for (const FSurfaceCellStatusEntry& Entry : ActiveStatuses)
+		{
+			if (Entry.Status == InStatus)
+			{
+				return &Entry;
+			}
+		}
+		return nullptr;
+	}
+
+	void RemoveStatus(EStatusEffectType InStatus)
+	{
+		for (int32 i = ActiveStatuses.Num() - 1; i >= 0; --i)
+		{
+			if (ActiveStatuses[i].Status == InStatus)
+			{
+				ActiveStatuses.RemoveAt(i);
+			}
+		}
+	}
+
+	TArray<EStatusEffectType> GetStatusTypes() const
+	{
+		TArray<EStatusEffectType> Types;
+		Types.Reserve(ActiveStatuses.Num());
+		for (const FSurfaceCellStatusEntry& Entry : ActiveStatuses)
+		{
+			Types.Add(Entry.Status);
+		}
+		return Types;
+	}
+
+	/** Zwraca dominujący status do celów wizualnych / debugowych */
+	EStatusEffectType GetDominantStatus() const
+	{
+		if (ActiveStatuses.Num() == 0)
+		{
+			return EStatusEffectType::None;
+		}
+		// Jeśli komórka ma prąd i ciecz, prąd jest najbardziej widocznym efektem
+		if (HasStatus(EStatusEffectType::Electrified))
+		{
+			return EStatusEffectType::Electrified;
+		}
+		if (HasStatus(EStatusEffectType::Burning))
+		{
+			return EStatusEffectType::Burning;
+		}
+		return ActiveStatuses[0].Status;
+	}
+
+	/** Zwraca aktora odpowiedzialnego za dominujący status */
+	AActor* GetDominantInstigator() const
+	{
+		const EStatusEffectType Dominant = GetDominantStatus();
+		if (const FSurfaceCellStatusEntry* Entry = FindStatus(Dominant))
+		{
+			return Entry->Instigator.Get();
+		}
+		return ActiveStatuses.Num() > 0 ? ActiveStatuses[0].Instigator.Get() : nullptr;
+	}
 };

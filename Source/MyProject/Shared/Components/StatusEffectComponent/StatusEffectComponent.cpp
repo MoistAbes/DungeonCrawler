@@ -1,4 +1,4 @@
-﻿#include "StatusEffectComponent.h"
+#include "StatusEffectComponent.h"
 
 #include "DrawDebugHelpers.h"
 #include "Engine/Engine.h"
@@ -8,8 +8,8 @@
 #include "Net/UnrealNetwork.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
-#include "MyProject/Environment/Elements/Data/StatusEffectDefinitions.h"
-#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
+#include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 
@@ -61,13 +61,13 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
     for (FActiveStatusEffectInstance& Instance : ActiveStatusEffects)
     {
-        // Okresowe tyknięcie (np. DoT pobierany z rejestru definicji)
+        // Okresowe tyknięcie (np. DoT pobierany z rejestru konfiguracji)
         Instance.TimeUntilNextTick -= DeltaTime;
         if (Instance.TimeUntilNextTick <= 0.0f)
         {
             Instance.TimeUntilNextTick += Instance.TickInterval;
 
-            const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(Instance.EffectType);
+            const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(Instance.EffectType);
             if (Def.DamagePerSecond > 0.0f && DamageableComponent)
             {
                 const float TickDamage = Def.DamagePerSecond * Instance.TickInterval;
@@ -111,7 +111,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 
     // 2. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
     // Przekazujemy listę powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
-    if (!UElementalChemistryLibrary::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
+    if (!UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
     {
         UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
@@ -135,7 +135,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
 
 bool UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses)
 {
-    const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(NewStatus, ActiveStatuses);
+    const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(NewStatus, ActiveStatuses);
     if (!Reaction.bReactionOccurred)
     {
         return false;
@@ -206,7 +206,7 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
 
 void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
-    const FStatusEffectDefinition& Def = FStatusEffectRegistry::GetDefinition(NewStatus);
+    const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(NewStatus);
 
     FActiveStatusEffectInstance NewInstance;
     NewInstance.EffectType = NewStatus;

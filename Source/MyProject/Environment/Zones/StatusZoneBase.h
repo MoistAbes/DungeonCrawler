@@ -16,7 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnZoneReactionSignature, EStatusEf
  * - Niezawodny, bezstanowy interwał sprawdzania obecności (0.25s)
  * - Replikację parametrów efektu (Zero-Bandwidth / NetUpdate)
  * - Aplikację statusów żywiołowych (UStatusEffectComponent) i obrażeń ciągłych (UDamageableComponent)
- * - Silnik chemiczny reakcji żywiołowych (UElementalChemistryLibrary)
+ * - Silnik chemiczny reakcji żywiołowych (UElementalReactionRules)
  */
 UCLASS(Abstract)
 class MYPROJECT_API AStatusZoneBase : public AActor

@@ -47,9 +47,63 @@ AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 					if (ExistingVolumetric->GetStatusType() == EffectConfig.AppliedStatus)
 					{
 						ExistingVolumetric->MergeWithZone(Duration, 1.20f, Radius * 1.5f);
+						if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+						{
+							SurfaceSubsystem->ApplyElementalBurst(Location, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
+						}
 						UE_LOG(LogDungeonElements, Log, TEXT("[StatusZoneLibrary] Merged into existing Volumetric Zone (Radius: %.1f cm)"), ExistingVolumetric->GetRadius());
 						return ExistingVolumetric;
 					}
+				}
+			}
+		}
+	}
+
+	// 1. Zastosowanie jednorazowego impulsu wybuchu na aktorów w strefie jeśli zdefiniowano InstantDamage lub KnockbackForce
+	if (EffectConfig.InstantDamage > 0.0f || EffectConfig.KnockbackForce > 0.0f)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius);
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneInitialBurst), false);
+		if (InstigatorActor)
+		{
+			QueryParams.AddIgnoredActor(InstigatorActor);
+		}
+
+		FCollisionObjectQueryParams ObjectParams;
+		ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
+		ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
+		ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+		ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+
+		if (World->OverlapMultiByObjectType(Overlaps, Location, FQuat::Identity, ObjectParams, SphereShape, QueryParams))
+		{
+			TSet<AActor*> ProcessedActors;
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				AActor* TargetActor = Overlap.GetActor();
+				if (!TargetActor || TargetActor == InstigatorActor || ProcessedActors.Contains(TargetActor))
+				{
+					continue;
+				}
+				ProcessedActors.Add(TargetActor);
+
+				if (EffectConfig.InstantDamage > 0.0f)
+				{
+					if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
+					{
+						Damageable->ApplyDamage(EffectConfig.InstantDamage);
+					}
+				}
+
+				if (EffectConfig.KnockbackForce > 0.0f)
+				{
+					FVector KnockbackDir = (TargetActor->GetActorLocation() - Location).GetSafeNormal();
+					if (KnockbackDir.IsNearlyZero())
+					{
+						KnockbackDir = FVector::UpVector;
+					}
+					UKineticForceLibrary::ApplyDirectionalKnockback(TargetActor, KnockbackDir, EffectConfig.KnockbackForce, 0.35f, InstigatorActor);
 				}
 			}
 		}

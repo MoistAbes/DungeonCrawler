@@ -6,7 +6,7 @@
 #include "GameFramework/Pawn.h"
 #include "TimerManager.h"
 
-#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Environment/Zones/StatusZoneBase.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
@@ -253,59 +253,88 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	FSurfaceCellData* Existing = ActiveCells.Find(Coord);
 
 	// 1. Pusta komórka: dodajemy nowy wpis do siatki
-	if (!Existing || Existing->Status == EStatusEffectType::None)
+	if (!Existing || Existing->IsEmpty())
 	{
 		FSurfaceCellData& NewCell = ActiveCells.FindOrAdd(Coord);
-		NewCell.Status = IncomingStatus;
-		NewCell.ServerEndTime = CurrentTime + Duration;
-		NewCell.Instigator = Instigator;
+		NewCell.ActiveStatuses.Reset();
+		NewCell.ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
 
 		OnSurfaceCellChanged.Broadcast(Coord, IncomingStatus, Instigator);
 		return true;
 	}
 
 	// 2. Identyczny żywioł: odświeżamy czas trwania i instigatora
-	if (Existing->Status == IncomingStatus)
+	if (FSurfaceCellStatusEntry* ExistingEntry = Existing->FindStatus(IncomingStatus))
 	{
-		Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, CurrentTime + Duration);
-		Existing->Instigator = Instigator;
+		ExistingEntry->ServerEndTime = FMath::Max(ExistingEntry->ServerEndTime, CurrentTime + Duration);
+		ExistingEntry->Instigator = Instigator;
 		return true;
 	}
 
-	// 3. Różny żywioł: ewaluacja w centralnej bibliotece chemicznej
-	const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(IncomingStatus, { Existing->Status });
+	// 3. Różny żywioł: ewaluacja w centralnych regułach reakcji chemicznych
+	const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(IncomingStatus, Existing->GetStatusTypes());
 	if (Reaction.bReactionOccurred)
 	{
+		bool bModified = false;
+
+		// A. Usunięcie wygaszonego/zutylizowanego w reakcji dotychczasowego statusu
+		if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+		{
+			Existing->RemoveStatus(Reaction.ExistingStatusToRemove);
+			bModified = true;
+		}
+
+		// B. Dodanie lub odświeżenie statusu wynikowego reakcji (np. Olej + Ogień -> Burning)
 		if (Reaction.ResultingStatus != EStatusEffectType::None)
 		{
-			// Nowy status powstały w wyniku reakcji (np. Olej + Ogień -> Burning)
 			const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-			Existing->Status = Reaction.ResultingStatus;
-			Existing->ServerEndTime = CurrentTime + NewDuration;
-			Existing->Instigator = Instigator;
-			OnSurfaceCellChanged.Broadcast(Coord, Reaction.ResultingStatus, Instigator);
-			return true;
+			if (FSurfaceCellStatusEntry* ResEntry = Existing->FindStatus(Reaction.ResultingStatus))
+			{
+				ResEntry->ServerEndTime = FMath::Max(ResEntry->ServerEndTime, CurrentTime + NewDuration);
+				ResEntry->Instigator = Instigator;
+			}
+			else
+			{
+				Existing->ActiveStatuses.Add({ Reaction.ResultingStatus, CurrentTime + NewDuration, Instigator });
+			}
+			bModified = true;
 		}
-		else if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+		// C. Jeśli przychodzący status nie został skonsumowany w reakcji (np. prąd w wodzie: Conductive Shock)
+		else if (!Reaction.bConsumeIncomingStatus)
 		{
-			// Wzajemna neutralizacja / anihilacja (np. Woda gasi Ogień / Ogień odparowuje Wodę)
+			if (!Existing->HasStatus(IncomingStatus))
+			{
+				Existing->ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
+				bModified = true;
+			}
+		}
+
+		// Jeśli komórka po reakcji stała się pusta (np. neutralizacja Woda + Ogień -> para)
+		if (Existing->IsEmpty())
+		{
 			OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
 			ActiveCells.Remove(Coord);
 			return true;
 		}
-		else if (Reaction.bConsumeIncomingStatus)
+
+		if (bModified)
 		{
-			// Przychodzący status uległ zużyciu, dotychczasowy stan komórki pozostaje
+			OnSurfaceCellChanged.Broadcast(Coord, Existing->GetDominantStatus(), Existing->GetDominantInstigator());
 			return true;
 		}
+
+		return false;
 	}
 
-	// 4. Brak dedykowanej reakcji: nowy status zastępuje poprzedni (np. wypieranie płynów)
-	Existing->Status = IncomingStatus;
-	Existing->ServerEndTime = CurrentTime + Duration;
-	Existing->Instigator = Instigator;
-	OnSurfaceCellChanged.Broadcast(Coord, IncomingStatus, Instigator);
-	return true;
+	// 4. Brak reakcji: jeśli nie wystąpił konflikt ani reakcja, dodajemy nowy status (współistnienie)
+	if (!Existing->HasStatus(IncomingStatus))
+	{
+		Existing->ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
+		OnSurfaceCellChanged.Broadcast(Coord, Existing->GetDominantStatus(), Existing->GetDominantInstigator());
+		return true;
+	}
+
+	return false;
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurface(
@@ -440,57 +469,6 @@ int32 UDungeonSurfaceSubsystem::ClearCellsInBounds(const FBox& BoundingBox)
 	return RemovedCount;
 }
 
-bool UDungeonSurfaceSubsystem::QueryStatusAt(const FVector& WorldLocation, EStatusEffectType& OutStatus, AActor*& OutInstigator) const
-{
-	OutStatus = EStatusEffectType::None;
-	OutInstigator = nullptr;
-
-	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-
-	// 1. Sprawdzamy podłoże pod stopami (+Z Floor)
-	// Próbkujemy zarówno zadaną wysokość Z, jak i próbki z lekkim offsetem pionowym (na tolerancję kolizji i progów)
-	const float SampleZOffsets[3] = { 0.0f, -15.0f, 15.0f };
-	for (float ZOffset : SampleZOffsets)
-	{
-		const FVector SamplePos = WorldLocation + FVector(0.0f, 0.0f, ZOffset);
-		const FSurfaceCellCoord FloorCoord = FSurfaceCellCoord::FromWorldLocation(SamplePos, FVector::UpVector, SafeCellSize);
-		if (const FSurfaceCellData* Found = ActiveCells.Find(FloorCoord))
-		{
-			if (Found->Status != EStatusEffectType::None)
-			{
-				OutStatus = Found->Status;
-				OutInstigator = Found->Instigator.Get();
-				return true;
-			}
-		}
-	}
-
-	// 2. Sprawdzamy 4 sąsiednie kierunki na wysokości korpusu (ściany, filary w promieniu dotyku)
-	const ESurfaceFaceDirection WallFaces[4] = {
-		ESurfaceFaceDirection::North,
-		ESurfaceFaceDirection::South,
-		ESurfaceFaceDirection::East,
-		ESurfaceFaceDirection::West
-	};
-
-	for (ESurfaceFaceDirection Face : WallFaces)
-	{
-		const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Face);
-		const FSurfaceCellCoord WallCoord = FSurfaceCellCoord::FromWorldLocation(WorldLocation + Normal * (SafeCellSize * 0.4f), Normal, SafeCellSize);
-		if (const FSurfaceCellData* Found = ActiveCells.Find(WallCoord))
-		{
-			if (Found->Status != EStatusEffectType::None)
-			{
-				OutStatus = Found->Status;
-				OutInstigator = Found->Instigator.Get();
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
 void UDungeonSurfaceSubsystem::GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const
 {
 	OutCoords.Reset();
@@ -566,30 +544,6 @@ void UDungeonSurfaceSubsystem::GetCellsTouchingActor(const AActor* Actor, TArray
 	}
 
 	OutCoords = UniqueCoords.Array();
-}
-
-bool UDungeonSurfaceSubsystem::QueryStatusForActor(const AActor* Actor, EStatusEffectType& OutStatus, AActor*& OutInstigator) const
-{
-	OutStatus = EStatusEffectType::None;
-	OutInstigator = nullptr;
-
-	TArray<FSurfaceCellCoord> TouchedCells;
-	GetCellsTouchingActor(Actor, TouchedCells);
-
-	for (const FSurfaceCellCoord& Coord : TouchedCells)
-	{
-		if (const FSurfaceCellData* Found = ActiveCells.Find(Coord))
-		{
-			if (Found->Status != EStatusEffectType::None)
-			{
-				OutStatus = Found->Status;
-				OutInstigator = Found->Instigator.Get();
-				return true;
-			}
-		}
-	}
-
-	return false;
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
@@ -755,11 +709,6 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	return AffectedCount;
 }
 
-void UDungeonSurfaceSubsystem::ClearAllCells()
-{
-	ActiveCells.Empty();
-}
-
 void UDungeonSurfaceSubsystem::ProcessGridTick()
 {
 	UWorld* World = GetWorld();
@@ -771,18 +720,33 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 	const float CurrentTime = World->GetTimeSeconds();
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 
-	// 1. Wygaszanie przeterminowanych komórek
+	// 1. Wygaszanie przeterminowanych statusów w komórkach
 	for (auto It = ActiveCells.CreateIterator(); It; ++It)
 	{
-		if (It.Value().ServerEndTime > 0.0f && CurrentTime >= It.Value().ServerEndTime)
+		FSurfaceCellData& Cell = It.Value();
+		bool bStatusRemoved = false;
+		for (int32 Index = Cell.ActiveStatuses.Num() - 1; Index >= 0; --Index)
+		{
+			if (Cell.ActiveStatuses[Index].ServerEndTime > 0.0f && CurrentTime >= Cell.ActiveStatuses[Index].ServerEndTime)
+			{
+				Cell.ActiveStatuses.RemoveAt(Index);
+				bStatusRemoved = true;
+			}
+		}
+
+		if (Cell.IsEmpty())
 		{
 			OnSurfaceCellChanged.Broadcast(It.Key(), EStatusEffectType::None, nullptr);
 			It.RemoveCurrent();
 		}
+		else if (bStatusRemoved)
+		{
+			OnSurfaceCellChanged.Broadcast(It.Key(), Cell.GetDominantStatus(), Cell.GetDominantInstigator());
+		}
 	}
 
 	// 2. Propagacja żywiołów na sąsiednie komórki (Cellular Automata)
-	// Wyłącznie reguły z UElementalChemistryLibrary - zero twardego kodowania statusów w podsystemie
+	// Wyłącznie reguły z UElementalReactionRules - zero twardego kodowania statusów w podsystemie
 	struct FPendingSpreadCell
 	{
 		FSurfaceCellCoord Coord;
@@ -799,7 +763,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 		const FSurfaceCellCoord& SourceCoord = Pair.Key;
 		const FSurfaceCellData& SourceData = Pair.Value;
 
-		if (SourceData.Status == EStatusEffectType::None)
+		if (SourceData.IsEmpty())
 		{
 			continue;
 		}
@@ -810,7 +774,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 		{
 			if (const FSurfaceCellData* NeighborData = ActiveCells.Find(NeighborCoord))
 			{
-				if (NeighborData->Status == EStatusEffectType::None || NeighborData->Status == SourceData.Status)
+				if (NeighborData->IsEmpty())
 				{
 					continue;
 				}
@@ -823,15 +787,53 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 					continue;
 				}
 
-				// Pytamy bibliotekę chemii, czy żywioł może rozprzestrzenić się na sąsiednią komórkę
-				FElementalReactionResult SpreadReaction;
-				if (UElementalChemistryLibrary::CanSpreadToNeighbor(SourceData.Status, NeighborData->Status, SpreadReaction))
+				// Sprawdzamy każdy status ze źródła z każdym statusem sąsiada
+				for (const FSurfaceCellStatusEntry& SourceEntry : SourceData.ActiveStatuses)
 				{
-					FPendingSpreadCell& Pending = PendingSpreads.FindOrAdd(NeighborCoord);
-					Pending.Coord = NeighborCoord;
-					Pending.NewStatus = (SpreadReaction.ResultingStatus != EStatusEffectType::None) ? SpreadReaction.ResultingStatus : SourceData.Status;
-					Pending.Duration = (SpreadReaction.ResultingDuration > 0.0f) ? SpreadReaction.ResultingDuration : 5.0f;
-					Pending.Instigator = SourceData.Instigator;
+					for (const FSurfaceCellStatusEntry& NeighborEntry : NeighborData->ActiveStatuses)
+					{
+						if (SourceEntry.Status == NeighborEntry.Status)
+						{
+							continue;
+						}
+
+						FElementalReactionResult SpreadReaction;
+						if (UElementalReactionRules::CanSpreadToNeighbor(SourceEntry.Status, NeighborEntry.Status, SpreadReaction))
+						{
+							const EStatusEffectType TargetStatus = (SpreadReaction.ResultingStatus != EStatusEffectType::None) ? SpreadReaction.ResultingStatus : SourceEntry.Status;
+
+							// Bezpiecznik fizyczny: jeśli sąsiad ma już ten status, nie rozprzestrzeniaj go ponownie (zapobiega nieskończonym pętlom)
+							if (NeighborData->HasStatus(TargetStatus))
+							{
+								continue;
+							}
+
+							const float RemainingSourceTime = SourceEntry.ServerEndTime - CurrentTime;
+							if (RemainingSourceTime <= 0.1f)
+							{
+								continue;
+							}
+
+							// Jeśli prąd rozchodzi się po wodzie, synchronizujemy czas trwania z pozostałym czasem źródła,
+							// aby cała kałuża gasła jednocześnie i nie tworzyła zapętlenia (bounce-back).
+							const float CalculatedDuration = (SourceEntry.Status == EStatusEffectType::Electrified && RemainingSourceTime > 0.0f)
+								? FMath::Max(0.5f, RemainingSourceTime)
+								: ((SpreadReaction.ResultingDuration > 0.0f) ? SpreadReaction.ResultingDuration : 5.0f);
+
+							if (FPendingSpreadCell* ExistingPending = PendingSpreads.Find(NeighborCoord))
+							{
+								ExistingPending->Duration = FMath::Max(ExistingPending->Duration, CalculatedDuration);
+							}
+							else
+							{
+								FPendingSpreadCell& Pending = PendingSpreads.Add(NeighborCoord);
+								Pending.Coord = NeighborCoord;
+								Pending.NewStatus = TargetStatus;
+								Pending.Duration = CalculatedDuration;
+								Pending.Instigator = SourceEntry.Instigator;
+							}
+						}
+					}
 				}
 			}
 		}
@@ -863,28 +865,39 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 			}
 
 			UStatusEffectComponent* StatusComp = Pawn->FindComponentByClass<UStatusEffectComponent>();
-			const TArray<EStatusEffectType> PawnStatuses = StatusComp ? StatusComp->GetActiveStatuses() : TArray<EStatusEffectType>();
+			TArray<EStatusEffectType> PawnStatuses = StatusComp ? StatusComp->GetActiveStatuses() : TArray<EStatusEffectType>();
+
+			// Sortujemy statusy postaci według centralnych praw fizyki żywiołów (np. Ogień anihiluje wodę zanim prąd zacznie przewodzić)
+			UElementalReactionRules::SortByReactionPriority(PawnStatuses);
 
 			for (const FSurfaceCellCoord& CellCoord : TouchedCells)
 			{
 				FSurfaceCellData* CellData = ActiveCells.Find(CellCoord);
-				if (!CellData || CellData->Status == EStatusEffectType::None)
+				if (!CellData || CellData->IsEmpty())
 				{
 					continue;
 				}
 
-				// A. Interakcja Postać -> Komórka (np. podpalona postać podpala kałużę oleju pod stopami)
-				for (EStatusEffectType PawnStatus : PawnStatuses)
+				// A. Interakcja Postać -> Komórka (z zachowaniem priorytetu reakcji i braku fałszywego break)
+				for (int32 StatusIdx = PawnStatuses.Num() - 1; StatusIdx >= 0; --StatusIdx)
 				{
-					if (PawnStatus == CellData->Status || PawnStatus == EStatusEffectType::None)
+					const EStatusEffectType PawnStatus = PawnStatuses[StatusIdx];
+					if (PawnStatus == EStatusEffectType::None)
 					{
 						continue;
 					}
 
-					const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(PawnStatus, { CellData->Status });
+					// Czy komórka nadal istnieje i ma z czym reagować?
+					CellData = ActiveCells.Find(CellCoord);
+					if (!CellData || CellData->IsEmpty())
+					{
+						break;
+					}
+
+					const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(PawnStatus, CellData->GetStatusTypes());
 					if (Reaction.bReactionOccurred)
 					{
-						// Zadawanie natychmiastowych obrażeń reakcji (np. wybuch oleju pod stopami postaci)
+						// Zadawanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok przewodzenia)
 						if (Reaction.BonusInstantDamage > 0.0f)
 						{
 							if (UDamageableComponent* Damageable = Pawn->FindComponentByClass<UDamageableComponent>())
@@ -897,19 +910,22 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 						if (Reaction.bConsumeIncomingStatus && StatusComp)
 						{
 							StatusComp->RemoveStatus(PawnStatus);
+							PawnStatuses.RemoveAt(StatusIdx);
 						}
 
 						ApplyStatusToCell(CellCoord, PawnStatus, (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f), Pawn);
-						break;
 					}
 				}
 
-				// B. Interakcja Komórka -> Postać (nakładanie/odświeżanie statusu z posadzki na postać)
+				// B. Interakcja Komórka -> Postać (nakładanie/odświeżanie wszystkich statusów z posadzki na postać)
 				if (FSurfaceCellData* CurrentCell = ActiveCells.Find(CellCoord))
 				{
-					if (CurrentCell->Status != EStatusEffectType::None && StatusComp)
+					if (!CurrentCell->IsEmpty() && StatusComp)
 					{
-						StatusComp->ApplyStatus(CurrentCell->Status, 1.5f, CurrentCell->Instigator.Get());
+						for (const FSurfaceCellStatusEntry& Entry : CurrentCell->ActiveStatuses)
+						{
+							StatusComp->ApplyStatus(Entry.Status, 1.5f, Entry.Instigator.Get());
+						}
 					}
 				}
 			}
@@ -936,14 +952,25 @@ void UDungeonSurfaceSubsystem::DrawDebugVisuals() const
 		const FSurfaceCellCoord& Coord = Pair.Key;
 		const FSurfaceCellData& Data = Pair.Value;
 
+		if (Data.IsEmpty())
+		{
+			continue;
+		}
+
 		FColor Color;
-		switch (Data.Status)
+		switch (Data.GetDominantStatus())
 		{
 		case EStatusEffectType::Burning:     Color = FColor(255, 69, 0);   break;
 		case EStatusEffectType::Wet:         Color = FColor(30, 144, 255); break;
 		case EStatusEffectType::Oiled:       Color = FColor(139, 69, 19);  break;
 		case EStatusEffectType::Electrified: Color = FColor(255, 215, 0);  break;
 		default:                             Color = FColor(200, 200, 200); break;
+		}
+
+		// Wizualizacja koegzystencji prądu i wody (Cyan / Electric Blue)
+		if (Data.HasStatus(EStatusEffectType::Wet) && Data.HasStatus(EStatusEffectType::Electrified))
+		{
+			Color = FColor(0, 255, 255);
 		}
 
 		const FVector Center = Coord.ToWorldLocation(SafeCellSize);

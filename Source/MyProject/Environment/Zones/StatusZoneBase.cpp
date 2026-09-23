@@ -8,7 +8,7 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
-#include "MyProject/Environment/Elements/Utilities/ElementalChemistryLibrary.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 
@@ -260,7 +260,7 @@ bool AStatusZoneBase::IsActorEligibleForZoneEffect(AActor* TargetActor, UPrimiti
 
 bool AStatusZoneBase::IsOverruledByNewerLiquidZone(const FVector& TargetLocation) const
 {
-	if (!UElementalChemistryLibrary::IsLiquidStatus(EffectConfig.AppliedStatus) || !GetWorld() || !ZoneCollision)
+	if (!UElementalReactionRules::IsLiquidStatus(EffectConfig.AppliedStatus) || !GetWorld() || !ZoneCollision)
 	{
 		return false;
 	}
@@ -276,7 +276,7 @@ bool AStatusZoneBase::IsOverruledByNewerLiquidZone(const FVector& TargetLocation
 
 			// Nadpisywanie dotyczy WYŁĄCZNIE różnych płynów (np. nowy olej na starą wodę)
 			if (OtherZone->GetStatusType() != EffectConfig.AppliedStatus &&
-				UElementalChemistryLibrary::IsLiquidStatus(OtherZone->GetStatusType()) &&
+				UElementalReactionRules::IsLiquidStatus(OtherZone->GetStatusType()) &&
 				OtherZone->GetZoneCreationTime() > ZoneCreationTime)
 			{
 				FBoxSphereBounds PointBounds;
@@ -350,7 +350,7 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 	// Ten sam żywioł nie wywołuje reakcji żywiołowych
 	if (IncomingStatus == EffectConfig.AppliedStatus) return;
 
-	const FElementalReactionResult Reaction = UElementalChemistryLibrary::EvaluateReaction(IncomingStatus, { EffectConfig.AppliedStatus });
+	const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(IncomingStatus, { EffectConfig.AppliedStatus });
 	if (Reaction.bReactionOccurred)
 	{
 		const EStatusEffectType OldStatus = EffectConfig.AppliedStatus;

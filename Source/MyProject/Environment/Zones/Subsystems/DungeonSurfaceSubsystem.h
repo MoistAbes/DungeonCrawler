@@ -96,7 +96,7 @@ public:
 	/**
 	 * JEDYNY ATOMOWY PUNKT STYKU (Single Point of Truth) dla stanu komórki w siatce.
 	 * Przyjmuje status z dowolnego źródła (wybuch, plama, pocisk, postać, propagacja),
-	 * odpytuje bibliotekę UElementalChemistryLibrary, aplikuje wynik reakcji i zarządza ActiveCells.
+	 * odpytuje reguły UElementalReactionRules, aplikuje wynik reakcji i zarządza ActiveCells.
 	 *
 	 * @return true jeśli komórka została zmodyfikowana (dodana, odświeżona, przereagowana lub usunięta).
 	 */
@@ -130,29 +130,6 @@ public:
 	int32 ClearCellsInBounds(const FBox& BoundingBox);
 
 	/**
-	 * Sprawdza, czy w danej pozycji w świecie (np. pod stopami postaci) znajduje się aktywny status.
-	 * 
-	 * @param WorldLocation Pozycja do sprawdzenia.
-	 * @param OutStatus Zwracany typ statusu (None jeśli brak).
-	 * @param OutInstigator Aktor odpowiedzialny za nałożenie statusu.
-	 * @return true jeśli znaleziono aktywną komórkę.
-	 */
-	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
-	bool QueryStatusAt(const FVector& WorldLocation, EStatusEffectType& OutStatus, AActor*& OutInstigator) const;
-
-	/**
-	 * Sprawdza, czy bryła kolizyjna lub stopy danego aktora/postaci dotykają jakiejkolwiek aktywnej komórki powierzchniowej.
-	 */
-	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
-	bool QueryStatusForActor(const AActor* Actor, EStatusEffectType& OutStatus, AActor*& OutInstigator) const;
-
-	/**
-	 * Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora.
-	 */
-	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
-	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
-
-	/**
 	 * Aplikuje impuls żywiołowy w sferze o zadanym promieniu (wybuch beczki, czar obszarowy).
 	 * Wywołuje reakcje chemiczne ze wszystkimi komórkami w zasięgu oraz opcjonalnie maluje strefę na trafionej posadzce.
 	 * 
@@ -166,15 +143,7 @@ public:
 		float Duration = 5.0f,
 		AActor* Instigator = nullptr);
 
-	/** Zwraca liczbę aktualnie aktywnych komórek w całym świecie */
-	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
-	int32 GetActiveCellCount() const { return ActiveCells.Num(); }
-
-	/** Usuwa wszystkie aktywne komórki z pamięci */
-	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
-	void ClearAllCells();
-
-	/** Zdarzenie wywoływane przy zmianie stanu komórki */
+	/** Zdarzenie wywoływane przy zmianie stanu komórki (podstawa dla systemów VFX/SFX) */
 	UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
 	FOnSurfaceCellChanged OnSurfaceCellChanged;
 
@@ -187,6 +156,9 @@ protected:
 	void DrawDebugVisuals() const;
 
 private:
+	/** Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora */
+	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
+
 	/** Rzadka mapa aktywnych komórek powierzchniowych */
 	TMap<FSurfaceCellCoord, FSurfaceCellData> ActiveCells;
 
