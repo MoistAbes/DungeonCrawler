@@ -136,7 +136,6 @@ protected:
 
 	virtual void ProcessActiveOverlaps();
 	virtual bool IsActorEligibleForZoneEffect(AActor* TargetActor, UPrimitiveComponent* TargetComp) const;
-	virtual bool IsOverruledByNewerLiquidZone(const FVector& TargetLocation) const;
 
 	// -------------------------------------------------------------------------
 	// Interfejs polimorficzny (implementowany przez klasy potomne)
@@ -148,14 +147,8 @@ protected:
 	/** Rysuje debugowe wizualizacje specyficzne dla kształtu strefy */
 	virtual void DrawDebugVisuals() const {}
 
-	/** Wylicza promień kuli broadphase kolizji */
-	virtual float CalculateBroadphaseRadius() const { return Radius; }
-
 	/** Sprawdza, czy dwie strefy mogą wejść w interakcję fizyczno-chemiczną */
 	virtual bool CanZonesInteract(const AStatusZoneBase* OtherZone) const;
-
-	/** Obsługuje logikę wypierania cieczy (zwraca true, jeśli strefa ma ulec zniszczeniu) */
-	virtual bool HandleLiquidDisplacement(AActor* HitInstigator);
 
 	/** Zwraca kolor debugowy powiązany z danym statusem */
 	FColor GetStatusDebugColor() const;

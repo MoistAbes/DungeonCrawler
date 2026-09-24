@@ -29,7 +29,7 @@ AStatusZoneBase::AStatusZoneBase()
 	ZoneCollision = CreateDefaultSubobject<USphereComponent>(TEXT("ZoneCollision"));
 	RootComponent = ZoneCollision;
 
-	ZoneCollision->SetSphereRadius(CalculateBroadphaseRadius());
+	ZoneCollision->SetSphereRadius(Radius);
 	ZoneCollision->SetCollisionProfileName(TEXT("OverlapAllDynamic"));
 	ZoneCollision->SetGenerateOverlapEvents(true);
 	ZoneCollision->CanCharacterStepUpOn = ECB_No;
@@ -108,7 +108,7 @@ void AStatusZoneBase::InitializeZoneBase(
 
 	if (ZoneCollision)
 	{
-		ZoneCollision->SetSphereRadius(CalculateBroadphaseRadius());
+		ZoneCollision->SetSphereRadius(Radius);
 	}
 
 	FlushNetDormancy();
@@ -124,7 +124,7 @@ void AStatusZoneBase::OnRep_Radius()
 {
 	if (ZoneCollision)
 	{
-		ZoneCollision->SetSphereRadius(CalculateBroadphaseRadius());
+		ZoneCollision->SetSphereRadius(Radius);
 	}
 }
 
@@ -249,48 +249,7 @@ bool AStatusZoneBase::IsActorEligibleForZoneEffect(AActor* TargetActor, UPrimiti
 		return false;
 	}
 
-	// 3. Rozwiązywanie konfliktów nakładających się płynów
-	if (IsOverruledByNewerLiquidZone(TargetActor->GetActorLocation()))
-	{
-		return false;
-	}
-
 	return true;
-}
-
-bool AStatusZoneBase::IsOverruledByNewerLiquidZone(const FVector& TargetLocation) const
-{
-	if (!UElementalReactionRules::IsLiquidStatus(EffectConfig.AppliedStatus) || !GetWorld() || !ZoneCollision)
-	{
-		return false;
-	}
-
-	TArray<AActor*> OverlappingZones;
-	ZoneCollision->GetOverlappingActors(OverlappingZones, AStatusZoneBase::StaticClass());
-
-	for (AActor* Actor : OverlappingZones)
-	{
-		if (const AStatusZoneBase* OtherZone = Cast<AStatusZoneBase>(Actor))
-		{
-			if (OtherZone == this) continue;
-
-			// Nadpisywanie dotyczy WYŁĄCZNIE różnych płynów (np. nowy olej na starą wodę)
-			if (OtherZone->GetStatusType() != EffectConfig.AppliedStatus &&
-				UElementalReactionRules::IsLiquidStatus(OtherZone->GetStatusType()) &&
-				OtherZone->GetZoneCreationTime() > ZoneCreationTime)
-			{
-				FBoxSphereBounds PointBounds;
-				PointBounds.Origin = TargetLocation;
-				PointBounds.BoxExtent = FVector(10.0f, 10.0f, 10.0f);
-				if (OtherZone->IsActorWithinZoneGeometry(PointBounds))
-				{
-					return true;
-				}
-			}
-		}
-	}
-
-	return false;
 }
 
 bool AStatusZoneBase::CanZonesInteract(const AStatusZoneBase* OtherZone) const
@@ -306,11 +265,6 @@ bool AStatusZoneBase::CanZonesInteract(const AStatusZoneBase* OtherZone) const
 		return false;
 	}
 
-	return true;
-}
-
-bool AStatusZoneBase::HandleLiquidDisplacement(AActor* HitInstigator)
-{
 	return true;
 }
 
@@ -355,17 +309,6 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 	{
 		const EStatusEffectType OldStatus = EffectConfig.AppliedStatus;
 
-		// Wypieranie powłok płynnych (np. woda wypiera olej, olej wypiera wodę)
-		if (Reaction.ReactionTag == FName(TEXT("Liquid_Displaced")))
-		{
-			if (HandleLiquidDisplacement(HitInstigator))
-			{
-				Destroy();
-				return;
-			}
-			return;
-		}
-
 		if (Reaction.ReactionTag == FName(TEXT("Oil_Ignition")))
 		{
 			EffectConfig.AppliedStatus = EStatusEffectType::Burning;
@@ -374,7 +317,7 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 
 			if (ZoneCollision)
 			{
-				ZoneCollision->SetSphereRadius(CalculateBroadphaseRadius());
+				ZoneCollision->SetSphereRadius(Radius);
 			}
 
 			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);

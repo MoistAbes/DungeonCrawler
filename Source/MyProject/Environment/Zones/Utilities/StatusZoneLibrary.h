@@ -4,9 +4,10 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Engine/HitResult.h"
 #include "MyProject/Environment/Zones/Data/ZoneTypes.h"
-#include "MyProject/Environment/Zones/StatusZoneBase.h"
-#include "MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h"
 #include "StatusZoneLibrary.generated.h"
+
+class AStatusZoneBase;
+class AVolumetricStatusZone;
 
 /**
  * Zunifikowana biblioteka narzędziowa do tworzenia i wywoływania stref w świecie gry (Status Zone Engine).
@@ -89,5 +90,7 @@ public:
 		const FVector& HitNormal,
 		EStatusEffectType StatusType,
 		float Duration,
+		float DirectDamage = 15.0f,
+		float SplashRadius = 45.0f,
 		AActor* InstigatorActor = nullptr);
 };

@@ -12,7 +12,8 @@
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Environment/Zones/StatusZoneBase.h"
+#include "MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h"
 #include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 
 
@@ -59,54 +60,10 @@ AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 		}
 	}
 
-	// 1. Zastosowanie jednorazowego impulsu wybuchu na aktorów w strefie jeśli zdefiniowano InstantDamage lub KnockbackForce
+	// 1. Zastosowanie jednorazowego impulsu wybuchu (LoS + Knockback + Falloff), jeśli zdefiniowano InstantDamage lub KnockbackForce
 	if (EffectConfig.InstantDamage > 0.0f || EffectConfig.KnockbackForce > 0.0f)
 	{
-		TArray<FOverlapResult> Overlaps;
-		FCollisionShape SphereShape = FCollisionShape::MakeSphere(Radius);
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(StatusZoneInitialBurst), false);
-		if (InstigatorActor)
-		{
-			QueryParams.AddIgnoredActor(InstigatorActor);
-		}
-
-		FCollisionObjectQueryParams ObjectParams;
-		ObjectParams.AddObjectTypesToQuery(ECC_Pawn);
-		ObjectParams.AddObjectTypesToQuery(ECC_PhysicsBody);
-		ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-		ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
-
-		if (World->OverlapMultiByObjectType(Overlaps, Location, FQuat::Identity, ObjectParams, SphereShape, QueryParams))
-		{
-			TSet<AActor*> ProcessedActors;
-			for (const FOverlapResult& Overlap : Overlaps)
-			{
-				AActor* TargetActor = Overlap.GetActor();
-				if (!TargetActor || TargetActor == InstigatorActor || ProcessedActors.Contains(TargetActor))
-				{
-					continue;
-				}
-				ProcessedActors.Add(TargetActor);
-
-				if (EffectConfig.InstantDamage > 0.0f)
-				{
-					if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
-					{
-						Damageable->ApplyDamage(EffectConfig.InstantDamage);
-					}
-				}
-
-				if (EffectConfig.KnockbackForce > 0.0f)
-				{
-					FVector KnockbackDir = (TargetActor->GetActorLocation() - Location).GetSafeNormal();
-					if (KnockbackDir.IsNearlyZero())
-					{
-						KnockbackDir = FVector::UpVector;
-					}
-					UKineticForceLibrary::ApplyDirectionalKnockback(TargetActor, KnockbackDir, EffectConfig.KnockbackForce, 0.35f, InstigatorActor);
-				}
-			}
-		}
+		ApplyRadialBurst(WorldContextObject, Location, Radius, EffectConfig, Duration, InstigatorActor);
 	}
 
 	FActorSpawnParameters SpawnParams;
@@ -309,23 +266,6 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 			{
 				StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
 			}
-			else if (StatusType == EStatusEffectType::Burning)
-			{
-				// Obiekty podatne na ogień bez StatusEffectComponent (np. drewniane barykady)
-				if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
-				{
-					EPhysicalMaterialType MatType = EPhysicalMaterialType::Stone;
-					if (TargetActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
-					{
-						MatType = IMaterialProviderInterface::Execute_GetMaterialType(TargetActor);
-					}
-
-					if (MatType == EPhysicalMaterialType::Wood)
-					{
-						Damageable->ApplyDamage(25.0f);
-					}
-				}
-			}
 		}
 	}
 
@@ -352,6 +292,8 @@ bool UStatusZoneLibrary::ApplyPointHit(
 	const FVector& HitNormal,
 	EStatusEffectType StatusType,
 	float Duration,
+	float DirectDamage,
+	float SplashRadius,
 	AActor* InstigatorActor)
 {
 	if (!TargetActor || !NetUtils::HasAuthority(TargetActor) || StatusType == EStatusEffectType::None)
@@ -370,10 +312,10 @@ bool UStatusZoneLibrary::ApplyPointHit(
 	return ApplyPointImpact(
 		TargetActor,
 		SyntheticHit,
-		45.0f,
+		SplashRadius,
 		StatusType,
 		Duration,
-		15.0f,
+		DirectDamage,
 		InstigatorActor);
 }
 
