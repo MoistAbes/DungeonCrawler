@@ -6,7 +6,6 @@
 UENUM(BlueprintType)
 enum class EPhysicalMaterialType : uint8
 {
-	Default  UMETA(DisplayName = "Default"),
 	Glass    UMETA(DisplayName = "Glass"),
 	Wood     UMETA(DisplayName = "Wood"),
 	Stone    UMETA(DisplayName = "Stone"),
@@ -57,12 +56,8 @@ namespace PhysicalMaterialUtils
 			Traits.bFragile = true;
 			break;
 		case EPhysicalMaterialType::Stone:
-			// Domyślnie brak cech specjalnych: niepalny izolator
-			break;
-		case EPhysicalMaterialType::Default:
 		default:
-			Traits.bFlammable = true;
-			Traits.bConductive = true;
+			// Domyślnie brak cech specjalnych: niepalny izolator
 			break;
 		}
 		return Traits;

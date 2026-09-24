@@ -6,6 +6,7 @@
 #include "DungeonSurfaceSubsystem.generated.h"
 
 class ACharacter;
+class UStatusEffectComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnSurfaceCellChanged, const FSurfaceCellCoord&, Coord, EStatusEffectType, NewStatus, AActor*, Instigator);
 
@@ -105,7 +106,8 @@ public:
 		const FSurfaceCellCoord& Coord,
 		EStatusEffectType IncomingStatus,
 		float Duration,
-		AActor* Instigator = nullptr);
+		AActor* Instigator = nullptr,
+		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone);
 
 	/**
 	 * Wewnętrzna wersja metody PaintSurface z możliwością przekazania zbioru przetworzonych koordynatów
@@ -147,6 +149,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
 	FOnSurfaceCellChanged OnSurfaceCellChanged;
 
+	/** Rejestruje komponent statusów do cyklicznej ewaluacji z siatką powierzchni */
+	void RegisterStatusComponent(UStatusEffectComponent* Comp);
+
+	/** Wyrejestrowuje komponent statusów z podsystemu */
+	void UnregisterStatusComponent(UStatusEffectComponent* Comp);
+
 protected:
 	/** Okresowa pętla serwera: wygaszanie starych komórek i aplikacja statusów na postacie */
 	UFUNCTION()
@@ -158,6 +166,13 @@ protected:
 private:
 	/** Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora */
 	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
+
+	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową */
+	EPhysicalMaterialType GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord) const;
+
+	/** Rejestr aktywnych komponentów statusów w świecie podlegających interakcji z podłożem */
+	UPROPERTY()
+	TArray<TWeakObjectPtr<UStatusEffectComponent>> RegisteredStatusComponents;
 
 	/** Rzadka mapa aktywnych komórek powierzchniowych */
 	TMap<FSurfaceCellCoord, FSurfaceCellData> ActiveCells;

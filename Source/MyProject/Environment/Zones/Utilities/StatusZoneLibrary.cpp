@@ -314,7 +314,7 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 				// Obiekty podatne na ogień bez StatusEffectComponent (np. drewniane barykady)
 				if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
 				{
-					EPhysicalMaterialType MatType = EPhysicalMaterialType::Default;
+					EPhysicalMaterialType MatType = EPhysicalMaterialType::Stone;
 					if (TargetActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
 					{
 						MatType = IMaterialProviderInterface::Execute_GetMaterialType(TargetActor);

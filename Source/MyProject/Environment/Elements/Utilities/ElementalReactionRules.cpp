@@ -106,6 +106,17 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 				/* ResultingDuration      */ 6.0f
 			});
 
+			// Reakcja: Olej trafia w Naelektryzowany cel (Iskra elektryczna zapala olej)
+			Oiled.Reactions.Add(EStatusEffectType::Electrified, FStatusReactionRule{
+				/* bConsumeIncomingStatus */ true,
+				/* bRemoveExistingStatus  */ true,
+				/* BonusInstantDamage     */ 20.0f,
+				/* ReactionTag            */ FName(TEXT("Oil_Electric_Ignition")),
+				/* ResultingStatus        */ EStatusEffectType::Burning,
+				/* bCanSpreadToNeighbor   */ true,
+				/* ResultingDuration      */ 6.0f
+			});
+
 			Definitions.Add(EStatusEffectType::Oiled, Oiled);
 		}
 
@@ -133,6 +144,18 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 				/* ResultingStatus        */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor   */ true,
 				/* ResultingDuration      */ 4.0f
+			});
+
+			// Reakcja: Prąd trafia w Naoliwiony cel (Iskra elektryczna zapala olej)
+			// Iskra elektryczna detonuje łatwopalny olej, wywołując zapłon (Burning) i natychmiastowe obrażenia
+			Electrified.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
+				/* bConsumeIncomingStatus */ true,
+				/* bRemoveExistingStatus  */ true,
+				/* BonusInstantDamage     */ 20.0f,
+				/* ReactionTag            */ FName(TEXT("Oil_Electric_Ignition")),
+				/* ResultingStatus        */ EStatusEffectType::Burning,
+				/* bCanSpreadToNeighbor   */ true,
+				/* ResultingDuration      */ 6.0f
 			});
 
 			Definitions.Add(EStatusEffectType::Electrified, Electrified);

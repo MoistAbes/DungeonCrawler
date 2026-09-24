@@ -12,6 +12,7 @@
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 
 UStatusEffectComponent::UStatusEffectComponent()
 {
@@ -36,7 +37,28 @@ void UStatusEffectComponent::BeginPlay()
         DamageableComponent = Owner->FindComponentByClass<UDamageableComponent>();
     }
 
+    if (UWorld* World = GetWorld())
+    {
+        if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+        {
+            SurfaceSubsystem->RegisterStatusComponent(this);
+        }
+    }
+
     UpdateTickState();
+}
+
+void UStatusEffectComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (UWorld* World = GetWorld())
+    {
+        if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+        {
+            SurfaceSubsystem->UnregisterStatusComponent(this);
+        }
+    }
+
+    Super::EndPlay(EndPlayReason);
 }
 
 void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
@@ -99,36 +121,36 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         return false;
     }
 
+    const float NewEndTime = GetCurrentSyncedTime() + Duration;
+
+    // 1. Jeśli dany status jest już aktywny, odświeżamy tylko czas trwania i nie wywołujemy reakcji
+    if (FActiveStatusEffectInstance* Existing = FindInstance(NewStatus))
+    {
+        RefreshExistingStatus(*Existing, Duration, NewEndTime, InstigatorActor);
+        return true;
+    }
+
     const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
     const TArray<EStatusEffectType> ActiveStatusList = GetActiveStatuses();
 
-    // 1. Reakcje chemiczne żywiołów (np. Vaporize, Extinguish, Oil Ignition)
+    // 2. Reakcje chemiczne żywiołów (np. Vaporize, Extinguish, Oil Ignition, Conductive Shock)
     const bool bConsumed = ProcessElementalReaction(NewStatus, ActiveStatusList);
     if (bConsumed)
     {
         return true;
     }
 
-    // 2. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
+    // 3. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
     // Przekazujemy listę powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
     if (!UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
     {
-        UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
+        UE_LOG(LogDungeonElements, Verbose, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
         return false;
     }
 
-    const float NewEndTime = GetCurrentSyncedTime() + Duration;
-
-    // 3. Odświeżenie istniejącego lub zarejestrowanie nowego statusu
-    if (FActiveStatusEffectInstance* Existing = FindInstance(NewStatus))
-    {
-        RefreshExistingStatus(*Existing, Duration, NewEndTime, InstigatorActor);
-    }
-    else
-    {
-        AddNewStatusInstance(NewStatus, Duration, NewEndTime, InstigatorActor);
-    }
+    // 4. Zarejestrowanie nowego statusu
+    AddNewStatusInstance(NewStatus, Duration, NewEndTime, InstigatorActor);
 
     return true;
 }

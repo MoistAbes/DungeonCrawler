@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
+#include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "SurfaceGridTypes.generated.h"
 
 /**
@@ -368,6 +369,10 @@ struct MYPROJECT_API FSurfaceCellData
 
 	/** Lista aktywnych statusów na komórce (max 2 trzymane bezpośrednio w strukturze inline) */
 	TArray<FSurfaceCellStatusEntry, TInlineAllocator<2>> ActiveStatuses;
+
+	/** Materiał fizyczny architektury podłoża (np. Stone, Wood, Metal) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|SurfaceGrid")
+	EPhysicalMaterialType SurfaceMaterial = EPhysicalMaterialType::Stone;
 
 	bool IsEmpty() const
 	{
