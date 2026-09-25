@@ -164,6 +164,18 @@ protected:
 	void DrawDebugVisuals() const;
 
 private:
+	/** Wygasza przeterminowane statusy w aktywnych komórkach siatki */
+	void ExpireCellStatuses(float CurrentTime);
+
+	/** Propaguje żywioły na sąsiednie komórki (Cellular Automata) */
+	void PropagateElementalSpreads(float CurrentTime, float SafeCellSize);
+
+	/** Ewaluuje dwukierunkową interakcję z zarejestrowanymi komponentami statusów */
+	void ProcessActorInteractions(float CurrentTime);
+
+	/** Przetwarza interakcję pojedynczego aktora ze stykającymi się komórkami */
+	void ProcessActorInteraction(AActor* Actor, UStatusEffectComponent* StatusComp, float CurrentTime);
+
 	/** Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora */
 	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
 
