@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
+#include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "StatusEffectComponent.generated.h"
 
@@ -150,8 +151,8 @@ private:
     void UpdateTickState();
     void DrawDebugLabels() const;
 
-    /** Przetwarza potencjalną reakcję chemiczną żywiołów. Zwraca true jeśli przychodzący status został skonsumowany */
-    bool ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
+    /** Przetwarza potencjalną reakcję chemiczną żywiołów. Zwraca wynik ewaluacji reakcji */
+    FElementalReactionResult ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
 
     /** Odświeża czas trwania i parametry istniejącego statusu */
     void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor);

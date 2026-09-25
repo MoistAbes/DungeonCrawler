@@ -203,7 +203,7 @@ void AStatusZoneBase::ProcessActiveOverlaps()
 		{
 			if (UDamageableComponent* DmgComp = Actor->FindComponentByClass<UDamageableComponent>())
 			{
-				DmgComp->ApplyDamage(EffectConfig.ContinuousDamagePerSec * 0.25f);
+				DmgComp->ApplyDamage(EffectConfig.ContinuousDamagePerSec * ZoneTickInterval);
 			}
 		}
 	}
@@ -309,11 +309,23 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 	{
 		const EStatusEffectType OldStatus = EffectConfig.AppliedStatus;
 
-		if (Reaction.ReactionTag == FName(TEXT("Oil_Ignition")))
+		// 1. Jeśli stary status uległ anihilacji/wygaszeniu i brak nowego statusu (np. Steam_Extinguish / Fire_Extinguished)
+		if (Reaction.ResultingStatus == EStatusEffectType::None && Reaction.ExistingStatusToRemove == OldStatus)
 		{
-			EffectConfig.AppliedStatus = EStatusEffectType::Burning;
-			EffectConfig.ContinuousDamagePerSec = 15.0f;
-			ServerEndTime = GetWorld()->GetTimeSeconds() + 10.0f;
+			OnZoneReaction.Broadcast(OldStatus, EStatusEffectType::None);
+			Destroy();
+			return;
+		}
+
+		// 2. Nowy status powstały w wyniku reakcji (np. Oil_Ignition -> Burning, Oil_Electric_Ignition -> Burning)
+		if (Reaction.ResultingStatus != EStatusEffectType::None)
+		{
+			EffectConfig.AppliedStatus = Reaction.ResultingStatus;
+			const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : 5.0f;
+			ServerEndTime = GetWorld()->GetTimeSeconds() + NewDuration;
+
+			const FStatusEffectConfig& NewStatusConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
+			EffectConfig.ContinuousDamagePerSec = NewStatusConfig.DamagePerSecond;
 
 			if (ZoneCollision)
 			{
@@ -324,33 +336,32 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			FlushNetDormancy();
 			ForceNetUpdate();
 
-			UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, 25.0f, 1200.0f, this, nullptr, false);
+			if (Reaction.BonusInstantDamage > 0.0f)
+			{
+				UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, Reaction.BonusInstantDamage, 1200.0f, HitInstigator ? HitInstigator : this, nullptr, false);
+			}
+
 			ProcessActiveOverlaps();
 			return;
 		}
 
-		if (Reaction.ReactionTag == FName(TEXT("Steam_Extinguish")) || Reaction.ReactionTag == FName(TEXT("Fire_Extinguished")))
+		// 3. Reakcja bez bezpośredniej zamiany (np. Conductive Shock: woda i prąd)
+		if (Reaction.BonusInstantDamage > 0.0f)
 		{
-			EffectConfig.AppliedStatus = EStatusEffectType::Wet;
-			EffectConfig.ContinuousDamagePerSec = 0.0f;
-			ServerEndTime = GetWorld()->GetTimeSeconds() + 8.0f;
+			UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, Reaction.BonusInstantDamage, 600.0f, HitInstigator ? HitInstigator : this, nullptr, false);
 
-			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
-			FlushNetDormancy();
-			ForceNetUpdate();
-			ProcessActiveOverlaps();
-			return;
-		}
+			if (IncomingStatus == EStatusEffectType::Electrified)
+			{
+				EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
+				const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : 4.0f;
+				ServerEndTime = GetWorld()->GetTimeSeconds() + ShockDuration;
+				EffectConfig.ContinuousDamagePerSec = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified).DamagePerSecond;
 
-		if (Reaction.ReactionTag == FName(TEXT("Conductive_Shock")))
-		{
-			EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
-			EffectConfig.ContinuousDamagePerSec = 5.0f;
-			ServerEndTime = GetWorld()->GetTimeSeconds() + 6.0f;
+				OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
+				FlushNetDormancy();
+				ForceNetUpdate();
+			}
 
-			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
-			FlushNetDormancy();
-			ForceNetUpdate();
 			ProcessActiveOverlaps();
 			return;
 		}

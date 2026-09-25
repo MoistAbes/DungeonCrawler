@@ -134,10 +134,38 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     const TArray<EStatusEffectType> ActiveStatusList = GetActiveStatuses();
 
     // 2. Reakcje chemiczne żywiołów (np. Vaporize, Extinguish, Oil Ignition, Conductive Shock)
-    const bool bConsumed = ProcessElementalReaction(NewStatus, ActiveStatusList);
-    if (bConsumed)
+    const FElementalReactionResult Reaction = ProcessElementalReaction(NewStatus, ActiveStatusList);
+    if (Reaction.bReactionOccurred)
     {
-        return true;
+        // A. Jeśli reakcja wytworzyła nowy status wynikowy (np. Olej + Ogień -> Burning, Iskra + Olej -> Burning)
+        if (Reaction.ResultingStatus != EStatusEffectType::None)
+        {
+            if (UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, Reaction.ResultingStatus, ActiveStatusList))
+            {
+                const float ResultDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
+                const float ResultEndTime = GetCurrentSyncedTime() + ResultDuration;
+
+                if (FActiveStatusEffectInstance* ExistingResult = FindInstance(Reaction.ResultingStatus))
+                {
+                    RefreshExistingStatus(*ExistingResult, ResultDuration, ResultEndTime, InstigatorActor);
+                }
+                else
+                {
+                    AddNewStatusInstance(Reaction.ResultingStatus, ResultDuration, ResultEndTime, InstigatorActor);
+                }
+            }
+            return true;
+        }
+
+        // B. Jeśli przychodzący status został skonsumowany/zneutralizowany w reakcji (np. woda zgasiła ogień)
+        if (Reaction.bConsumeIncomingStatus)
+        {
+            UpdateTickState();
+            return true;
+        }
+
+        // C. Jeśli przychodzący status nie został skonsumowany (np. Conductive Shock: woda i prąd współistnieją),
+        // kontynuujemy do standardowej walidacji materiałowej i dodania NewStatus
     }
 
     // 3. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
@@ -155,12 +183,12 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
     return true;
 }
 
-bool UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses)
+FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses)
 {
     const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(NewStatus, ActiveStatuses);
     if (!Reaction.bReactionOccurred)
     {
-        return false;
+        return Reaction;
     }
 
     // Usunięcie skonsumowanego/wypartego statusu (np. woda odparowuje od ognia, olej spala się)
@@ -193,14 +221,7 @@ bool UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatu
 
     OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
 
-    // Jeśli reakcja całkowicie zneutralizowała przychodzący żywioł (np. woda zgasiła ogień)
-    if (Reaction.bConsumeIncomingStatus)
-    {
-        UpdateTickState();
-        return true;
-    }
-
-    return false;
+    return Reaction;
 }
 
 void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor)

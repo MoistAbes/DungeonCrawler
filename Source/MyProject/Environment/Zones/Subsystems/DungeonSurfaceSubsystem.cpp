@@ -997,7 +997,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 				}
 
 				// A. Interakcja Obiekt -> Komórka (z zachowaniem priorytetu reakcji i braku fałszywego break)
-				for (int32 StatusIdx = ActorStatuses.Num() - 1; StatusIdx >= 0; --StatusIdx)
+				for (int32 StatusIdx = 0; StatusIdx < ActorStatuses.Num(); ++StatusIdx)
 				{
 					const EStatusEffectType ActorStatus = ActorStatuses[StatusIdx];
 					if (ActorStatus == EStatusEffectType::None)
@@ -1036,6 +1036,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 						{
 							StatusComp->RemoveStatus(ActorStatus);
 							ActorStatuses.RemoveAt(StatusIdx);
+							--StatusIdx;
 						}
 
 						ApplyStatusToCell(CellCoord, ActorStatus, (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f), Actor);
