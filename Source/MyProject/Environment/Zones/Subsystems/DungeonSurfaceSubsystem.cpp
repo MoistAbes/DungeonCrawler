@@ -36,7 +36,8 @@ namespace
 		const FVector ProbeEnd = SamplePoint - SurfaceNormal * 30.0f;
 
 		TArray<FHitResult> Hits;
-		if (World->LineTraceMultiByChannel(Hits, ProbeStart, ProbeEnd, ECC_WorldStatic, Params))
+		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
+		if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
 		{
 			for (const FHitResult& Hit : Hits)
 			{
@@ -145,7 +146,7 @@ void UDungeonSurfaceSubsystem::Deinitialize()
 
 bool UDungeonSurfaceSubsystem::IsValidSurfaceTarget(const AActor* Actor)
 {
-	if (!Actor)
+	if (!Actor || !IsValid(Actor) || Actor->IsActorBeingDestroyed())
 	{
 		return false;
 	}
@@ -157,8 +158,19 @@ bool UDungeonSurfaceSubsystem::IsValidSurfaceTarget(const AActor* Actor)
 	}
 
 	// 2. Akceptujemy oficjalne fundamenty i architekturę lochu (ściany, podłogi, sufity)
-	if (Actor->IsA<ADungeonStructureBase>())
+	if (const ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(Actor))
 	{
+		// Tylko zniszczalne elementy architektury lochu mogą przestać być powierzchnią po zniszczeniu
+		if (Structure->IsDestructible())
+		{
+			if (const UDamageableComponent* DmgComp = Structure->GetDamageableComponent())
+			{
+				if (DmgComp->IsDestroyed())
+				{
+					return false;
+				}
+			}
+		}
 		return true;
 	}
 
@@ -221,10 +233,20 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	FSurfaceCellData* Existing = ActiveCells.Find(Coord);
 
 	// Jeśli komórka nie istnieje w siatce, ustalamy tożsamość materiałową podłoża
+	// oraz upewniamy się, że pod komórką faktycznie istnieje fizyczna architektura lochu.
 	EPhysicalMaterialType SurfaceMat = ExplicitMaterial;
-	if (SurfaceMat == EPhysicalMaterialType::Stone)
+	if (!Existing)
 	{
-		SurfaceMat = GetSurfaceMaterialAtCoord(Coord);
+		if (!GetSurfaceMaterialAtCoord(Coord, SurfaceMat))
+		{
+			UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) rejected: No valid surface geometry present!"),
+				Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
+			return false;
+		}
+	}
+	else
+	{
+		SurfaceMat = Existing->SurfaceMaterial;
 	}
 
 	FSurfaceCellData CellData;
@@ -264,6 +286,17 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 			Instigator,
 			nullptr,
 			false);
+
+		// Jeśli wybuch zniszczył strukturę podtrzymującą tę komórkę, przerywamy i nie zapisujemy stanu w siatce!
+		EPhysicalMaterialType PostExplosionMat;
+		if (!GetSurfaceMaterialAtCoord(Coord, PostExplosionMat))
+		{
+			UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) structure was destroyed by reaction explosion! Aborting state save."),
+				Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
+			ActiveCells.Remove(Coord);
+			OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
+			return true;
+		}
 	}
 
 	// Komórka została opróżniona (np. ugaszenie ognia wodą)
@@ -274,6 +307,18 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		ActiveCells.Remove(Coord);
 		OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
 		return true;
+	}
+
+	// Ostateczny bezpiecznik fizyczny: upewniamy się, że pod komórką nadal istnieje nienaruszona architektura lochu.
+	// Zapobiega zapisaniu lewitującej komórki w siatce, jeśli struktura została zniszczona w trakcie ewaluacji.
+	EPhysicalMaterialType FinalCheckMat;
+	if (!GetSurfaceMaterialAtCoord(Coord, FinalCheckMat))
+	{
+		UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) aborted: Surface geometry is destroyed or absent!"),
+			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
+		ActiveCells.Remove(Coord);
+		OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
+		return false;
 	}
 
 	// Zapisanie nowego stanu komórki
@@ -416,12 +461,20 @@ int32 UDungeonSurfaceSubsystem::ClearCellsInBounds(const FBox& BoundingBox)
 {
 	int32 RemovedCount = 0;
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	const FBox ExpandedBox = BoundingBox.ExpandBy(SafeCellSize * 0.5f);
 
 	for (auto It = ActiveCells.CreateIterator(); It; ++It)
 	{
 		const FVector Center = It.Key().ToWorldLocation(SafeCellSize);
-		if (BoundingBox.IsInsideOrOn(Center))
+		if (ExpandedBox.IsInsideOrOn(Center))
 		{
+			// Upewniamy się, że pod komórką faktycznie nie ma już geometrii (np. nie usuwamy nienaruszonej podłogi pod zniszczoną ścianą)
+			EPhysicalMaterialType SurvivingMat;
+			if (GetSurfaceMaterialAtCoord(It.Key(), SurvivingMat))
+			{
+				continue;
+			}
+
 			OnSurfaceCellChanged.Broadcast(It.Key(), EStatusEffectType::None, nullptr);
 			It.RemoveCurrent();
 			RemovedCount++;
@@ -526,52 +579,50 @@ void UDungeonSurfaceSubsystem::UnregisterStatusComponent(UStatusEffectComponent*
 	RegisteredStatusComponents.Remove(Comp);
 }
 
-EPhysicalMaterialType UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord) const
+bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const
 {
+	OutMaterial = EPhysicalMaterialType::Stone;
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
-		return EPhysicalMaterialType::Stone;
+		return false;
 	}
 
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 	const FVector Center = Coord.ToWorldLocation(SafeCellSize);
-	const FVector ProbeStart = Center + Normal * 20.0f;
-	const FVector ProbeEnd = Center - Normal * 30.0f;
+	const FVector ProbeStart = Center + Normal * (SafeCellSize * 0.8f);
+	const FVector ProbeEnd = Center - Normal * (SafeCellSize * 0.8f);
 
 	TArray<FHitResult> Hits;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(SurfaceMatQuery), false);
-	if (World->LineTraceMultiByChannel(Hits, ProbeStart, ProbeEnd, ECC_WorldStatic, Params))
+	FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
+	if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
 	{
 		for (const FHitResult& Hit : Hits)
 		{
 			AActor* HitActor = Hit.GetActor();
 			if (HitActor && UDungeonSurfaceSubsystem::IsValidSurfaceTarget(HitActor))
 			{
-				if (HitActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
+				const float NormalDot = FVector::DotProduct(Hit.ImpactNormal, Normal);
+				if (NormalDot > 0.4f)
 				{
-					const EPhysicalMaterialType FoundMat = IMaterialProviderInterface::Execute_GetMaterialType(HitActor);
-					UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] GetSurfaceMaterialAtCoord(%d,%d,%d Face:%d) -> HitActor: %s | Material: %s"),
-						Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *HitActor->GetName(), *UEnum::GetValueAsString(FoundMat));
-					return FoundMat;
-				}
-				else
-				{
-					UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] GetSurfaceMaterialAtCoord(%d,%d,%d Face:%d) -> HitActor %s DOES NOT implement IMaterialProviderInterface! Defaulting to Stone"),
-						Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *HitActor->GetName());
-					return EPhysicalMaterialType::Stone;
+					if (HitActor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
+					{
+						OutMaterial = IMaterialProviderInterface::Execute_GetMaterialType(HitActor);
+					}
+					else
+					{
+						OutMaterial = EPhysicalMaterialType::Stone;
+					}
+					return true;
 				}
 			}
 		}
 	}
-	else
-	{
-		UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] GetSurfaceMaterialAtCoord(%d,%d,%d Face:%d) -> LineTrace MISSED geometry! (Start:%s, End:%s)"),
-			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *ProbeStart.ToString(), *ProbeEnd.ToString());
-	}
 
-	return EPhysicalMaterialType::Stone;
+	return false;
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
@@ -629,6 +680,13 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 
 	for (const FSurfaceCellCoord& Coord : CellsInRadius)
 	{
+		// Bezpiecznik: jeśli komórka została usunięta z ActiveCells w trakcie tej samej pętli
+		// (np. reakcja/wybuch na wcześniejszej komórce zniszczył podtrzymującą strukturę lochu i usunął komórki), pomijamy ją!
+		if (!ActiveCells.Contains(Coord))
+		{
+			continue;
+		}
+
 		ProcessedCoords.Add(Coord);
 		if (ApplyStatusToCell(Coord, Status, Duration, Instigator))
 		{

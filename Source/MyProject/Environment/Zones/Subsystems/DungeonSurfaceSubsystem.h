@@ -167,8 +167,8 @@ private:
 	/** Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora */
 	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
 
-	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową */
-	EPhysicalMaterialType GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord) const;
+	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową. Zwraca false jeśli brak fizycznej geometrii. */
+	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;
 
 	/** Rejestr aktywnych komponentów statusów w świecie podlegających interakcji z podłożem */
 	UPROPERTY()
