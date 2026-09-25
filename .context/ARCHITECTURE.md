@@ -172,11 +172,27 @@ Environment/
 
 ├── Elements/
 
+│   ├── Data/
+
+│   ├── Enums/
+
+│   └── Utilities/
+
 ├── Kinetic/
+
+│   ├── Components/
+
+│   └── Utilities/
 
 └── Zones/
 
-&#x20;   └── Shapes/
+    ├── Data/
+
+    ├── Shapes/
+
+    ├── Subsystems/
+
+    └── Utilities/
 
 ```
 
@@ -204,9 +220,11 @@ Important classes/libraries include:
 
 \* `AStatusZoneBase`
 
-\* `ASurfaceSplashZone`
-
 \* `AVolumetricStatusZone`
+
+\* `UDungeonSurfaceSubsystem`
+
+\* `UElementalReactionRules`
 
 \* `UStatusZoneLibrary`
 
@@ -704,8 +722,6 @@ Current shape-specific implementations include:
 
 ```text
 
-ASurfaceSplashZone
-
 AVolumetricStatusZone
 
 ```
@@ -721,6 +737,14 @@ with the shape implementations located under:
 Environment/Zones/Shapes/
 
 ```
+
+
+
+Surface splashes are NOT actor subclasses. They are handled by UDungeonSurfaceSubsystem (a UWorldSubsystem) as a sparse surface cell grid (TMap<FSurfaceCellCoord, FSurfaceCellData>), with no per-splash actors and no decals. AVolumetricStatusZone is the only actor-based zone shape.
+
+
+
+Elemental reaction rules (material compatibility, reactions, propagation) are centralized in UElementalReactionRules, shared by both UStatusEffectComponent (targets) and UDungeonSurfaceSubsystem (surface cells).
 
 
 

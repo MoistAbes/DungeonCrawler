@@ -1,115 +1,178 @@
 # Specyfikacja Techniczna i Projektowa: System Stref Statusów (Status Zone System)
 
 Dokument stanowi **kompletną kartę projektowo-architektoniczną** dla modułu stref (`Status Zones`) w projekcie *Dungeon Crawler Co-op* (Unreal Engine 5.8 C++, `MYPROJECT_API`).
-Definiuje zrealizowaną transformację monolitycznego aktora w **uniwersalny, modułowy system hierarchii klas C++**, rejestruje rozwiązane problemy fizyczno-geometryczne oraz przedstawia **krytyczny audyt wydajności i skalowalności** w warunkach intensywnej rozgrywki kooperacyjnej (1–6 graczy, roje wrogów, dziesiątki nakładających się stref).
+
+System realizuje dwa niezależne wektory dostarczania efektów żywiołowych do świata:
+1. **Powierzchniowy (Surface)** — rzadka siatka komórek w `UDungeonSurfaceSubsystem` (WorldSubsystem), bez osobnych aktorów i dekalów.
+2. **Wolumetryczny (Volumetric)** — aktor `AVolumetricStatusZone` (sfera zawieszona w przestrzeni).
+
+Dostarczanie steruje zunifikowana fabryka `UStatusZoneLibrary`, a cała chemia żywiołowa (reakcje, materiały, propagacja) jest centralizowana w `UElementalReactionRules`.
+
+Model sieci: **server-authoritative**, **Zero-Bandwidth Timers** (replikacja `ServerEndTime`), **Net Dormancy** (`DORM_DormantAll`).
 
 ---
 
-## 1. Wizja i Cele Nowego Systemu
+## 1. Wizja i Cele Systemu
 
-Dotychczasowy aktor `AElementalStatusZone` był ściśle powiązany z wąskim pojęciem żywiołów (kałuże wody, plamy oleju, ogień) i posiadał sztywno zakodowane parametry (np. `LiquidSurfaceHeight = 35.0f`, `FireSurfaceHeight = 85.0f`).
+System Status Zone realizuje następujące filary:
 
-Nowy system **Status Zone** realizuje następujące filary:
 1. **Uniwersalność Domenowa:**
    Strefa reprezentuje dowolny obszar oddziaływania na gameplay w lochu:
-   - **Żywioły i Ciecze:** Ogień, plama oleju, rozlana woda, kwas.
-   - **Gazy i Zjawiska Środowiskowe:** Trująca chmura, gęsty dym (blokada LoS/celowania), para wodna.
-   - **Efekty Gameplayowe i Spowolnienia:** Strefa spowolnienia ruchu (`MovementSpeedMultiplier`), pajęczyna, strefa uciszenia magii (*Area of Silence*).
-2. **Modularność Formy Przestrzennej (3 Czyste Archetypy):**
-   - **Surface Splash (Powłoka Powierzchniowa):** Cienka warstwa (10–30 cm) przylegająca do geometrii (`DungeonStructureBase`, podłogi, ściany, sufity, a także ruchome mechanizmy).
-   - **Volumetric Timed Zone (Wolumen Przestrzenny w Czasie):** Trójwymiarowa bryła (sfera) zawieszona w przestrzeni przez czas $T$.
-   - **Instant Radial Burst (Chwilowy Wybuch):** Bezstanowe zdarzenie w klatce $t_0$ realizowane przez funkcję statyczną biblioteki, sprawdzające Line of Sight, niepozostawiające trwałego aktora strefy.
-3. **Zasada Czystego Testowania (1 Forma na Dany Blueprint):**
-   - W fazie implementacji i testów `AVolatileProp` wybiera **dokładnie jeden tryb** (`EVolatileZoneSpawnMode`), co pozwala na precyzyjną, izolowaną weryfikację zachowania każdego typu w grze (brak nakładających się zmiennych).
+   - **Żywioły i Ciecze:** Ogień (`Burning`), rozlana woda (`Wet`), plama oleju (`Oiled`), prąd (`Electrified`).
+   - **Gazy i Zjawiska Środowiskowe:** Trująca chmura, dym, mgła parowa (strefy wolumetryczne).
+   - **Efekty Gameplayowe:** Obrażenia ciągłe (DoT), odrzut kinetyczny, reakcje łańcuchowe.
+
+2. **Dwa Wektory Dostarczania (Surface + Volumetric):**
+   - **Surface (siatka komórek):** Cienka, dyskretna warstwa przypięta do geometrii lochu (podłogi, ściany, sufity). Realizowana przez `UDungeonSurfaceSubsystem` jako rzadka siatka `TMap<FSurfaceCellCoord, FSurfaceCellData>` — **bez osobnych aktorów i dekalów**, z pełną świadomością strony fundamentu (6 kierunków) i wielostatusowością komórki.
+   - **Volumetric (aktor sferyczny):** Trójwymiarowa bryła (sfera) zawieszona w przestrzeni przez czas `T`. Realizowana przez aktora `AVolumetricStatusZone`.
+
+3. **Tryby Dostarczania (1 tryb na dany Blueprint):**
+   W `AVolatileProp` wybrany jest dokładnie jeden tryb `EVolatileZoneSpawnMode`, co pozwala na precyzyjną, izolowaną weryfikację każdego wektora:
+   - **RadialBurst** — pełny wybuch 3D z Line-of-Sight (obrażenia, odrzut) + obryzganie widocznych powierzchni w promieniu.
+   - **PointImpact** — uderzenie punktowe w pojedynczą powierzchnię (np. rzucona butelka, ampułka).
+   - **VolumetricZone** — przestrzenna bryła 3D wisząca w powietrzu (gaz, dym).
+
 4. **Architektura Co-op i Optymalizacja Sieciowa (1–6 Graczy):**
-   - **Zero-Bandwidth Timers:** Replikacja wyłącznie `ServerEndTime`. Klienci lokalnie odliczają czas i wygaszają wizualia.
-   - **Server-Authoritative Gameplay:** Aplikacja statusów, obrażeń DoT i spowolnienia następuje wyłącznie na Serwerze.
-   - **Net Dormancy:** Strefy po utworzeniu i replikacji początkowej przechodzą w uśpienie (`DORM_DormantAll`), oszczędzając CPU serwera.
-5. **Przyczepianie do Podłoża / Ściany (`AttachToComponent`):**
-   - Powłoka *Surface Splash* przyczepia się do trafionego komponentu (np. ściany `DungeonStructureBase`).
-   - W przypadku zburzenia/zniszczenia ściany, powłoka jest automatycznie niszczona wraz z rodzicem (brak lewitujących plam w powietrzu).
+   - **Zero-Bandwidth Timers:** Replikacja wyłącznie `ServerEndTime`. Klienci lokalnie odliczają czas.
+   - **Server-Authoritative Gameplay:** Aplikacja statusów, obrażeń DoT i reakcji następuje wyłącznie na Serwerze.
+   - **Net Dormancy:** Strefy wolumetryczne po utworzeniu przechodzą w `DORM_DormantAll`.
+
+5. **Centralizacja Chemii Żywiołowej:**
+   Wszystkie reguły reakcji, kompatybilności materiałowej i propagacji żyją w `UElementalReactionRules` (UBlueprintFunctionLibrary). Zarówno komponent statusów (`UStatusEffectComponent`), jak i siatka powierzchni (`UDungeonSurfaceSubsystem`) odpytują ten sam silnik zasad — brak podwójnej implementacji chemii.
 
 ---
 
 ## 2. Architektura Klas C++ (Hierarchia i Odpowiedzialności)
-
-Zgodnie z zasadami Enterprise Clean Architecture zlikwidowano monolitycznego aktora i wprowadzono hierarchię klas o pojedynczej odpowiedzialności (SRP):
 
 ```mermaid
 classDiagram
     class AStatusZoneBase {
         <<Abstract Base>>
         #USphereComponent* ZoneCollision
-        #UStatusEffectComponent* StatusEffectComponent
         #FZoneEffectConfig EffectConfig
-        #float ZoneTickInterval
+        #float Radius
         #float ServerEndTime
-        +InitializeZone(Config, Duration)
-        +ApplyElementalHit(HitElement)
-        #ProcessZoneEffects()
-        #IsActorEligibleForZoneEffect(Actor) bool
-    }
-
-    class ASurfaceSplashZone {
-        -UDecalComponent* SplashDecal
-        -FVector SurfaceNormal
-        -float SurfaceHeight
-        -TArray~FVector~ CachedPerimeterPoints
-        +InitializeSurfaceSplash(Config, Duration, Normal, Extent, Radius)
-        +RecalculatePerimeter()
-        #IsActorEligibleForZoneEffect(Actor) bool override
+        #float ZoneCreationTime
+        #EZoneShapeType ShapeType
+        #float ZoneTickInterval
+        +InitializeZoneBase(Config, Radius, Duration, ShapeType, Instigator)
+        +ApplyElementalHit(IncomingStatus, InstantDamage, Instigator)
+        +MergeWithZone(Duration, RadiusGrowthMultiplier, MaxRadiusCap)
+        #ProcessActiveOverlaps()
+        #IsActorEligibleForZoneEffect(Actor, Comp) bool
+        #IsActorWithinZoneGeometry(Bounds) bool
     }
 
     class AVolumetricStatusZone {
-        -float SphereRadius
-        +InitializeVolumetric(Config, Duration, Radius)
-        #IsActorEligibleForZoneEffect(Actor) bool override
+        +InitializeVolumetricZone(Config, Radius, Duration, Instigator)
+        #IsActorWithinZoneGeometry(Bounds) bool override
+        #DrawDebugVisuals() override
+    }
+
+    class UDungeonSurfaceSubsystem {
+        <<WorldSubsystem>>
+        -TMap~FSurfaceCellCoord, FSurfaceCellData~ ActiveCells
+        #float CellSize
+        #float SubsystemTickInterval
+        +IsValidSurfaceTarget(Actor) bool
+        +PaintSurfaceFromHit(Hit, Radius, Status, Duration, Instigator) int32
+        +PaintSurface(Location, Normal, Radius, Status, Duration, Instigator) int32
+        +ApplyStatusToCell(Coord, Status, Duration, Instigator, Material) bool
+        +ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator) int32
+        +ClearCellsInBounds(BoundingBox) int32
+        +RegisterStatusComponent(Comp)
+        #ProcessGridTick()
     }
 
     class UStatusZoneLibrary {
         <<BlueprintFunctionLibrary>>
+        +SpawnVolumetricZone(...) AVolumetricStatusZone*
+        +ApplyRadialBurst(...)
+        +ApplyPointImpact(...) bool
         +ApplyPointHit(...) bool
-        +ApplySurfaceSplash(...)
-        +SpawnVolumetricZone(...)
-        +ApplyInstantBurst(...)
-        +HasExplosionLineOfSight(...) bool
     }
 
-    AStatusZoneBase <|-- ASurfaceSplashZone
+    class UElementalReactionRules {
+        <<BlueprintFunctionLibrary>>
+        +GetEffectConfig(Status) FStatusEffectConfig&
+        +CanMaterialReceiveStatus(Material, Status, Active) bool
+        +EvaluateReaction(Incoming, Active) FElementalReactionResult
+        +CanSpreadToNeighbor(Source, Target, Out) bool
+    }
+
     AStatusZoneBase <|-- AVolumetricStatusZone
-    UStatusZoneLibrary ..> AStatusZoneBase : Fabryka i Logika Statyczna
+    UStatusZoneLibrary ..> AVolumetricStatusZone : Fabryka
+    UStatusZoneLibrary ..> UDungeonSurfaceSubsystem : Malowanie powierzchni
+    UDungeonSurfaceSubsystem ..> UElementalReactionRules : Ewaluacja reakcji
+    AVolumetricStatusZone ..> UElementalReactionRules : Ewaluacja reakcji
 ```
 
 ### Podział Odpowiedzialności:
-1. **`AStatusZoneBase` (`Source/MyProject/Environment/Zones/StatusZoneBase.h`):**
-   - Bazowy cykl życia aktora, autorytatywny timer serwera (`FTimerHandle ZoneTickTimerHandle`, domyślnie $0.25\text{ s}$).
-   - Integracja z `UStatusEffectComponent` (rejestracja strefy jako źródła statusów).
-   - Aplikacja ciągłych obrażeń DoT (`ContinuousDamagePerSec`) oraz modyfikatora prędkości poruszania się (`MovementSpeedMultiplier`).
-   - Replikacja stanu czasu (`ServerEndTime`) w modelu *Zero-Bandwidth*.
-   - Obsługa reakcji chemicznych (`ApplyElementalHit`) delegowana do `UElementalChemistryLibrary`.
-2. **`ASurfaceSplashZone` (`Source/MyProject/Environment/Zones/Shapes/SurfaceSplashZone.h`):**
-   - Odpowiedzialność ściśle geometryczna dla powłok powierzchniowych (podłogi, ściany, pochyłości).
-   - Zarządzanie komponentem `UDecalComponent` (dynamiczny materiał, orientacja do wektora normalnego powierzchni).
-   - **Leniwa inwalidacja cache (`IsPerimeterCacheValid`):** porównanie z `CachedCenter`, `CachedNormal`, `CachedRadius`. Rebuild obrysu następuje tylko przy faktycznym przemieszczeniu rodzica w świecie (`AttachToComponent`).
-   - Generowanie obrysu 48 promieni z binarnym poszukiwaniem krawędzi (Drop-Off Binary Search).
-   - **Szybka interpolacja radialna (`GetPerimeterRadiusAtAngle`):** $O(1)$ interpolacja liniowa `Lerp` między dwoma sąsiednimi promieniami z ograniczeniem `[0.0f, Radius]`, eliminująca zbędną geometrię analityczną i sztuczne 10 cm lewitowania plamy nad przepaścią.
-   - Weryfikacja półprzestrzeni (`Half-Space Test`) eliminująca przenikanie przez ściany o grubości $< 30\text{ cm}$.
-3. **`AVolumetricStatusZone` (`Source/MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h`):**
-   - Czysty, ultra-lekki wolumen 3D (chmury gazu, kłęby dymu, strefy ciszy, parowanie).
-   - Całkowity brak dekalów (`UDecalComponent`), brak tablic wierzchołków obrysu, brak alokacji 48 promieni raycastingu.
-   - Błyskawiczny i matematycznie precyzyjny test geometryczny AABB celu: `Bounds.GetBox().ComputeSquaredDistanceToPoint(ZoneCenter) <= Radius^2`.
-   - Weryfikacja przeszkód architektonicznych: Line of Sight ze środka sfery z 5-punktowym próbnikiem anatomicznym (lite ściany, drzwi i zamknięte pokoje $1\times 1\text{ m}$ w 100% zatrzymują gaz wewnątrz).
-   - Pełna obsługa **Zone Merging**: odświeżanie czasu trwania, bezpieczne powiększanie promienia o 20% do limitu `MaxRadiusCap`, natychmiastowe `ForceNetUpdate()` i `ProcessActiveOverlaps()`.
-4. **`UStatusZoneLibrary` (`Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h`):**
-   - Zunifikowana fabryka dostarczania żywiołów do świata:
-     - `ApplyPointHit`: bezpośrednie trafienie pociskiem/strzałą w cel, sprawdzające strefy, komponent statusów i niszczalne drewno.
-     - `ApplySurfaceSplash`: wykrywa trafienie w geometrię fundamentu (`DungeonStructureBase`), spawnuje `ASurfaceSplashZone` i podpina go pod trafiony komponent (`AttachToComponent`).
-     - `SpawnVolumetricZone`: spawnuje `AVolumetricStatusZone` zawieszony w przestrzeni.
-     - `ApplyInstantBurst`: wykonuje natychmiastowe uderzenie w klatce $t_0$ w zunifikowanym pojedynczym przebiegu (`Single-Pass Query`: Line of Sight z 5-punktowym próbnikiem anatomicznym, obrażenia z falloffem, odrzut fizyczny, niszczenie drewnianych struktur `WorldStatic` oraz aplikacja statusu o zadanym `Duration`) bez alokacji trwałego aktora strefy.
+- **`AStatusZoneBase` (`Source/MyProject/Environment/Zones/StatusZoneBase.h`):**
+  Abstrakcyjny aktor strefy wolumetrycznej. Bazowy cykl życia, autorytatywny timer serwera oparty na `PrimaryActorTick.TickInterval = ZoneTickInterval` (domyślnie 0.25 s).
+  Replikacja stanu w modelu Zero-Bandwidth: `EffectConfig`, `Radius`, `ServerEndTime`, `ShapeType`, `ZoneCreationTime`.
+  `bReplicates = true`, `SetReplicateMovement(false)`, `NetDormancy = DORM_DormantAll`.
+  Kolizja przez `USphereComponent ZoneCollision` (profil `OverlapAllDynamic`, `GenerateOverlapEvents`).
+  Aplikacja statusów (`UStatusEffectComponent::ApplyStatus` u celu, wyszukiwane przez `FindComponentByClass`) oraz obrażeń DoT (`UDamageableComponent::ApplyDamage`) — wyłącznie na serwerze.
+  Reakcje chemiczne (`ApplyElementalHit`) delegowane do `UElementalReactionRules::EvaluateReaction`.
+  Wykrywanie nakładania się przez `ProcessActiveOverlaps()` (odpytanie `GetOverlappingActors` co interwał) oraz zdarzeniowo przez `HandleBeginOverlap`.
+- **`AVolumetricStatusZone` (`Source/MyProject/Environment/Zones/Shapes/VolumetricStatusZone.h`):**
+  JEDYNA klasa potomna kształtu strefy. Czysty, lekki wolumen 3D (chmury gazu, dym, mgła parowa).
+  Brak dekalów, brak tablic wierzchołków — maksymalna wydajność pamięciowa i sieciowa.
+  Test geometryczny AABB celu: Bounds vs środek/promień sfery (`IsActorWithinZoneGeometry`).
+  Pełna obsługa Zone Merging (`MergeWithZone`): odświeżanie czasu, kontrolowane powiększanie promienia do `MaxRadiusCap`, `ForceNetUpdate()` + `ProcessActiveOverlaps()`.
+- **`UDungeonSurfaceSubsystem` (`Source/MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h`):**
+  Podsystem świata (`UWorldSubsystem`) zarządzający rzadką siatką komórek powierzchniowych (`TMap<FSurfaceCellCoord, FSurfaceCellData> ActiveCells`).
+  Zastępuje dawny model powierzchniowych stref-aktorów z decallem — brak osobnych aktorów, brak dekalów, brak analitycznych obrysów radialnych.
+  Mapowanie uderzeń cieczy/ognia na dyskretne komórki z uwzględnieniem strony fundamentu (`ESurfaceFaceDirection`: Up/Down/North/South/East/West) — rozbryzg z frontu ściany nie przenika na tył.
+  Wielostatusowość komórki: do 2 statusów trzymanych inline (`TInlineAllocator<2>`), np. [Wet, Electrified].
+  Ewaluacja reakcji chemicznych między żywiołami przez `UElementalReactionRules`.
+  Błyskawiczne usuwanie komórek z obszaru zniszczonych fundamentów (`ClearCellsInBounds`), wywoływane przez `ADungeonStructureBase`.
+  Cykliczna (0.25 s) aplikacja statusów na postacie stykające się z aktywnymi komórkami oraz wygaszanie przeterminowanych.
+- **`UStatusZoneLibrary` (`Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h`):**
+  Zunifikowana fabryka dostarczania efektów do świata:
+  - `SpawnVolumetricZone`: tworzy `AVolumetricStatusZone` zawieszony w przestrzeni.
+  - `ApplyRadialBurst`: natychmiastowy wybuch 3D z Line-of-Sight (obrażenia, odrzut, status) + wszechkierunkowa projekcja na powierzchnie lochu w `UDungeonSurfaceSubsystem`.
+  - `ApplyInstantBurst`: alias wsteczny dla `ApplyRadialBurst`.
+  - `ApplyPointImpact`: uderzenie punktowe w pojedynczą powierzchnię/cel (maluje powierzchnię w subsystemie, aplikuje obrażenia i status).
+  - `ApplyPointHit`: prosty wrapper dla trafienia pojedynczym pociskiem.
+- **`UElementalReactionRules` (`Source/MyProject/Environment/Elements/Utilities/ElementalReactionRules.h`):**
+  Centralny silnik praw żywiołów: kompatybilność materiałowa (`CanMaterialReceiveStatus`), ewaluacja reakcji (`EvaluateReaction`), propagacja na sąsiednie komórki (`CanSpreadToNeighbor`), karty konfiguracyjne statusów (`GetEffectConfig`).
+  Wspólny punkt odpytywany zarówno przez `UStatusEffectComponent` (cele/aktory), jak i `UDungeonSurfaceSubsystem` (komórki powierzchni).
 
 ---
 
-## 3. Zunifikowana Karta Efektu (`FZoneEffectConfig`)
+## 3. Podsystem Siatki Powierzchniowej (Surface Grid)
+
+`UDungeonSurfaceSubsystem` przechowuje aktywne komórki w pamięci podręcznej bez alokacji osobnych aktorów.
+
+### 3.1. Typy Danych
+- `ESurfaceFaceDirection` (`SurfaceGridTypes.h`): 6 kierunków strony fundamentu — Up, Down, North, South, East, West. Zapewnia niezależność przeciwnych stron ściany.
+- `FSurfaceCellCoord`: klucz komórki — X, Y, Z + Face. Statyczne `FromWorldLocation(Location, Normal, CellSize)` (z marginesem 2 cm w głąb komórki eliminującym błędy zaokrągleń na granicy siatki), `ToWorldLocation`, `GetCoplanarNeighbors`, `GetAdjacentNeighbors` (sąsiedzi współpłaszczyznowi + krawędzie 90°), `GetTypeHash`.
+- `FSurfaceCellStatusEntry`: pojedynczy aktywny status na komórce — Status, ServerEndTime, Instigator.
+- `FSurfaceCellData`: dane komórki — `ActiveStatuses` (`TArray<FSurfaceCellStatusEntry, TInlineAllocator<2>>`), `SurfaceMaterial` (`EPhysicalMaterialType`), plus `HasStatus`, `FindStatus`, `RemoveStatus`, `GetDominantStatus` (do wizualizacji: Electrified > Burning > pierwszy).
+
+### 3.2. Konfiguracja
+
+| Parametr | Domyślnie | Opis |
+| :--- | :--- | :--- |
+| `CellSize` | 50.0 cm | Fizyczny rozmiar pojedynczej komórki. |
+| `SubsystemTickInterval` | 0.25 s | Interwał serwera: wygaszanie komórek + aplikacja statusów na postacie. |
+| `bDrawDebugGrid` | true | Debugowe rysowanie aktywnych komórek. |
+
+### 3.3. Główne API
+- `IsValidSurfaceTarget(Actor)` (static): kwalifikuje podłoże — akceptuje `ADungeonStructureBase` i geometrię poziomu (`ABrush`), odrzuca `AInteractivePropBase` i `APawn`.
+- `PaintSurfaceFromHit(HitResult, Radius, Status, Duration, Instigator)`: resolver uderzenia — postać/rekwizyt (status + FloorTrace pod stopy), strefa przestrzenna (przekazanie trafienia), powierzchnia (malowanie).
+- `PaintSurface(Location, Normal, Radius, Status, Duration, Instigator)`: maluje komórki w promieniu z ewaluacją reakcji.
+- `ApplyStatusToCell(Coord, Status, Duration, Instigator, Material)`: atomowy punkt styku dla stanu komórki — odpytuje `UElementalReactionRules`, aplikuje wynik, zarządza `ActiveCells`.
+- `ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator)`: impuls sferyczny (wybuch beczki) — reakcje ze wszystkimi komórkami w zasięgu + opcjonalne malowanie posadzki.
+- `ClearCellsInBounds(BoundingBox)`: usuwa komórki w AABB (zniszczenie ściany/podłogi przez `ADungeonStructureBase`).
+- `RegisterStatusComponent` / `UnregisterStatusComponent`: rejestr komponentów statusów podlegających cyklicznej interakcji z podłożem.
+- `OnSurfaceCellChanged` (delegat): podstawa dla systemów VFX/SFX.
+
+---
+
+## 4. Zunifikowana Karta Efektu (`FZoneEffectConfig`)
 
 ```mermaid
 classDiagram
@@ -118,140 +181,73 @@ classDiagram
         +float InstantDamage
         +float KnockbackForce
         +float ContinuousDamagePerSec
-        +float MovementSpeedMultiplier
     }
 ```
 
-Pola w `FZoneEffectConfig`:
-- **Instant (dla InstantBurst):**
-  - `InstantDamage`: jednorazowe obrażenia w klatce detonacji.
-  - `KnockbackForce`: radialny odrzut fizyczny obiektów Chaos i graczy spełniających warunek LoS.
+Pola w `FZoneEffectConfig` (`ZoneTypes.h`):
+
 - **Status:**
-  - `AppliedStatus`: typ nakładanego żywiołu (`Burning`, `Wet`, `Oiled`, `Electrified`, `None`). Aplikowany przy wejściu i odświeżany co okres strefy.
+  - `AppliedStatus` — nakładany status (`Burning`, `Wet`, `Oiled`, `Electrified`, `None`). Nakładany przy wejściu i odświeżany co interwał strefy.
+- **Instant (dla wybuchu / trafienia):**
+  - `InstantDamage` — jednorazowe obrażenia w klatce detonacji.
+  - `KnockbackForce` — radialny odrzut fizyczny celów spełniających warunek LoS.
 - **Continuous (dla stref trwałych):**
-  - `ContinuousDamagePerSec`: ciągłe obrażenia co sekundę (np. ogień, kwas).
-  - `MovementSpeedMultiplier`: mnożnik prędkości (np. $0.5$ dla spowolnienia w oleju lub pajęczynie, $1.0$ dla braku modyfikacji).
+  - `ContinuousDamagePerSec` — ciągłe obrażenia co sekundę (np. ogień, kwas).
+
+> **Uwaga:** strefy nie posiadają mnożnika prędkości poruszania się. Spowolnienie ruchu nie jest częścią bieżącego `FZoneEffectConfig`.
 
 ---
 
-## 4. Reakcje Chemiczne i Zbieżność Stref (Zone Interactivity)
+## 5. Reakcje Chemiczne (Elemental Reactions)
 
-| Istniejąca Strefa | Trafienie / Wejście innej strefy | Wynik Reakcji |
+Cała chemia jest centralizowana w `UElementalReactionRules`. Reakcje zachodzą w dwóch kontekstach:
+1. Na celach/aktorach — przez `UStatusEffectComponent` (powłoki na postaciach i rekwizytach).
+2. Na komórkach powierzchni — przez `UDungeonSurfaceSubsystem` (siatka).
+
+Oba konteksty odpytują ten sam silnik zasad (`EvaluateReaction`, `CanMaterialReceiveStatus`, `CanSpreadToNeighbor`).
+
+| Istniejący Status | Przychodzący Status | Wynik Reakcji (`ReactionTag`) |
 | :--- | :--- | :--- |
-| **Surface Splash: Olej** | Ogień (Pocisk lub Strefa) | **Podpalenie strefy:** Przekształcenie w płonącą powłokę, obrażenia podpalenia, reakcja łańcuchowa. |
-| **Surface Splash: Woda** | Ogień | **Odparowanie:** Powstaje chmura pary wodnej (*Volumetric Steam Zone*), gasząca pożar i zasłaniająca widok. |
-| **Surface Splash: Woda** | Elektryczność | **Przewodzenie:** Cała kałuża staje się strefą pod napięciem zadającą obrażenia szokowe. |
-| **Volumetric: Trujący Gaz** | Ogień | **Detonacja Gazowa:** Natychmiastowy *Radial Burst* wybuchu, strefa gazu znika w płomieniach. |
-| **Surface Splash: Dowolna ciecz** | Spłukanie inną cieczą | **Wypieranie cieczy (Liquid Displacement):** Tylko na tej samej płaszczyźnie (`NormalDot > 0.85` i $\Delta h < 30\text{ cm}$). |
+| Olej (`Oiled`) | Ogień (`Burning`) | `Oil_Ignition` — podpalenie, status Burning, obrażenia, odrzut, propagacja na sąsiednie komórki. |
+| Ogień (`Burning`) | Woda (`Wet`) | `Steam_Extinguish` / `Fire_Extinguished` — ugaszenie, status Wet, brak DoT. |
+| Woda (`Wet`) | Prąd (`Electrified`) | `Conductive_Shock` — przewodzenie, status Electrified, obrażenia szokowe. |
+
+Dane reakcji (`FStatusReactionRule`, `FElementalReactionResult`): `bConsumeIncomingStatus`, `bRemoveExistingStatus`, `BonusInstantDamage`, `ReactionTag`, `ResultingStatus`, `bCanSpreadToNeighbor`, `ResultingDuration`.
+
+Karty statusów (`FStatusEffectConfig` w `StatusEffectTypes.h`): `bIsLiquid`, `bRequiresFlammable`, `bRequiresConductive`, `BypassTraitsIfActive`, `DamagePerSecond`, `TickInterval`, `ReactionPriority`, `Reactions`.
 
 ---
 
-## 5. Dziennik Problemów i Zrealizowane Rozwiązania
+## 6. Audyt Wydajności i Skalowalności
 
-### Problem 1: Błędne usuwanie plamy podłogowej przy wybuchu w pobliżu ściany (Rozwiązany)
-- **Symptom:** Rozbicie beczki wodnej tuż przy ścianie generowało splash na ścianie, ale splash na podłodze natychmiast znikał lub w ogóle się nie pojawiał.
-- **Przyczyna:** Logika `Liquid_Displaced` w `ApplyElementalHit` zawierała bezwarunkowe niszczenie istniejącej strefy (`Dist <= Radius * 0.6f -> Destroy()`). Jeśli w tej samej klatce $t_0$ wygenerował się splash na podłodze, a ułamek sekundy później raycast boczny wygenerował splash na ścianie, nowy splash niszczył ten na podłodze mimo skrajnie różnych wektorów normalnych! Dodatkowo ten sam żywioł (`Wet` + `Wet`) niszczył sam siebie.
-- **Rozwiązanie w kodzie:**
-  1. Wykluczono samoniszczenie dla identycznych żywiołów (`NewStatus == EffectConfig.AppliedStatus -> return`).
-  2. Wprowadzono rygorystyczny test koplanarności dla wypierania cieczy:
-     - `FVector::DotProduct(SurfaceNormal, OtherZone->SurfaceNormal) > 0.85f` (zgodność płaszczyzn).
-     - Różnica rzutu na normalną $< 30\text{ cm}$ (ta sama fizyczna powierzchnia).
-     Dzięki temu plama na ścianie i plama na podłodze koegzystują bez konfliktu.
+Scenariusz docelowy: 4 graczy w kooperacji, fala 20–30 przeciwników, dziesiątki nakładających się efektów.
 
-### Problem 2: Błąd kompilacji C2259 (Cannot instantiate abstract class) (Rozwiązany)
-- **Symptom:** Utworzenie metod czysto wirtualnych (`= 0`) w `AStatusZoneBase` uniemożliwiało silnikowi Unreal Engine wygenerowanie obiektu domyślnego klasy (Class Default Object - CDO).
-- **Rozwiązanie:** Zastąpiono czysto wirtualne metody implementacjami domyślnymi `virtual bool IsActorEligibleForZoneEffect(AActor* TargetActor)` w `AStatusZoneBase`, nadpisywanymi w klasach potomnych.
+### 6.1. Powierzchnia (Surface Grid) — CPU
+- **Model:** Rzadka mapa `TMap<FSurfaceCellCoord, FSurfaceCellData>`. Brak osobnych aktorów, brak dekalów, brak analitycznych obrysów radialnych (48 promieni).
+- **Koszt:** Co `SubsystemTickInterval` (0.25 s) iteracja wyłącznie po aktywnych komórkach (`ActiveCells`) + test styku z zarejestrowanymi komponentami statusów. Koszt proporcjonalny do liczby aktywnych komórek, nie do liczby "aktorów stref".
+- **Zysk względem dawnego modelu:** Eliminacja per-aktor `GetOverlappingActors`, eliminacja GPU decal overdraw, eliminacja alokacji aktorów i dekalów przy każdym rozbryzgu.
 
-### Problem 3: Brak statusu przy fizycznym zablokowaniu rozbryzgu (Splash Blocking) przez postać lub prop (Rozwiązany)
-- **Symptom:** Gdy postać lub interaktywny rekwizyt (np. beczka, skrzynka) stał na drodze rozbryzgu cieczy z `AVolatileProp`, ciecz fizycznie zatrzymywała się na obiekcie (rozwarstwiała się na nim i nie leciała dalej na ścianę), lecz obiekt ten nie zawsze otrzymywał status żywiołowy (`Wet`, `Oiled`).
-- **Przyczyny źródłowe:**
-  1. **Ignorowanie blokera w skanowaniu radialnym (`AVolatileProp::SpawnSurfaceSplashes`):** Promienie radialne natrafiając na aktora niebędącego strukturą (`!IsValidSurfaceTarget`) wykonywały `continue;`, całkowicie pomijając aplikację statusu na obiekt, który przechwycił strugę cieczy.
-  2. **Zawężenie promienia podłogowego tylko do `APawn` (`UStatusZoneLibrary::ApplySurfaceSplash`):** Trafienie w `AInteractivePropBase` nie generowało poszukiwania posadzki w dół pod propem, przez co pod rekwizytem nie formowała się kałuża.
-  3. **Kolizje Line of Sight na poziomie podłogi (`AStatusZoneBase::IsActorEligibleForZoneEffect`):** Weryfikacja LoS za pomocą promienia z $Z=0$ (środek strefy na podłodze) haczyła o mikroskopijne krawędzie siatki podłogi lub inne rekwizyty, fałszywie odrzucając obiekty stojące bezpośrednio w kałuży. Dla stref `SurfaceSplash` obrys 48 promieni już w pełni definiuje geometrię widoczności i architektury.
-  4. **Zerowa tolerancja granic w `ASurfaceSplashZone`:** Brak bufora grubości (`GetMaxAllowedHeight()`) sprawiał, że obiekty uniesione o 1–3 cm przez skórę kolizyjną Chaos (contact skin) lub stojące na skraju dekalowania wypadały poza strefę.
-- **Rozwiązanie w kodzie:**
-  1. W `AVolatileProp::SpawnSurfaceSplashes`: każdy promień trafiający w obiekt niebędący strukturą natychmiast aplikuje status z pełnym czasem trwania `ZoneDuration` na `UStatusEffectComponent` tego aktora, zatrzymując strugę przed dotarciem do ściany za nim.
-  2. W `UStatusZoneLibrary::ApplySurfaceSplash`: rozszerzono wyszukiwanie podłogi w dół o `AInteractivePropBase`, dzięki czemu plama rozlewa się pod stopami gracza lub pod rekwizytem.
-  3. W `AStatusZoneBase::IsActorEligibleForZoneEffect`: ominięto redundantny, przypodłogowy test LoS dla `EZoneShapeType::SurfaceSplash` (zachowując go dla przestrzennych chmur 3D `VolumetricZone`).
-  4. W `ASurfaceSplashZone`: dodano $+15\text{ cm}$ tolerancji w `IsWithinNormalBounds` oraz `IsWithinTangentialPerimeter`, co idealnie pokrywa się z rzutem dekalowania i geometrią fizyczną Chaos.
+### 6.2. Wolumetryka (Volumetric Zones) — CPU
+- **Stan obecny:** Każdy `AVolumetricStatusZone` posiada `USphereComponent ZoneCollision`. Co `ZoneTickInterval` (0.25 s) `ProcessActiveOverlaps()` wywołuje `GetOverlappingActors`.
+- **Rekomendacja (Wysoki Priorytet, do wdrożenia):** Zamiana odpytywania fazy szerokiej na podejście **Event-Driven** — utrzymywanie lokalnego zbioru aktorów wewnątrz strefy w oparciu o `OnComponentBeginOverlap` / `OnComponentEndOverlap` i iteracja wyłącznie po nim.
+- **Rekomendacja (P2):** **Timer Phase Staggering** — losowe przesunięcie pierwszej fazy ticka (`FMath::FRandRange`) rozkładające obciążenie wielu stref pomiędzy klatki.
+- **Rekomendacja (P2):** **LoS Caching** — pamięć podręczna widoczności per aktor, odświeżana tylko przy ruchu > 30 cm.
+
+### 6.3. Skalowalność Sieciowa i Przepustowość (Network Bandwidth)
+- **Ocena:** Implementacja jest oszczędna:
+  - Strefy wolumetryczne: `bReplicates = true`, `bReplicateMovement = false`, `NetDormancy = DORM_DormantAll`. Replikowane wyłącznie `EffectConfig`, `Radius`, `ServerEndTime`, `ShapeType`, `ZoneCreationTime`.
+  - Siatka powierzchni: nie replikuje aktorów — stan komórek jest autorytatywny na serwerze; klienci odbierają efekty przez komponenty statusów i delegaty.
+  - Obrażenia i logika statusów są w 100% autorytatywne na serwerze (zero RPC do klientów podczas trwania efektu).
 
 ---
 
-## 6. Krytyczny Audyt Wydajności i Skalowalności
-
-Dokonano szczegółowej analizy systemu pod kątem obciążenia w scenariuszu docelowym: **4 graczy w trybie kooperacji, fala 20–30 przeciwników w korytarzu lochu, 30–50 aktywnych, nakładających się stref (rozlany olej, ogień, woda z rur, chmury trującego gazu, wybuchające beczki).**
-
-```mermaid
-graph LR
-    subgraph "Wąskie Gardła Wydajności (Performance Bottlenecks)"
-        A["1. Chaos Dynamic Overlaps"] -->|"GetOverlappingActors co 0.25s x 50 stref"| CPU1["Spadek wydajności CPU Serwera"]
-        B["2. Line-of-Sight Raycasts"] -->|"LineTraceSingle co tick dla każdego aktora"| CPU2["Zatory w PhysX/Chaos Raycast Pool"]
-        C["3. GPU Decal Overdraw"] -->|"10 nakładających się dekalów na 1 m2"| GPU["Dławienie G-Buffer Pixel Shadera"]
-        D["4. Timer Frame Hitching"] -->|"50 stref tykających w tej samej klatce"| TICK["Mikro-przycięcia (Frame Spikes)"]
-    end
-```
-
-### 6.1. Solver Fizyki Chaos & Badanie Overlapów (CPU)
-- **Stan obecny:**
-  Każda strefa posiada komponent `USphereComponent* ZoneCollision` ($R \approx 300\text{--}600\text{ cm}$). Co $0.25\text{ s}$ w metodzie `ProcessZoneEffects()` wywoływane jest:
-  ```cpp
-  ZoneCollision->GetOverlappingActors(OverlappingActors, AActor::StaticClass());
-  ```
-- **Krytyczna ocena:**
-  Przy 50 aktywnych strefach serwer wykonuje $50 \times 4 = 200$ zapytań przestrzennych do solvera Chaos na sekundę. W wąskim gardle lochu, gdzie strefy się nakładają, a w środku znajduje się 4 graczy i 25 potworów, `GetOverlappingActors` zwraca duże tablice i obciąża wątek fizyki alokacjami i iteracjami.
-- **Rekomendacja optymalizacyjna (Wysoki Priorytet):**
-  Zastąpienie odpytywania fazy szerokiej (`GetOverlappingActors`) podejściem **Event-Driven**:
-  Strefa rejestruje delegaty `OnComponentBeginOverlap` i `OnComponentEndOverlap`, utrzymując lokalny zbiór `TSet<TWeakObjectPtr<AActor>> InsideActors`.
-  W metodzie `ProcessZoneEffects()` iterujemy **wyłącznie** po elementach tego zbioru ($O(N)$ zamiast zapytania do drzewa BVH Chaos). Koszt CPU spada o rząd wielkości.
-
-### 6.2. Raycasty Widoczności Line-of-Sight (CPU)
-- **Stan obecny:**
-  W metodzie `IsActorEligibleForZoneEffect` dla każdego nakładającego się aktora wykonywany jest `LineTraceSingleByChannel(..., ECC_Visibility)` ze środka strefy do środka kapsuły aktora.
-- **Krytyczna ocena:**
-  Jeśli w 10 nakładających się strefach znajduje się 15 jednostek, co $0.25\text{ s}$ wykonywanych jest $10 \times 15 = 150$ synchronicznych promieni raycastingu.
-- **Rekomendacja optymalizacyjna:**
-  1. **Spatial Caching LoS:** Zapisanie ostatniego wyniku LoS i pozycji aktora. Jeśli aktor przemieścił się o mniej niż $30\text{ cm}$ od ostatniego sprawdzenia, pomijamy raycast i używamy wyniku z pamięci podręcznej.
-  2. **Volumetric Zones Bypass:** Dla stref wolumetrycznych (np. chmura trującego dymu) gaz wnika w zakamarki — test LoS można uprościć lub sprawdzać wyłącznie przy wejściu do strefy (`BeginOverlap`), a nie co $0.25\text{ s}$.
-
-### 6.3. Overdraw Dekali na GPU (Render Thread & Fillrate)
-- **Stan wdrożony (Zrealizowano):**
-  Zaimplementowano mechanizm **Zone Merging & Refresh**:
-  W [`UStatusZoneLibrary`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.cpp) przed zespawnowaniem nowego aktora strefy badane jest otoczenie punktu trafienia:
-  - Jeśli na tej samej płaszczyźnie (`NormalDot > 0.85` oraz odległość płaszczyzny $< 30\text{ cm}$) istnieje już strefa tego samego żywiołu:
-    1. Wywoływana jest metoda [`MergeWithZone(Duration, 1.20f, SplashRadius * 1.5f)`](file:///E:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Zones/StatusZoneBase.cpp).
-    2. Wydłużany jest czas trwania: `ServerEndTime = FMath::Max(ServerEndTime, Now + Duration)`.
-    3. Promień strefy zostaje powiększony o $20\%$ (do ustalonego bezpiecznego limitu).
-    4. Wymuszone zostaje przeliczenie 48-promieniowego obrysu, co rozlewa plamę wzdłuż wolnych korytarzy bez przekraczania ścian i krawędzi.
-    5. Zwracana jest istniejąca strefa, a nowy aktor i dekal nie są alokowane.
-- **Zysk:** Całkowite wyeliminowanie GPU Overdraw przy wielokrotnym detonowaniu beczek w tym samym punkcie oraz drastyczny spadek liczby tykających aktorów.
-
-### 6.4. Zsynchronizowany Tick i Mikro-przycięcia (Timer Hitching)
-- **Stan obecny:**
-  Gdy pułapka lub wybuch tworzy jednocześnie 10 stref, wszystkie mają timer ustawiony na $0.25\text{ s}$ bez przesunięcia fazowego. W efekcie wszystkie 10 stref tyka w tej samej milisekundzie co 250 ms.
-- **Rekomendacja optymalizacyjna:**
-  Wprowadzenie tzw. **Timer Jitter / Phase Staggering**:
-  Podczas inicjalizacji timera serwera dodajemy losowe przesunięcie pierwszej klatki:
-  `FirstDelay = FMath::FRandRange(0.01f, 0.08f)`.
-  Dzięki temu obciążenie obliczeniowe stref rozkłada się równomiernie pomiędzy kolejne klatki serwera.
-
-### 6.5. Skalowalność Sieciowa i Przepustowość (Network Bandwidth)
-- **Ocena:**
-  Obecna implementacja jest **bardzo dobra i oszczędna**:
-  - `bReplicates = true`, ale `bReplicateMovement = false`.
-  - Replikowane są wyłącznie dane konfiguracyjne oraz `ServerEndTime` (pojedynczy float).
-  - Obrażenia i logika statusów są w 100% autorytatywne na serwerze (zero RPC do klientów podczas trwania strefy).
-  - Klienci lokalnie odliczają czas i wygaszają dekal.
-- **Kolejny krok sieciowy:**
-  Włączenie `DORM_DormantAll` bezpośrednio po zreplikowaniu stanu początkowego, co całkowicie wyłącza strefy z pętli porównywania właściwości replikowanych silnika (`NetDriver`) do momentu ewentualnej zmiany stanu (np. zapłonu).
-
----
-
-## 7. Plan Działań Optymalizacyjnych (Roadmapa v0.2 / v0.3)
+## 7. Roadmapa Optymalizacyjna
 
 | Priorytet | Zadanie | Status | Cel / Zysk |
 | :---: | :--- | :---: | :--- |
-| **P1** | **Zone Merging (Łączenie Stref)** | **[ZREALIZOWANE]** | Odświeżanie istniejącej strefy i powiększenie promienia o 20% zamiast duplikatów. Zero Overdraw. |
-| **P1** | **Event-Driven Overlap Tracking** | Do wdrożenia | Zamiana `GetOverlappingActors()` na `TSet` w oparciu o `OnComponentBegin/EndOverlap`. Spadek obciążenia CPU. |
-| **P2** | **Timer Phase Staggering** | Do wdrożenia | Losowe mikro-przesunięcie pierwszej fazy timera strefy eliminujące mikro-przycięcia klatek. |
-| **P2** | **LoS Caching** | Do wdrożenia | Pamięć podręczna widoczności per aktor odświeżana tylko przy ruchu $> 30\text{ cm}$. Ograniczenie raycastów o 70%. |
-| **P3** | **Multi-Zone Spawning** | Backlog | Jednoczesne spawnowanie fali $t_0$, powłoki cieczy i chmury gazu z jednego obiektu. |
+| **P1** | **Surface Grid (`UDungeonSurfaceSubsystem`)** | **[ZREALIZOWANE]** | Zastąpienie stref-aktorów z decallem rzadką siatką komórek. Zero per-aktor overlaps, zero decal overdraw. |
+| **P1** | **Net Dormancy stref wolumetrycznych** | **[ZREALIZOWANE]** | `DORM_DormantAll` po utworzeniu — wyłączenie z pętli porównywania właściwości. |
+| **P1** | **Zone Merging (strefy wolumetryczne)** | **[ZREALIZOWANE]** | `MergeWithZone` — odświeżanie czasu i kontrolowane powiększanie promienia zamiast duplikatów. |
+| **P1** | **Event-Driven Overlap (strefy wolumetryczne)** | Do wdrożenia | Zamiana `GetOverlappingActors()` na zbiór w oparciu o `OnComponentBegin/EndOverlap`. |
+| **P2** | **Timer Phase Staggering** | Do wdrożenia | Losowe mikro-przesunięcie fazy ticka strefy eliminujące mikro-przycięcia. |
+| **P2** | **LoS Caching** | Do wdrożenia | Pamięć podręczna widoczności per aktor odświeżana tylko przy ruchu > 30 cm. |

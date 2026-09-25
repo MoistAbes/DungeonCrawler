@@ -1,4 +1,4 @@
-﻿# Architektura Sieciowa i Zasady Implementacji Co-op (1–6 Graczy)
+# Architektura Sieciowa i Zasady Implementacji Co-op (1–6 Graczy)
 
 ## 1. Misja i Cel Dokumentu
 Dokument stanowi **kontrakt architektoniczny (Network Architecture RFC)** dla gry *Dungeon Crawler*.
@@ -112,15 +112,15 @@ Każdy nowy system, komponent i aktor wprowadzany do projektu musi spełniać po
   ```
 * Funkcja `OnRep_CurrentDurability` rozgłasza lokalne delegaty `OnHealthChanged` / `OnDurabilityChanged`, zasilając pasek zdrowia UI u każdego klienta.
 
-### 3. `UStatusEffectComponent` & `UElementalChemistryLibrary`
+### 3. `UStatusEffectComponent` & `UElementalReactionRules`
 * `bReplicates = true`.
 * **Hierarchia Ewaluacji Chemii Żywiołów (Elemental Priority Pipeline):**
   1. **Faza 1 (Żywioł vs Powłoka):** Sprawdzenie czy przychodzący żywioł reaguje z aktywnym statusem na powierzchni (np. Ogień uderza w Mokry cel $\rightarrow$ `Steam_Extinguish`). Jeśli reakcja neutralizuje żywioł (`bConsumeIncomingStatus = true`), następuje odparowanie/ugaszanie i wczesne zakończenie.
   2. **Faza 2 (Żywioł vs Materiał pod spodem):** Jeśli żywioł nie został skonsumowany przez powłokę, sprawdzana jest odporność materiałowa (`CanMaterialReceiveStatus`). Kamień i metal odrzucają ogień, chroniąc obiekt przed niepoprawnym zapłonem.
 * Tablica aktywnych statusów:
   ```cpp
-  UPROPERTY(ReplicatedUsing = OnRep_ActiveEffects)
-  TArray<FActiveStatusEffectInstance> ReplicatedEffects;
+  UPROPERTY(ReplicatedUsing = OnRep_ActiveStatusEffects, VisibleInstanceOnly, Category = "Custom|Status Effects|State")
+  TArray<FActiveStatusEffectInstance> ActiveStatusEffects;
   ```
 * Cykl życia, DoT oraz ewaluacja chemii wykonywane są **wyłącznie na serwerze**.
 
