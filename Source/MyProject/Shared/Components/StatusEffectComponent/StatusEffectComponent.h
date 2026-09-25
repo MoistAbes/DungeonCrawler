@@ -26,6 +26,10 @@ struct FActiveStatusEffectInstance
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     EStatusEffectType EffectType = EStatusEffectType::None;
 
+    /** Poziom/tier nałożonego statusu (0 = bazowy, 1 = silny, ...) */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
+    int32 Tier = 0;
+
     /** Całkowity czas, na jaki został zaaplikowany ten status (np. 5.0s) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
     float TotalDuration = 0.0f;
@@ -74,9 +78,12 @@ public:
     // API Domenowe (Server-Authoritative)
     // -------------------------------------------------------------------------
 
-    /** Aplikuje status elementarny z podanym czasem trwania i sprawdzaniem reakcji (Tylko Serwer) */
+    /** 
+     * Aplikuje status elementarny z podanym tierem i opcjonalnym czasem trwania (Tylko Serwer).
+     * Jeśli OverrideDuration <= 0.0f, czas trwania pobierany jest automatycznie z konfiguracji danego tieru (BaseDuration).
+     */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
-    bool ApplyStatus(EStatusEffectType NewStatus, float Duration = 5.0f, AActor* InstigatorActor = nullptr);
+    bool ApplyStatus(EStatusEffectType NewStatus, int32 Tier = 0, float OverrideDuration = -1.0f, AActor* InstigatorActor = nullptr);
 
     /** Usuwa aktywny status z obiektu (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
@@ -89,6 +96,10 @@ public:
     /** Czy dany status żywiołowy jest obecnie aktywny na tym obiekcie */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
     bool HasStatus(EStatusEffectType Status) const;
+
+    /** Zwraca tier danego aktywnego statusu (0 jeśli brak lub bazowy) */
+    UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
+    int32 GetStatusTier(EStatusEffectType Status) const;
 
     /** Zwraca pozostały czas trwania danego statusu w sekundach (obliczany on-demand z ServerEndTime) */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
@@ -155,8 +166,8 @@ private:
     FElementalReactionResult ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
 
     /** Odświeża czas trwania i parametry istniejącego statusu */
-    void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor);
+    void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
 
     /** Tworzy i rejestruje nową instancję statusu na podstawie danych z rejestru */
-    void AddNewStatusInstance(EStatusEffectType NewStatus, float Duration, float NewEndTime, AActor* InstigatorActor);
+    void AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
 };

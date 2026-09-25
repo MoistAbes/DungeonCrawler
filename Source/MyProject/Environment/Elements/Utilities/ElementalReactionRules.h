@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
+#include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
 #include "ElementalReactionRules.generated.h"
 
 /**
@@ -11,6 +12,7 @@
  * - Weryfikację kompatybilności tożsamości materiałowej na podstawie cech fizycznych (bFlammable, bConductive).
  * - Ewaluację interakcji i reakcji łańcuchowych między żywiołami.
  * - Udostępnianie kart konfiguracyjnych poszczególnych statusów (obrażenia DoT, właściwości płynów).
+ * - Autorytatywne wyliczanie przejść stanów dla komórek powierzchniowych i obiektów.
  */
 UCLASS()
 class MYPROJECT_API UElementalReactionRules : public UBlueprintFunctionLibrary
@@ -61,6 +63,27 @@ public:
 	/** Sortuje listę statusów malejąco według priorytetu reakcji żywiołowych */
 	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
 	static void SortByReactionPriority(TArray<EStatusEffectType>& InOutStatuses);
+
+	/** Sprawdza, czy status zależny synchronizuje swój czas z nośnikiem (zgodnie z konfiguracją reguł w DataAsset) */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool DoesStatusSyncWithCarrier(EStatusEffectType DependentStatus, EStatusEffectType CarrierStatus);
+
+	/**
+	 * Główny resolver stanu komórki powierzchniowej.
+	 * Wylicza całkowity nowy stan komórki (reakcje, nośniki, wygaszanie, tożsamość materiałowa).
+	 * Modyfikuje InOutCellData i zwraca raport z przejścia stanu.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
+	static FSurfaceCellTransitionResult CalculateCellTransition(
+		UPARAM(ref) FSurfaceCellData& InOutCellData,
+		EStatusEffectType IncomingStatus,
+		float Duration,
+		AActor* Instigator,
+		float CurrentTime);
+
+	/** Usuwa z komórki statusy, które bez swoich nośników nie mogą dłużej legalnie istnieć na tym materiale */
+	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
+	static bool CleanOrphanedStatuses(UPARAM(ref) FSurfaceCellData& InOutCellData, EStatusEffectType StatusToPreserve = EStatusEffectType::None);
 
 private:
 	static const TMap<EStatusEffectType, FStatusEffectConfig>& GetConfigRegistry();

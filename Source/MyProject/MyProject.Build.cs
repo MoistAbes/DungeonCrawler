@@ -22,6 +22,9 @@ public class MyProject : ModuleRules
 			"Chaos"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateDependencyModuleNames.AddRange(new string[] 
+		{ 
+			"DeveloperSettings" 
+		});
 	}
 }

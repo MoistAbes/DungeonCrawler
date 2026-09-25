@@ -90,9 +90,10 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             Instance.TimeUntilNextTick += Instance.TickInterval;
 
             const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(Instance.EffectType);
-            if (Def.DamagePerSecond > 0.0f && DamageableComponent)
+            const float DamagePerSec = Def.GetDamagePerSecond(Instance.Tier);
+            if (DamagePerSec > 0.0f && DamageableComponent)
             {
-                const float TickDamage = Def.DamagePerSecond * Instance.TickInterval;
+                const float TickDamage = DamagePerSec * Instance.TickInterval;
                 DamageableComponent->ApplyDamage(TickDamage);
             }
         }
@@ -112,21 +113,29 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     }
 }
 
-bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Duration, AActor* InstigatorActor)
+bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier, float OverrideDuration, AActor* InstigatorActor)
 {
     REQUIRE_AUTHORITY_RET(false);
 
-    if (NewStatus == EStatusEffectType::None || Duration <= 0.0f)
+    if (NewStatus == EStatusEffectType::None)
+    {
+        return false;
+    }
+
+    const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(NewStatus);
+    const FStatusEffectTier& TierConfig = Config.GetTier(Tier);
+    const float Duration = (OverrideDuration > 0.0f) ? OverrideDuration : TierConfig.BaseDuration;
+    if (Duration <= 0.0f)
     {
         return false;
     }
 
     const float NewEndTime = GetCurrentSyncedTime() + Duration;
 
-    // 1. Jeśli dany status jest już aktywny, odświeżamy tylko czas trwania i nie wywołujemy reakcji
+    // 1. Jeśli dany status jest już aktywny, odświeżamy tylko czas trwania (lub podnosimy tier) i nie wywołujemy reakcji
     if (FActiveStatusEffectInstance* Existing = FindInstance(NewStatus))
     {
-        RefreshExistingStatus(*Existing, Duration, NewEndTime, InstigatorActor);
+        RefreshExistingStatus(*Existing, Tier, Duration, NewEndTime, InstigatorActor);
         return true;
     }
 
@@ -142,16 +151,18 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         {
             if (UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, Reaction.ResultingStatus, ActiveStatusList))
             {
-                const float ResultDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
+                const FStatusEffectConfig& ResultConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
+                const float ResultBaseDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ResultConfig.GetBaseDuration(Tier);
+                const float ResultDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
                 const float ResultEndTime = GetCurrentSyncedTime() + ResultDuration;
 
                 if (FActiveStatusEffectInstance* ExistingResult = FindInstance(Reaction.ResultingStatus))
                 {
-                    RefreshExistingStatus(*ExistingResult, ResultDuration, ResultEndTime, InstigatorActor);
+                    RefreshExistingStatus(*ExistingResult, Tier, ResultDuration, ResultEndTime, InstigatorActor);
                 }
                 else
                 {
-                    AddNewStatusInstance(Reaction.ResultingStatus, ResultDuration, ResultEndTime, InstigatorActor);
+                    AddNewStatusInstance(Reaction.ResultingStatus, Tier, ResultDuration, ResultEndTime, InstigatorActor);
                 }
             }
             return true;
@@ -165,7 +176,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         }
 
         // C. Jeśli przychodzący status nie został skonsumowany (np. Conductive Shock: woda i prąd współistnieją),
-        // kontynuujemy do standardowej walidacji materiałowej i dodania NewStatus
+        // kontynuujemy do standardowej walidacji materiałowej i dodania NewStatus.
     }
 
     // 3. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
@@ -177,8 +188,26 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, float Dura
         return false;
     }
 
+    // Jeśli zachodzi synchronizacja czasu z nośnikiem (np. woda dla prądu na postaci)
+    float FinalDuration = Duration;
+    if (Reaction.bSyncWithCarrierDuration)
+    {
+        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+        {
+            if (ActiveInst.EffectType != NewStatus)
+            {
+                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
+                if (CarrierRemaining > 0.0f)
+                {
+                    FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+                }
+            }
+        }
+    }
+    const float FinalEndTime = GetCurrentSyncedTime() + FinalDuration;
+
     // 4. Zarejestrowanie nowego statusu
-    AddNewStatusInstance(NewStatus, Duration, NewEndTime, InstigatorActor);
+    AddNewStatusInstance(NewStatus, Tier, FinalDuration, FinalEndTime, InstigatorActor);
 
     return true;
 }
@@ -224,8 +253,17 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
     return Reaction;
 }
 
-void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, float Duration, float NewEndTime, AActor* InstigatorActor)
+void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
+    // Jeśli nowy tier jest wyższy, podnosimy tier
+    if (Tier > Existing.Tier)
+    {
+        Existing.Tier = Tier;
+        const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(Existing.EffectType);
+        const float NewTickInterval = Def.GetTickInterval(Tier);
+        Existing.TickInterval = (NewTickInterval > 0.0f) ? NewTickInterval : 1.0f;
+    }
+
     Existing.ServerEndTime = FMath::Max(Existing.ServerEndTime, NewEndTime);
     Existing.TotalDuration = FMath::Max(Existing.TotalDuration, Duration);
     if (InstigatorActor)
@@ -233,47 +271,67 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
         Existing.InstigatorActor = InstigatorActor;
     }
 
-    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Remaining: %.1fs)"),
-        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), GetRemainingDuration(Existing.EffectType));
+    // Synchronizacja czasu dla statusów zależnych od tego nośnika (np. prąd na mokrej postaci)
+    for (FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
+    {
+        if (OtherInst.EffectType != Existing.EffectType && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherInst.EffectType, Existing.EffectType))
+        {
+            OtherInst.ServerEndTime = FMath::Max(OtherInst.ServerEndTime, Existing.ServerEndTime);
+        }
+    }
+
+    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Tier %d, Remaining: %.1fs)"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), Existing.Tier, GetRemainingDuration(Existing.EffectType));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
     if (GEngine && GetOwner())
     {
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
-            FString::Printf(TEXT("[%s] REFRESHED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), GetRemainingDuration(Existing.EffectType)));
+            FString::Printf(TEXT("[%s] REFRESHED: %s T%d (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), Existing.Tier, GetRemainingDuration(Existing.EffectType)));
     }
 #endif
 
     OnStatusEffectApplied.Broadcast(Existing.EffectType, GetRemainingDuration(Existing.EffectType));
 }
 
-void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, float Duration, float NewEndTime, AActor* InstigatorActor)
+void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
     const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(NewStatus);
+    const float ConfigTickInterval = Def.GetTickInterval(Tier);
 
     FActiveStatusEffectInstance NewInstance;
     NewInstance.EffectType = NewStatus;
+    NewInstance.Tier = Tier;
     NewInstance.TotalDuration = Duration;
     NewInstance.ServerEndTime = NewEndTime;
-    NewInstance.TickInterval = (Def.TickInterval > 0.0f) ? Def.TickInterval : 1.0f;
+    NewInstance.TickInterval = (ConfigTickInterval > 0.0f) ? ConfigTickInterval : 1.0f;
     NewInstance.TimeUntilNextTick = NewInstance.TickInterval;
     NewInstance.InstigatorActor = InstigatorActor;
 
     ActiveStatusEffects.Add(NewInstance);
     UpdateTickState();
 
-    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Duration: %.1fs)"),
-        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration);
+    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Tier %d, Duration: %.1fs)"),
+        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Tier, Duration);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
     if (GEngine && GetOwner())
     {
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
-            FString::Printf(TEXT("[%s] GAINED: %s (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Duration));
+            FString::Printf(TEXT("[%s] GAINED: %s T%d (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Tier, Duration));
     }
 #endif
 
     OnStatusEffectApplied.Broadcast(NewStatus, Duration);
+}
+
+int32 UStatusEffectComponent::GetStatusTier(EStatusEffectType Status) const
+{
+    if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
+    {
+        return Found->Tier;
+    }
+    return 0;
 }
 
 bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)

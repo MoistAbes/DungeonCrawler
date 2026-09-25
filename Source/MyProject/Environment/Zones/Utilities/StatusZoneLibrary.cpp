@@ -61,9 +61,10 @@ AVolumetricStatusZone* UStatusZoneLibrary::SpawnVolumetricZone(
 	}
 
 	// 1. Zastosowanie jednorazowego impulsu wybuchu (LoS + Knockback + Falloff), jeśli zdefiniowano InstantDamage lub KnockbackForce
+	// bApplyToSurfaceGrid = false, ponieważ AVolumetricStatusZone projektuje swój kształt na siatkę w InitializeVolumetricZone
 	if (EffectConfig.InstantDamage > 0.0f || EffectConfig.KnockbackForce > 0.0f)
 	{
-		ApplyRadialBurst(WorldContextObject, Location, Radius, EffectConfig, Duration, InstigatorActor);
+		ApplyRadialBurst(WorldContextObject, Location, Radius, EffectConfig, Duration, InstigatorActor, false);
 	}
 
 	FActorSpawnParameters SpawnParams;
@@ -90,7 +91,8 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 	float Radius,
 	const FZoneEffectConfig& EffectConfig,
 	float Duration,
-	AActor* InstigatorActor)
+	AActor* InstigatorActor,
+	bool bApplyToSurfaceGrid)
 {
 	UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
 	if (!World || World->GetNetMode() == NM_Client || Radius <= 0.0f)
@@ -99,9 +101,12 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 	}
 
 	// Propagacja impulsu wybuchu na rzadką siatkę komórek powierzchniowych (projekcja 3D na posadzkę, ściany, sufit)
-	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+	if (bApplyToSurfaceGrid)
 	{
-		SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
+		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+		{
+			SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
+		}
 	}
 
 	// 1. Zunifikowany pojedynczy przebieg przestrzenny (Single-Pass Query)
@@ -208,7 +213,7 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 		{
 			if (UStatusEffectComponent* StatusComp = HitActor->FindComponentByClass<UStatusEffectComponent>())
 			{
-				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, Duration, InstigatorActor);
+				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, EffectConfig.StatusTier, Duration, InstigatorActor);
 			}
 		}
 	}
@@ -264,7 +269,7 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 		{
 			if (UStatusEffectComponent* StatusComp = TargetActor->FindComponentByClass<UStatusEffectComponent>())
 			{
-				StatusComp->ApplyStatus(StatusType, Duration, InstigatorActor);
+				StatusComp->ApplyStatus(StatusType, 0, Duration, InstigatorActor);
 			}
 		}
 	}

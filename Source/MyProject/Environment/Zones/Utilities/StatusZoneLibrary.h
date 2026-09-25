@@ -49,7 +49,8 @@ public:
 		float Radius,
 		const FZoneEffectConfig& EffectConfig,
 		float Duration = 4.0f,
-		AActor* InstigatorActor = nullptr);
+		AActor* InstigatorActor = nullptr,
+		bool bApplyToSurfaceGrid = true);
 
 	/**
 	 * Alias wsteczny dla ApplyRadialBurst (zachowanie pełnej kompatybilności wstecznej).

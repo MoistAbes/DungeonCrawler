@@ -41,6 +41,10 @@ struct FStatusReactionRule
 	/** Czas trwania nowego statusu powstałego w wyniku reakcji */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	float ResultingDuration = 5.0f;
+
+	/** Czy czas trwania statusu powinien zsynchronizować się z istniejącym nośnikiem (np. prąd na wodzie trwa do końca wody) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	bool bSyncWithCarrierDuration = false;
 };
 
 /**
@@ -75,6 +79,10 @@ struct FElementalReactionResult
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
 	float ResultingDuration = 0.0f;
 
+	/** Czy czas trwania statusu powinien zsynchronizować się z nośnikiem cieczy (np. woda dla prądu) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bSyncWithCarrierDuration = false;
+
 	/** Natychmiastowe obrażenia bonusowe wywołane reakcją */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
 	float BonusInstantDamage = 0.0f;
@@ -82,6 +90,27 @@ struct FElementalReactionResult
 	/** Identyfikator reakcji (VFX, dźwięk, logi) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
 	FName ReactionTag = NAME_None;
+};
+
+/**
+ * Konfiguracja pojedynczego poziomu (tieru) statusu.
+ */
+USTRUCT(BlueprintType)
+struct FStatusEffectTier
+{
+	GENERATED_BODY()
+
+	/** Obrażenia okresowe zadawane co sekundę na tym tierze (0.0 jeśli brak DoT) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	float DamagePerSecond = 0.0f;
+
+	/** Bazowy/kanoniczny czas trwania statusu dla danego tieru (np. 5.0s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	float BaseDuration = 5.0f;
+
+	/** Co ile sekund status aplikuje obrażenia */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	float TickInterval = 1.0f;
 };
 
 /**
@@ -95,6 +124,10 @@ struct FStatusEffectConfig
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	EStatusEffectType EffectType = EStatusEffectType::None;
+
+	/** Jawna flaga czy status zadaje obrażenia DoT (np. Burning/Electrified = true, Wet/Oiled = false) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	bool bIsDoTType = false;
 
 	/** Czy status jest płynem (wypiera inne płyny z powierzchni) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
@@ -112,19 +145,34 @@ struct FStatusEffectConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	TArray<EStatusEffectType> BypassTraitsIfActive;
 
-	/** Obrażenia okresowe zadawane co sekundę (0.0 jeśli brak DoT) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
-	float DamagePerSecond = 0.0f;
-
-	/** Co ile sekund status aplikuje obrażenia */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
-	float TickInterval = 1.0f;
-
 	/** Priorytet ewaluacji reakcji (im wyższy, tym wcześniej status wchodzi w reakcje fazowe/anihilacji) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	int32 ReactionPriority = 0;
 
+	/** Poziomy/tiery statusu (Tier 0 = bazowy, Tier 1 = silny, Tier 2 = potężny) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	TArray<FStatusEffectTier> Tiers;
+
 	/** Dedykowane reguły reakcji z innymi statusami */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	TMap<EStatusEffectType, FStatusReactionRule> Reactions;
+
+	/** Zwraca konfigurację wybranego tieru z bezpiecznym fallbackiem na Tier 0 lub pusty */
+	const FStatusEffectTier& GetTier(int32 TierIndex = 0) const
+	{
+		if (Tiers.IsValidIndex(TierIndex))
+		{
+			return Tiers[TierIndex];
+		}
+		if (Tiers.Num() > 0)
+		{
+			return Tiers[0];
+		}
+		static const FStatusEffectTier DefaultTier;
+		return DefaultTier;
+	}
+
+	float GetDamagePerSecond(int32 TierIndex = 0) const { return GetTier(TierIndex).DamagePerSecond; }
+	float GetBaseDuration(int32 TierIndex = 0) const { return GetTier(TierIndex).BaseDuration; }
+	float GetTickInterval(int32 TierIndex = 0) const { return GetTier(TierIndex).TickInterval; }
 };

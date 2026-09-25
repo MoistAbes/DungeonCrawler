@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
+#include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
 #include "SurfaceGridTypes.generated.h"
 
 /**
@@ -466,4 +467,29 @@ struct MYPROJECT_API FSurfaceCellData
 		}
 		return ActiveStatuses.Num() > 0 ? ActiveStatuses[0].Instigator.Get() : nullptr;
 	}
+};
+
+/**
+ * Raport z przejścia stanu komórki powierzchniowej wyliczany przez silnik praw żywiołów (UElementalReactionRules).
+ */
+USTRUCT(BlueprintType)
+struct MYPROJECT_API FSurfaceCellTransitionResult
+{
+	GENERATED_BODY()
+
+	/** Czy status został zaakceptowany/zaaplikowany przez zasady chemii */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	bool bAccepted = false;
+
+	/** Czy stan komórki uległ jakiejkolwiek modyfikacji (do wysłania delegatu OnSurfaceCellChanged) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	bool bStateModified = false;
+
+	/** Czy komórka po tej operacji stała się całkowicie pusta (np. ugaszenie, neutralizacja) i powinna zostać usunięta z siatki */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	bool bCellBecameEmpty = false;
+
+	/** Wynik reakcji chemicznej (jeśli zaszła), np. do zadania bonus instant damage / wybuchu */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	FElementalReactionResult Reaction;
 };

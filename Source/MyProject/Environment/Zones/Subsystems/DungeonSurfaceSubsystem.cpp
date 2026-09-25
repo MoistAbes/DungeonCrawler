@@ -9,6 +9,7 @@
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Environment/Zones/StatusZoneBase.h"
+#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
@@ -219,152 +220,78 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 	FSurfaceCellData* Existing = ActiveCells.Find(Coord);
 
-	// 1. Pusta komórka: dodajemy nowy wpis do siatki
-	if (!Existing || Existing->IsEmpty())
+	// Jeśli komórka nie istnieje w siatce, ustalamy tożsamość materiałową podłoża
+	EPhysicalMaterialType SurfaceMat = ExplicitMaterial;
+	if (SurfaceMat == EPhysicalMaterialType::Stone)
 	{
-		// Ustalamy materiał powierzchni dla nowej komórki.
-		// Jeśli ExplicitMaterial to Stone (wartość domyślna), pobieramy tożsamość materiałową z geometrii lochu pod koordynatem.
-		EPhysicalMaterialType SurfaceMat = ExplicitMaterial;
-		if (SurfaceMat == EPhysicalMaterialType::Stone)
-		{
-			SurfaceMat = GetSurfaceMaterialAtCoord(Coord);
-		}
-
-		const bool bCanReceive = UElementalReactionRules::CanMaterialReceiveStatus(SurfaceMat, IncomingStatus, {});
-		UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyStatusToCell -> NEW Coord(%d,%d,%d Face:%d) | Status:%s | ExplicitMat:%s | ResolvedMat:%s | CanReceive:%d | Instigator:%s"),
-			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face),
-			*UEnum::GetValueAsString(IncomingStatus),
-			*UEnum::GetValueAsString(ExplicitMaterial),
-			*UEnum::GetValueAsString(SurfaceMat),
-			bCanReceive,
-			*GetNameSafe(Instigator));
-
-		// Sprawdzamy czy materiał powierzchni może przyjąć ten status (np. kamień nie przyjmie czystego prądu ani ognia)
-		if (!bCanReceive)
-		{
-			return false;
-		}
-
-		FSurfaceCellData& NewCell = ActiveCells.FindOrAdd(Coord);
-		NewCell.ActiveStatuses.Reset();
-		NewCell.SurfaceMaterial = SurfaceMat;
-		NewCell.ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
-
-		OnSurfaceCellChanged.Broadcast(Coord, IncomingStatus, Instigator);
-		return true;
+		SurfaceMat = GetSurfaceMaterialAtCoord(Coord);
 	}
 
-	// 2. Identyczny żywioł: odświeżamy czas trwania i instigatora
-	if (FSurfaceCellStatusEntry* ExistingEntry = Existing->FindStatus(IncomingStatus))
+	FSurfaceCellData CellData;
+	if (Existing)
 	{
-		ExistingEntry->ServerEndTime = FMath::Max(ExistingEntry->ServerEndTime, CurrentTime + Duration);
-		ExistingEntry->Instigator = Instigator;
-		return true;
+		CellData = *Existing;
+	}
+	else
+	{
+		CellData.SurfaceMaterial = SurfaceMat;
 	}
 
-	// 3. Różny żywioł: ewaluacja w centralnych regułach reakcji chemicznych
-	const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(IncomingStatus, Existing->GetStatusTypes());
-	UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyStatusToCell -> REACTION EVAL Coord(%d,%d,%d Face:%d) | Incoming:%s | ExistingMat:%s | ReactionOccurred:%d | ResultingStatus:%s"),
-		Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face),
-		*UEnum::GetValueAsString(IncomingStatus),
-		*UEnum::GetValueAsString(Existing->SurfaceMaterial),
-		Reaction.bReactionOccurred,
-		*UEnum::GetValueAsString(Reaction.ResultingStatus));
-	if (Reaction.bReactionOccurred)
+	// Cała chemia, reakcje, nośniki i wygaszanie są liczone w centralnym silniku zasad (UElementalReactionRules).
+	// Komórka jedynie odbiera i utrwala nowy stan.
+	const FSurfaceCellTransitionResult Result = UElementalReactionRules::CalculateCellTransition(
+		CellData,
+		IncomingStatus,
+		Duration,
+		Instigator,
+		CurrentTime);
+
+	if (!Result.bAccepted)
 	{
-		bool bModified = false;
-		const TArray<EStatusEffectType> ActiveStatusesBefore = Existing->GetStatusTypes();
-
-		// A. Dodanie lub odświeżenie statusu wynikowego reakcji (np. Olej + Ogień -> Burning)
-		// Sprawdzamy CanMaterialReceiveStatus z listą statusów PRZED usunięciem (np. kamień z olejem dopuszcza Burning przez BypassTraitsIfActive)
-		if (Reaction.ResultingStatus != EStatusEffectType::None)
-		{
-			if (UElementalReactionRules::CanMaterialReceiveStatus(Existing->SurfaceMaterial, Reaction.ResultingStatus, ActiveStatusesBefore))
-			{
-				const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-				if (FSurfaceCellStatusEntry* ResEntry = Existing->FindStatus(Reaction.ResultingStatus))
-				{
-					ResEntry->ServerEndTime = FMath::Max(ResEntry->ServerEndTime, CurrentTime + NewDuration);
-					ResEntry->Instigator = Instigator;
-				}
-				else
-				{
-					Existing->ActiveStatuses.Add({ Reaction.ResultingStatus, CurrentTime + NewDuration, Instigator });
-				}
-				bModified = true;
-			}
-		}
-		// B. Jeśli przychodzący status nie został skonsumowany w reakcji (np. prąd w wodzie: Conductive Shock)
-		else if (!Reaction.bConsumeIncomingStatus)
-		{
-			if (!Existing->HasStatus(IncomingStatus))
-			{
-				if (UElementalReactionRules::CanMaterialReceiveStatus(Existing->SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
-				{
-					Existing->ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
-					bModified = true;
-				}
-			}
-		}
-
-		// C. Usunięcie wygaszonego/zutylizowanego w reakcji dotychczasowego statusu (np. spalonego oleju lub odparowanej wody)
-		if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-		{
-			Existing->RemoveStatus(Reaction.ExistingStatusToRemove);
-			bModified = true;
-
-			// D. WERYFIKACJA OSIEROCONYCH STATUSÓW (Orphaned Dependent Status Cleanup):
-			// Jeśli usunięto status nośnika (np. Wet został wyparty przez Olej lub odparowany przez Ogień),
-			// sprawdzamy czy pozostałe dotychczasowe statusy pasożytnicze (np. Electrified) mogą nadal legalnie istnieć
-			// na tym materiale. Status wynikowy reakcji (ResultingStatus) został już zwalidowany w kroku A i nie jest osierocony.
-			for (int32 Index = Existing->ActiveStatuses.Num() - 1; Index >= 0; --Index)
-			{
-				const EStatusEffectType RemainingStatus = Existing->ActiveStatuses[Index].Status;
-				if (RemainingStatus == Reaction.ResultingStatus)
-				{
-					continue;
-				}
-
-				if (!UElementalReactionRules::CanMaterialReceiveStatus(Existing->SurfaceMaterial, RemainingStatus, Existing->GetStatusTypes()))
-				{
-					UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyStatusToCell -> Evicting orphaned dependent status %s from Coord(%d,%d,%d Face:%d) on material %s"),
-						*UEnum::GetValueAsString(RemainingStatus), Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face),
-						*UEnum::GetValueAsString(Existing->SurfaceMaterial));
-					Existing->ActiveStatuses.RemoveAt(Index);
-					bModified = true;
-				}
-			}
-		}
-
-		// Jeśli komórka po reakcji stała się pusta (np. neutralizacja Woda + Ogień -> para)
-		if (Existing->IsEmpty())
-		{
-			OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
-			ActiveCells.Remove(Coord);
-			return true;
-		}
-
-		if (bModified)
-		{
-			OnSurfaceCellChanged.Broadcast(Coord, Existing->GetDominantStatus(), Existing->GetDominantInstigator());
-			return true;
-		}
-
 		return false;
 	}
 
-	// 4. Brak reakcji: jeśli nie wystąpił konflikt ani reakcja, sprawdzamy czy materiał pozwala na koegzystencję
-	if (!Existing->HasStatus(IncomingStatus))
+	// Obsługa ewentualnego wybuchu / obrażeń z reakcji
+	if (Result.Reaction.bReactionOccurred && Result.Reaction.BonusInstantDamage > 0.0f)
 	{
-		if (UElementalReactionRules::CanMaterialReceiveStatus(Existing->SurfaceMaterial, IncomingStatus, Existing->GetStatusTypes()))
-		{
-			Existing->ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
-			OnSurfaceCellChanged.Broadcast(Coord, Existing->GetDominantStatus(), Existing->GetDominantInstigator());
-			return true;
-		}
+		const FVector CellCenter = Coord.ToWorldLocation(CellSize);
+		UKineticForceLibrary::ApplyExplosion(
+			this,
+			CellCenter,
+			CellSize * 1.5f,
+			Result.Reaction.BonusInstantDamage,
+			800.0f,
+			Instigator,
+			nullptr,
+			false);
 	}
 
-	return false;
+	// Komórka została opróżniona (np. ugaszenie ognia wodą)
+	if (Result.bCellBecameEmpty)
+	{
+		UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) became EMPTY after incoming %s"),
+			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *UEnum::GetValueAsString(IncomingStatus));
+		ActiveCells.Remove(Coord);
+		OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
+		return true;
+	}
+
+	// Zapisanie nowego stanu komórki
+	ActiveCells.Add(Coord, CellData);
+
+	if (Result.bStateModified)
+	{
+		FString StatusesStr;
+		for (const auto& St : CellData.ActiveStatuses)
+		{
+			StatusesStr += FString::Printf(TEXT("[%s: %.1fs] "), *UEnum::GetValueAsString(St.Status), St.ServerEndTime - CurrentTime);
+		}
+		UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) Updated -> %s"),
+			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *StatusesStr);
+		OnSurfaceCellChanged.Broadcast(Coord, CellData.GetDominantStatus(), CellData.GetDominantInstigator());
+	}
+
+	return true;
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurface(
@@ -834,27 +761,26 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 		{
 			if (Cell.ActiveStatuses[Index].ServerEndTime > 0.0f && CurrentTime >= Cell.ActiveStatuses[Index].ServerEndTime)
 			{
+				UE_LOG(LogDungeonElements, Log, TEXT("[ProcessGridTick] Cell Coord(%d,%d,%d Face:%d) status %s expired (EndTime: %.1fs, Current: %.1fs)"),
+					It.Key().X, It.Key().Y, It.Key().Z, static_cast<int32>(It.Key().Face),
+					*UEnum::GetValueAsString(Cell.ActiveStatuses[Index].Status),
+					Cell.ActiveStatuses[Index].ServerEndTime, CurrentTime);
 				Cell.ActiveStatuses.RemoveAt(Index);
 				bStatusRemoved = true;
 			}
 		}
 
-		// Jeśli wygasł status nośnika (np. Wet odparowało lub woda wyschła),
-		// sprawdzamy czy pozostałe w komórce statusy pasożytnicze (np. Electrified) mogą nadal istnieć na tym materiale
+		// Jeśli wygasł status nośnika (np. woda wyschła),
+		// sprawdzamy czy pozostałe w komórce statusy zależne mogą nadal legalnie istnieć na tym materiale
 		if (bStatusRemoved && !Cell.IsEmpty())
 		{
-			for (int32 Index = Cell.ActiveStatuses.Num() - 1; Index >= 0; --Index)
-			{
-				const EStatusEffectType RemainingStatus = Cell.ActiveStatuses[Index].Status;
-				if (!UElementalReactionRules::CanMaterialReceiveStatus(Cell.SurfaceMaterial, RemainingStatus, Cell.GetStatusTypes()))
-				{
-					Cell.ActiveStatuses.RemoveAt(Index);
-				}
-			}
+			UElementalReactionRules::CleanOrphanedStatuses(Cell);
 		}
 
 		if (Cell.IsEmpty())
 		{
+			UE_LOG(LogDungeonElements, Log, TEXT("[ProcessGridTick] Cell Coord(%d,%d,%d Face:%d) became EMPTY and was removed from grid"),
+				It.Key().X, It.Key().Y, It.Key().Z, static_cast<int32>(It.Key().Face));
 			OnSurfaceCellChanged.Broadcast(It.Key(), EStatusEffectType::None, nullptr);
 			It.RemoveCurrent();
 		}
@@ -933,11 +859,22 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 								continue;
 							}
 
-							// Jeśli prąd rozchodzi się po wodzie, synchronizujemy czas trwania z pozostałym czasem źródła,
-							// aby cała kałuża gasła jednocześnie i nie tworzyła zapętlenia (bounce-back).
-							const float CalculatedDuration = (SourceEntry.Status == EStatusEffectType::Electrified && RemainingSourceTime > 0.0f)
-								? FMath::Max(0.5f, RemainingSourceTime)
-								: ((SpreadReaction.ResultingDuration > 0.0f) ? SpreadReaction.ResultingDuration : 5.0f);
+							// Jeśli prąd/reakcja rozchodzi się po nośniku z bSyncWithCarrierDuration (np. prąd na sąsiednią komórkę wody),
+							// synchronizujemy czas trwania z czasem nośnika na komórce docelowej (NeighborEntry)!
+							const float FallbackSpreadDuration = UElementalReactionRules::GetEffectConfig(TargetStatus).GetBaseDuration();
+							float CalculatedDuration = (SpreadReaction.ResultingDuration > 0.0f) ? SpreadReaction.ResultingDuration : FallbackSpreadDuration;
+							if (SpreadReaction.bSyncWithCarrierDuration)
+							{
+								const float NeighborCarrierRemaining = NeighborEntry.ServerEndTime - CurrentTime;
+								if (NeighborCarrierRemaining > 0.0f)
+								{
+									CalculatedDuration = NeighborCarrierRemaining;
+								}
+							}
+							else if (RemainingSourceTime > 0.0f)
+							{
+								CalculatedDuration = FMath::Min(CalculatedDuration, RemainingSourceTime);
+							}
 
 							if (FPendingSpreadCell* ExistingPending = PendingSpreads.Find(NeighborCoord))
 							{
@@ -1022,6 +959,15 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 							continue;
 						}
 
+						// Bezpiecznik fizyczny: jeśli komórka już posiada status docelowy, który ta reakcja wprowadza
+						// (np. komórka już płonie [Oiled, Burning] lub jest naelektryzowana [Wet, Electrified]),
+						// to nie aplikujemy go ponownie z aktora, aby nie tworzyć pętli sprzężenia zwrotnego i nieskończonego odświeżania podłoża pod stopami.
+						const EStatusEffectType TargetStatus = (Reaction.ResultingStatus != EStatusEffectType::None) ? Reaction.ResultingStatus : ActorStatus;
+						if (CellData->HasStatus(TargetStatus))
+						{
+							continue;
+						}
+
 						// Zadawanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok przewodzenia)
 						if (Reaction.BonusInstantDamage > 0.0f)
 						{
@@ -1039,7 +985,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 							--StatusIdx;
 						}
 
-						ApplyStatusToCell(CellCoord, ActorStatus, (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f), Actor);
+						ApplyStatusToCell(CellCoord, TargetStatus, (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f), Actor);
 					}
 				}
 
@@ -1064,12 +1010,12 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 				}
 			}
 
-			// B. Interakcja Komórka -> Obiekt: aplikacja każdego unikalnego statusu z posadzki tylko RAZ na obiekt na tick
+			// B. Interakcja Komórka -> Obiekt: aplikacja każdego unikalnego statusu z posadzki tylko RAZ na obiekt na tick (czas trwania z aktywnego tieru)
 			for (const auto& StatusPair : FloorStatusesToApply)
 			{
 				UE_LOG(LogDungeonElements, Log, TEXT("[ProcessGridTick] Applying floor status %s to %s"),
 					*UEnum::GetValueAsString(StatusPair.Key), *Actor->GetName());
-				StatusComp->ApplyStatus(StatusPair.Key, 1.5f, StatusPair.Value.Get());
+				StatusComp->ApplyStatus(StatusPair.Key, 0, -1.0f, StatusPair.Value.Get());
 			}
 		};
 

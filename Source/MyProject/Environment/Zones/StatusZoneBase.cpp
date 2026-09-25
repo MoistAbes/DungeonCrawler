@@ -160,7 +160,7 @@ void AStatusZoneBase::HandleBeginOverlap(
 	{
 		if (UStatusEffectComponent* StatusComp = OtherActor->FindComponentByClass<UStatusEffectComponent>())
 		{
-			StatusComp->ApplyStatus(EffectConfig.AppliedStatus, 3.0f, ZoneInstigator.Get());
+			StatusComp->ApplyStatus(EffectConfig.AppliedStatus, 0, -1.0f, ZoneInstigator.Get());
 		}
 	}
 }
@@ -189,12 +189,12 @@ void AStatusZoneBase::ProcessActiveOverlaps()
 
 		if (!IsActorEligibleForZoneEffect(Actor, nullptr)) continue;
 
-		// 1. Status żywiołowy - odświeżany co 0.25s
+		// 1. Status żywiołowy - odświeżany co 0.25s (czas trwania pobierany z aktywnego tieru konfiguracji)
 		if (EffectConfig.AppliedStatus != EStatusEffectType::None)
 		{
 			if (UStatusEffectComponent* StatusComp = Actor->FindComponentByClass<UStatusEffectComponent>())
 			{
-				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, 2.5f, ZoneInstigator.Get());
+				StatusComp->ApplyStatus(EffectConfig.AppliedStatus, EffectConfig.StatusTier, -1.0f, ZoneInstigator.Get());
 			}
 		}
 
@@ -321,11 +321,10 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 		if (Reaction.ResultingStatus != EStatusEffectType::None)
 		{
 			EffectConfig.AppliedStatus = Reaction.ResultingStatus;
-			const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : 5.0f;
-			ServerEndTime = GetWorld()->GetTimeSeconds() + NewDuration;
-
 			const FStatusEffectConfig& NewStatusConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
-			EffectConfig.ContinuousDamagePerSec = NewStatusConfig.DamagePerSecond;
+			const float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : NewStatusConfig.GetBaseDuration();
+			ServerEndTime = GetWorld()->GetTimeSeconds() + NewDuration;
+			EffectConfig.ContinuousDamagePerSec = NewStatusConfig.GetDamagePerSecond();
 
 			if (ZoneCollision)
 			{
@@ -353,9 +352,10 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			if (IncomingStatus == EStatusEffectType::Electrified)
 			{
 				EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
-				const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : 4.0f;
+				const FStatusEffectConfig& ElectrifiedConfig = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified);
+				const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ElectrifiedConfig.GetBaseDuration();
 				ServerEndTime = GetWorld()->GetTimeSeconds() + ShockDuration;
-				EffectConfig.ContinuousDamagePerSec = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified).DamagePerSecond;
+				EffectConfig.ContinuousDamagePerSec = ElectrifiedConfig.GetDamagePerSecond();
 
 				OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
 				FlushNetDormancy();
