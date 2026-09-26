@@ -23,7 +23,7 @@ ADungeonStructureBase::ADungeonStructureBase()
 
 	// Domyślnie architektura lochu jest stabilna, statyczna, bez fizyki
 	StructureMesh->SetSimulatePhysics(false);
-	StructureMesh->SetNotifyRigidBodyCollision(true);
+	StructureMesh->SetNotifyRigidBodyCollision(false);
 	StructureMesh->SetCollisionProfileName(TEXT("BlockAll"));
 	StructureMesh->SetGenerateOverlapEvents(false);
 	StructureMesh->CanCharacterStepUpOn = ECB_Yes;
@@ -38,26 +38,22 @@ void ADungeonStructureBase::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	if (StructureMesh)
+	// Zdarzenia kolizji i niszczenia podpinamy wyłącznie wtedy, gdy struktura może ulec zniszczeniu
+	if (bIsDestructible)
 	{
+		StructureMesh->SetNotifyRigidBodyCollision(true);
 		StructureMesh->OnComponentHit.AddDynamic(this, &ADungeonStructureBase::HandleComponentHit);
-	}
-
-	if (DamageableComponent)
-	{
 		DamageableComponent->OnDestroyed.AddDynamic(this, &ADungeonStructureBase::HandleOnDestroyed);
+	}
+	else
+	{
+		DamageableComponent->SetComponentTickEnabled(false);
 	}
 }
 
 void ADungeonStructureBase::BeginPlay()
 {
 	Super::BeginPlay();
-
-	// Jeśli struktura jest oznaczona jako niezniszczalna, wyłączamy nasłuchiwanie zderzeń i niszczenie
-	if (!bIsDestructible && DamageableComponent)
-	{
-		DamageableComponent->SetComponentTickEnabled(false);
-	}
 }
 
 void ADungeonStructureBase::HandleComponentHit(
@@ -69,7 +65,7 @@ void ADungeonStructureBase::HandleComponentHit(
 {
 	REQUIRE_AUTHORITY();
 
-	if (!bIsDestructible || !DamageableComponent || DamageableComponent->IsDestroyed())
+	if (DamageableComponent->IsDestroyed())
 	{
 		return;
 	}
@@ -100,7 +96,8 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 {
 	REQUIRE_AUTHORITY();
 
-	if (!bIsDestructible)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
@@ -108,30 +105,37 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 	UE_LOG(LogDungeonPhysics, Warning, TEXT("[DungeonStructure]%s %s has collapsed and been destroyed!"),
 		*NetUtils::GetNetRolePrefix(this), *GetName());
 
-	// -------------------------------------------------------------------------------------------------
-	// MECHANIKA PUNCH-THROUGH (Przebijanie barykady):
-	// Jeśli postać lub pocisk/obiekt fizyczny przebił tę ścianę z dużą prędkością, chcemy aby nie został
-	// natychmiast zatrzymany w miejscu przez nagłą kolizję, lecz kontynuował ruch przez powstałą wyrwę.
-	// -------------------------------------------------------------------------------------------------
-
 	// 0. Czyszczenie komórek powierzchniowych w zniszczonym obszarze fundamentu
-	const FBox StructureBounds = StructureMesh ? StructureMesh->Bounds.GetBox() : GetComponentsBoundingBox(true);
-	if (UWorld* World = GetWorld())
-	{
-		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
-		{
-			SurfaceSubsystem->ClearCellsInBounds(StructureBounds);
-		}
-	}
+	ClearSurfaceGrid(World);
 
-	// 1. Natychmiastowe usunięcie kolizji bryły, by przepuścić obiekty w locie
-	if (StructureMesh)
-	{
-		StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		StructureMesh->SetVisibility(false);
-	}
+	// 1. Natychmiastowe usunięcie kolizji bryły i widoczności, by przepuścić obiekty w locie
+	StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StructureMesh->SetVisibility(false);
 
-	// 1b. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych), by nie lewitowały w powietrzu
+	// 2. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych), by nie lewitowały w powietrzu
+	DestroyAttachedActors();
+
+	// 3. Mechanika Punch-Through: postacie pędzące w wyrwę kontynuują bieg z zachowaniem części pędu
+	ApplyPunchThrough(World);
+
+	// 4. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
+	SpawnDebris(World);
+
+	// 5. Po krótkiej chwili (na dokończenie ewentualnych replikacji) niszczymy aktora
+	SetLifeSpan(0.1f);
+}
+
+void ADungeonStructureBase::ClearSurfaceGrid(UWorld* World)
+{
+	if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
+	{
+		const FBox StructureBounds = StructureMesh->Bounds.GetBox();
+		SurfaceSubsystem->ClearCellsInBounds(StructureBounds);
+	}
+}
+
+void ADungeonStructureBase::DestroyAttachedActors()
+{
 	TArray<AActor*> AttachedActors;
 	GetAttachedActors(AttachedActors);
 	for (AActor* Attached : AttachedActors)
@@ -141,40 +145,36 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 			Attached->Destroy();
 		}
 	}
+}
 
-	// 2. Wykrywamy obiekty w bezpośrednim punkcie zniszczenia, by zredukować ich prędkość jedynie częściowo
-	if (UWorld* World = GetWorld())
+void ADungeonStructureBase::ApplyPunchThrough(UWorld* World)
+{
+	TArray<FOverlapResult> Overlaps;
+	const FCollisionShape BoxShape = FCollisionShape::MakeBox(FVector(100.0f, 100.0f, 150.0f));
+	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PunchThroughQuery), false, this);
+
+	if (World->OverlapMultiByChannel(Overlaps, GetActorLocation(), GetActorRotation().Quaternion(), ECC_Pawn, BoxShape, QueryParams))
 	{
-		const FVector StructureCenter = GetActorLocation();
-		TArray<FOverlapResult> Overlaps;
-		FCollisionShape BoxShape = FCollisionShape::MakeBox(FVector(100.0f, 100.0f, 150.0f));
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PunchThroughQuery), false, this);
-
-		if (World->OverlapMultiByChannel(Overlaps, StructureCenter, GetActorRotation().Quaternion(), ECC_Pawn, BoxShape, QueryParams))
+		for (const FOverlapResult& Overlap : Overlaps)
 		{
-			for (const FOverlapResult& Overlap : Overlaps)
+			if (ACharacter* Character = Cast<ACharacter>(Overlap.GetActor()))
 			{
-				if (ACharacter* Character = Cast<ACharacter>(Overlap.GetActor()))
-				{
-					// Przekazujemy pęd z redukcją oporu przebicia (Tylko Serwer zarządza LaunchCharacter)
-					const FVector CurrentVel = Character->GetVelocity();
-					Character->LaunchCharacter(CurrentVel * PunchThroughVelocityRetention, true, true);
+				const FVector PenetrationVelocity = Character->GetVelocity() * PunchThroughVelocityRetention;
+				Character->LaunchCharacter(PenetrationVelocity, true, true);
 
-					UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
-						*Character->GetName(), *Character->GetVelocity().ToString());
-				}
+				UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
+					*Character->GetName(), *Character->GetVelocity().ToString());
 			}
 		}
 	}
+}
 
-	// 3. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
-	if (DestroyedDebrisClass && GetWorld())
+void ADungeonStructureBase::SpawnDebris(UWorld* World)
+{
+	if (DestroyedDebrisClass)
 	{
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-		GetWorld()->SpawnActor<AActor>(DestroyedDebrisClass, GetActorTransform(), SpawnParams);
+		World->SpawnActor<AActor>(DestroyedDebrisClass, GetActorTransform(), SpawnParams);
 	}
-
-	// 4. Po krótkiej chwili (na dokończenie ewentualnych replikacji) niszczymy aktora
-	SetLifeSpan(0.1f);
 }

@@ -89,4 +89,17 @@ protected:
 
 	UFUNCTION()
 	virtual void HandleOnDestroyed(AActor* DestroyedActor);
+
+private:
+	/** Czyści komórki siatki powierzchniowej w obszarze zniszczonej ściany */
+	void ClearSurfaceGrid(UWorld* World);
+
+	/** Niszczy podpięte do struktury aktory (np. strefy ognia, pochodnie) */
+	void DestroyAttachedActors();
+
+	/** Przepuszcza pędzące postacie przez wyrwę (Punch-Through) z zachowaniem części prędkości */
+	void ApplyPunchThrough(UWorld* World);
+
+	/** Spawnuje opcjonalny aktor gruzu/efektu cząsteczkowego */
+	void SpawnDebris(UWorld* World);
 };
