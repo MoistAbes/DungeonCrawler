@@ -1,4 +1,4 @@
-﻿#include "DamageableComponent.h"
+#include "DamageableComponent.h"
 
 #include "Net/UnrealNetwork.h"
 #include "Components/CapsuleComponent.h"
@@ -6,6 +6,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
+#include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 
 UDamageableComponent::UDamageableComponent()
 {
@@ -45,27 +46,58 @@ void UDamageableComponent::BeginPlay()
     }
 }
 
-void UDamageableComponent::ApplyDamage(float Amount)
+void UDamageableComponent::ApplyDamage(float Amount, EDamageType DamageType, AActor* DamageCauser)
 {
     REQUIRE_AUTHORITY();
 
-    if (IsDestroyed() || Amount <= 0.0f)
+    // 1. STRAŻNIK: Jeśli obiekt jest niezniszczalny, zniszczony lub Amount <= 0 -> Early Exit (zero kosztu CPU)
+    if (bIsInvulnerable || IsDestroyed() || Amount <= 0.0f)
     {
         return;
     }
 
-    CurrentDurability = FMath::Clamp(CurrentDurability - Amount, 0.0f, MaxDurability);
+    // 2. Obliczenie sumarycznej odporności i finalnych obrażeń
+    const float TotalResist = GetTotalResistance(DamageType);
+    const float FinalDamage = Amount * (1.0f - FMath::Clamp(TotalResist, -1.0f, 1.0f));
+
+    if (FinalDamage <= 0.0f)
+    {
+        return;
+    }
+
+    CurrentDurability = FMath::Clamp(CurrentDurability - FinalDamage, 0.0f, MaxDurability);
 
     OnHealthChanged.Broadcast(CurrentDurability);
     OnDurabilityChanged.Broadcast(CurrentDurability, MaxDurability);
 
-    UE_LOG(LogDungeonPhysics, Warning, TEXT("[DamageableService]%s %s received %.1f dmg | Remaining: %.1f/%.1f"), 
-       *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), Amount, CurrentDurability, MaxDurability);
+    UE_LOG(LogDungeonPhysics, Warning, TEXT("[DamageableService]%s %s received %.1f dmg (raw: %.1f, type: %d, resist: %.2f) | Remaining: %.1f/%.1f"), 
+       *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), FinalDamage, Amount, static_cast<int32>(DamageType), TotalResist, CurrentDurability, MaxDurability);
 
     if (IsDestroyed())
     {
         OnDestroyed.Broadcast(GetOwner());
     }
+}
+
+float UDamageableComponent::GetTotalResistance(EDamageType DamageType) const
+{
+    float BaseResist = 0.0f;
+    if (const AActor* Owner = GetOwner())
+    {
+        if (Owner->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
+        {
+            const EPhysicalMaterialType Mat = IMaterialProviderInterface::Execute_GetMaterialType(Owner);
+            BaseResist = PhysicalMaterialUtils::GetBaseResistance(Mat, DamageType);
+        }
+    }
+
+    const float Modifier = ResistanceModifiers.FindRef(DamageType);
+    return BaseResist + Modifier;
+}
+
+void UDamageableComponent::SetResistanceModifier(EDamageType DamageType, float Modifier)
+{
+    ResistanceModifiers.FindOrAdd(DamageType) = Modifier;
 }
 
 void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
@@ -96,7 +128,7 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
         UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticService]%s %s registered impact at Speed: %.1f cm/s | Damage: %.1f"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), ImpactSpeed, CalculatedDamage);
 
-        ApplyDamage(CalculatedDamage);
+        ApplyDamage(CalculatedDamage, EDamageType::Kinetic);
     }
 }
 

@@ -189,7 +189,8 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 			if (UDamageableComponent* Damageable = HitActor->FindComponentByClass<UDamageableComponent>())
 			{
 				const float ScaledDamage = EffectConfig.InstantDamage * FalloffFactor;
-				Damageable->ApplyDamage(ScaledDamage);
+				const EDamageType BurstDamageType = PhysicalMaterialUtils::StatusToDamageType(EffectConfig.AppliedStatus);
+				Damageable->ApplyDamage(ScaledDamage, BurstDamageType, InstigatorActor);
 			}
 		}
 
@@ -261,7 +262,8 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 		{
 			if (UDamageableComponent* Damageable = TargetActor->FindComponentByClass<UDamageableComponent>())
 			{
-				Damageable->ApplyDamage(DirectDamage);
+				const EDamageType ImpactDamageType = PhysicalMaterialUtils::StatusToDamageType(StatusType);
+				Damageable->ApplyDamage(DirectDamage, ImpactDamageType, InstigatorActor);
 			}
 		}
 

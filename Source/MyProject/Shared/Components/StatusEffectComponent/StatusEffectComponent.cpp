@@ -94,7 +94,8 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
             if (DamagePerSec > 0.0f && DamageableComponent)
             {
                 const float TickDamage = DamagePerSec * Instance.TickInterval;
-                DamageableComponent->ApplyDamage(TickDamage);
+                const EDamageType DamageType = PhysicalMaterialUtils::StatusToDamageType(Instance.EffectType);
+                DamageableComponent->ApplyDamage(TickDamage, DamageType, Instance.InstigatorActor.Get());
             }
         }
 

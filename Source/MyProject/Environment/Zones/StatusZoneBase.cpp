@@ -203,7 +203,8 @@ void AStatusZoneBase::ProcessActiveOverlaps()
 		{
 			if (UDamageableComponent* DmgComp = Actor->FindComponentByClass<UDamageableComponent>())
 			{
-				DmgComp->ApplyDamage(EffectConfig.ContinuousDamagePerSec * ZoneTickInterval);
+				const EDamageType ZoneDamageType = PhysicalMaterialUtils::StatusToDamageType(EffectConfig.AppliedStatus);
+				DmgComp->ApplyDamage(EffectConfig.ContinuousDamagePerSec * ZoneTickInterval, ZoneDamageType, ZoneInstigator.Get());
 			}
 		}
 	}

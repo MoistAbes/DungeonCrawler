@@ -32,6 +32,7 @@ ADungeonStructureBase::ADungeonStructureBase()
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;
+	DamageableComponent->SetInvulnerable(true);
 }
 
 void ADungeonStructureBase::PostInitializeComponents()
@@ -39,6 +40,8 @@ void ADungeonStructureBase::PostInitializeComponents()
 	Super::PostInitializeComponents();
 
 	// Zdarzenia kolizji i niszczenia podpinamy wyłącznie wtedy, gdy struktura może ulec zniszczeniu
+	DamageableComponent->SetInvulnerable(!bIsDestructible);
+
 	if (bIsDestructible)
 	{
 		StructureMesh->SetNotifyRigidBodyCollision(true);

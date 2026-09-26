@@ -308,7 +308,7 @@ void UKineticForceLibrary::ApplyExplosion(
             if (UDamageableComponent* Damageable = HitActor->FindComponentByClass<UDamageableComponent>())
             {
                 const float ScaledDamage = BaseDamage * FalloffFactor;
-                Damageable->ApplyDamage(ScaledDamage);
+                Damageable->ApplyDamage(ScaledDamage, EDamageType::Kinetic, InstigatorActor);
             }
         }
 

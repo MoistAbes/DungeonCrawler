@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "PhysicalMaterialEnums.generated.h"
 
 UENUM(BlueprintType)
@@ -11,6 +12,15 @@ enum class EPhysicalMaterialType : uint8
 	Stone    UMETA(DisplayName = "Stone"),
 	Metal    UMETA(DisplayName = "Metal"),
 	Flesh    UMETA(DisplayName = "Flesh")
+};
+
+UENUM(BlueprintType)
+enum class EDamageType : uint8
+{
+	Physical     UMETA(DisplayName = "Physical"),      // Cios mieczem, strzała, bezpośrednie uderzenie
+	Kinetic      UMETA(DisplayName = "Kinetic"),       // Zderzenie ze ścianą, uderzenie głazem, siła kinetyczna
+	Fire         UMETA(DisplayName = "Fire"),          // Ogień, płomienie, DoT od podpalenia
+	Lightning    UMETA(DisplayName = "Lightning")      // Prąd, wyładowania elektryczne
 };
 
 /**
@@ -61,5 +71,70 @@ namespace PhysicalMaterialUtils
 			break;
 		}
 		return Traits;
+	}
+
+	/** Mapuje status żywiołowy na odpowiedni typ obrażeń */
+	FORCEINLINE EDamageType StatusToDamageType(EStatusEffectType Status)
+	{
+		switch (Status)
+		{
+		case EStatusEffectType::Burning:
+			return EDamageType::Fire;
+		case EStatusEffectType::Electrified:
+			return EDamageType::Lightning;
+		default:
+			return EDamageType::Physical;
+		}
+	}
+
+	/** Zwraca bazową odporność tożsamości materiałowej na dany typ obrażeń (1.0 = 100% odporności / immune, 0.0 = brak, ujemna = podatność) */
+	FORCEINLINE float GetBaseResistance(EPhysicalMaterialType Material, EDamageType DamageType)
+	{
+		switch (Material)
+		{
+		case EPhysicalMaterialType::Stone:
+			if (DamageType == EDamageType::Fire || DamageType == EDamageType::Lightning)
+			{
+				return 1.0f; // 100% odporności na ogień i prąd (kamień nie płonie i nie niszczy się od prądu)
+			}
+			return 0.0f;
+
+		case EPhysicalMaterialType::Metal:
+			if (DamageType == EDamageType::Fire || DamageType == EDamageType::Lightning)
+			{
+				return 1.0f; // 100% odporności na ogień i prąd (metal nie pali się ani nie niszczy od prądu)
+			}
+			if (DamageType == EDamageType::Kinetic)
+			{
+				return 0.5f; // 50% redukcji obrażeń kinetycznych (odporny na stłuczenie)
+			}
+			return 0.0f;
+
+		case EPhysicalMaterialType::Wood:
+			if (DamageType == EDamageType::Lightning)
+			{
+				return 0.5f; // 50% odporności na prąd (drewno jest częściowym izolatorem)
+			}
+			if (DamageType == EDamageType::Fire)
+			{
+				return 0.0f; // 0% odporności na ogień (drewno łatwo się pali i niszczy)
+			}
+			return 0.0f;
+
+		case EPhysicalMaterialType::Glass:
+			if (DamageType == EDamageType::Fire || DamageType == EDamageType::Lightning)
+			{
+				return 1.0f; // Szkło nie niszczy się od ognia ani prądu
+			}
+			if (DamageType == EDamageType::Kinetic)
+			{
+				return -0.5f; // Podatność (+50% obrażeń od kinetyki - kruche szkło łatwo pęka)
+			}
+			return 0.0f;
+
+		case EPhysicalMaterialType::Flesh:
+		default:
+			return 0.0f; // Bazowe obrażenia bez redukcji
+		}
 	}
 }

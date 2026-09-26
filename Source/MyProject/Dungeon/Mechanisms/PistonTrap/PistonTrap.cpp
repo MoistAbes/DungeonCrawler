@@ -1,4 +1,4 @@
-﻿#include "PistonTrap.h"
+#include "PistonTrap.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -207,7 +207,7 @@ void APistonTrap::ApplyKineticHit(AActor* HitActor, UPrimitiveComponent* HitComp
 
 		if (UDamageableComponent* DamComp = Character->FindComponentByClass<UDamageableComponent>())
 		{
-			DamComp->ApplyDamage(BaseImpactDamage);
+			DamComp->ApplyDamage(BaseImpactDamage, EDamageType::Kinetic, this);
 		}
 	}
 	// 2. Obiekt fizyczny Chaos (głaz, skrzynia, beczka)

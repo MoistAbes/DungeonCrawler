@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "MyProject/Shared/Interfaces/StatProviderInterface.h"
+#include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "DamageableComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHealthChangedSignature, float, NewHealth);
@@ -31,15 +32,15 @@ public:
 
     // --- Domena ---
 
-    /** Aplikuje bezpośrednie obrażenia redukujące aktualną wytrzymałość/punkty życia (tylko na serwerze) */
+    /** Aplikuje obrażenia redukujące wytrzymałość/punkty życia z uwzględnieniem typu i odporności (tylko na serwerze) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Durability")
-    void ApplyDamage(float Amount);
+    void ApplyDamage(float Amount, EDamageType DamageType = EDamageType::Physical, AActor* DamageCauser = nullptr);
     
     /** Aplikuje obrażenia kinetyczne na podstawie prędkości uderzenia (cm/s), uwzględniając próg i mnożnik (tylko na serwerze) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyKineticImpact(float ImpactSpeed);
 
-    // --- Stan ---
+    // --- Stan i Odporności ---
 
     /** Zwraca aktualny stan punktów wytrzymałości/życia */
     UFUNCTION(BlueprintPure, Category = "Custom|Durability")
@@ -52,6 +53,22 @@ public:
     /** Sprawdza, czy obiekt został całkowicie zniszczony (CurrentDurability <= 0) */
     UFUNCTION(BlueprintPure, Category = "Custom|Durability")
     bool IsDestroyed() const { return CurrentDurability <= 0.0f; }
+
+    /** Sprawdza, czy obiekt jest całkowicie niewrażliwy na obrażenia (Early Exit) */
+    UFUNCTION(BlueprintPure, Category = "Custom|Durability")
+    bool IsInvulnerable() const { return bIsInvulnerable; }
+
+    /** Ustawia niewrażliwość na obrażenia (np. stabilne ściany i posadzki lochu) */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Durability")
+    void SetInvulnerable(bool bNewInvulnerable) { bIsInvulnerable = bNewInvulnerable; }
+
+    /** Zwraca sumaryczną odporność na dany typ obrażeń (bazowa z materiału + modyfikatory postaci) */
+    UFUNCTION(BlueprintPure, Category = "Custom|Durability")
+    float GetTotalResistance(EDamageType DamageType) const;
+
+    /** Ustawia lub modyfikuje dodatkową odporność dla postaci (np. zbroja, perki, buffy) */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Durability")
+    void SetResistanceModifier(EDamageType DamageType, float Modifier);
 
     // --- Zdarzenia ---
 
@@ -69,6 +86,14 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+
+    /** Czy obiekt jest całkowicie niewrażliwy na jakiekolwiek obrażenia (Early Exit) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Custom|Durability")
+    bool bIsInvulnerable = false;
+
+    /** Opcjonalne dodatkowe modyfikatory odporności (np. zbroja postaci, buffy, perki) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Custom|Durability")
+    TMap<EDamageType, float> ResistanceModifiers;
 
     /** Maksymalna liczba punktów wytrzymałości / zdrowia */
     UPROPERTY(ReplicatedUsing = OnRep_MaxDurability, EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Durability", meta = (ClampMin = "1.0"))
