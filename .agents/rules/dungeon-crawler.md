@@ -26,7 +26,7 @@ The project uses:
 
 \* server-authoritative multiplayer,
 
-\* Unreal MCP when editor/world/Blueprint state cannot be reliably verified from source code.
+\* Unreal MCP (via `Tools/MCP/unreal_mcp.py` / `ProgrammaticToolset`) for procedural level generation, map editing, actor placement, and world/editor state verification.
 
 
 

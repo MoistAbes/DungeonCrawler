@@ -88,6 +88,8 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateCellTransition`, `CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, and propagation.
 
+* **Level Design & Unreal MCP Map Editing** — The map (`Map_Dungeon_01.umap`) is 100% editable programmatically via Unreal MCP. Do not scan C++ engine headers for level tools. Always use the project CLI bridge: `& "E:\UE_5.8\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" Tools/MCP/unreal_mcp.py status` (and `run-script`, `save-level`). Full instructions and templates are in [`Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md`](file:///E:/UE_PROJECTS/MyProject/Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md).
+
 
 
 Detailed contracts and implementation belong in `ARCHITECTURE.md` and feature specifications.
