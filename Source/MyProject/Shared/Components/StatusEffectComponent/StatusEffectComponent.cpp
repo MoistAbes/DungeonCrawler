@@ -241,13 +241,6 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
             }
         }
     }
-
-    // Zadanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok elektryczny)
-    if (Reaction.BonusInstantDamage > 0.0f && DamageableComponent)
-    {
-        DamageableComponent->ApplyDamage(Reaction.BonusInstantDamage);
-    }
-
     UE_LOG(LogDungeonElements, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 

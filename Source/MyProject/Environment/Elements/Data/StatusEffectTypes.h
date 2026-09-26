@@ -22,10 +22,6 @@ struct FStatusReactionRule
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	bool bRemoveExistingStatus = false;
 
-	/** Natychmiastowe obrażenia bonusowe wywołane reakcją (np. wybuch oleju, szok elektryczny) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
-	float BonusInstantDamage = 0.0f;
-
 	/** Unikalny identyfikator reakcji (np. "Oil_Ignition", "Steam_Extinguish", "Conductive_Shock") */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	FName ReactionTag = NAME_None;
@@ -82,10 +78,6 @@ struct FElementalReactionResult
 	/** Czy czas trwania statusu powinien zsynchronizować się z nośnikiem cieczy (np. woda dla prądu) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
 	bool bSyncWithCarrierDuration = false;
-
-	/** Natychmiastowe obrażenia bonusowe wywołane reakcją */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
-	float BonusInstantDamage = 0.0f;
 
 	/** Identyfikator reakcji (VFX, dźwięk, logi) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")

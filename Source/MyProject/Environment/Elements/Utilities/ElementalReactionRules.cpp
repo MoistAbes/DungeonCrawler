@@ -32,7 +32,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Burning.Reactions.Add(EStatusEffectType::Wet, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ true,
-				/* BonusInstantDamage      */ 0.0f,
 				/* ReactionTag             */ FName(TEXT("Steam_Extinguish")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
@@ -45,7 +44,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Burning.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* BonusInstantDamage      */ 25.0f,
 				/* ReactionTag             */ FName(TEXT("Oil_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ true,
@@ -77,7 +75,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Wet.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ true,
-				/* BonusInstantDamage      */ 0.0f,
 				/* ReactionTag             */ FName(TEXT("Fire_Extinguished")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
@@ -90,7 +87,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Wet.Reactions.Add(EStatusEffectType::Electrified, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* BonusInstantDamage      */ 15.0f,
 				/* ReactionTag             */ FName(TEXT("Conductive_Shock")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
@@ -123,7 +119,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* BonusInstantDamage      */ 25.0f,
 				/* ReactionTag             */ FName(TEXT("Oil_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ true,
@@ -135,7 +130,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.Reactions.Add(EStatusEffectType::Electrified, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ true,
-				/* BonusInstantDamage      */ 20.0f,
 				/* ReactionTag             */ FName(TEXT("Oil_Electric_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::Burning,
 				/* bCanSpreadToNeighbor    */ true,
@@ -169,7 +163,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.Reactions.Add(EStatusEffectType::Wet, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* BonusInstantDamage      */ 15.0f,
 				/* ReactionTag             */ FName(TEXT("Conductive_Shock")),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ true,
@@ -181,7 +174,6 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ false,
-				/* BonusInstantDamage      */ 20.0f,
 				/* ReactionTag             */ FName(TEXT("Oil_Electric_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::Burning,
 				/* bCanSpreadToNeighbor    */ true,
@@ -321,7 +313,6 @@ FElementalReactionResult UElementalReactionRules::EvaluateReaction(
 			Result.bCanSpreadToNeighbor = Rule->bCanSpreadToNeighbor;
 			Result.ResultingDuration = Rule->ResultingDuration;
 			Result.bSyncWithCarrierDuration = Rule->bSyncWithCarrierDuration;
-			Result.BonusInstantDamage = Rule->BonusInstantDamage;
 			Result.ReactionTag = Rule->ReactionTag;
 			return Result;
 		}
@@ -343,7 +334,6 @@ FElementalReactionResult UElementalReactionRules::EvaluateReaction(
 				Result.ResultingStatus = IncomingStatus;
 				Result.bCanSpreadToNeighbor = false;
 				Result.ResultingDuration = 0.0f;
-				Result.BonusInstantDamage = 0.0f;
 				Result.ReactionTag = FName(TEXT("Liquid_Displaced"));
 				return Result;
 			}

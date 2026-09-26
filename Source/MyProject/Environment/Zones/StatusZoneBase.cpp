@@ -335,36 +335,26 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			FlushNetDormancy();
 			ForceNetUpdate();
 
-			if (Reaction.BonusInstantDamage > 0.0f)
-			{
-				UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, Reaction.BonusInstantDamage, 1200.0f, HitInstigator ? HitInstigator : this, nullptr, false);
-			}
-
 			ProcessActiveOverlaps();
 			return;
 		}
 
 		// 3. Reakcja bez bezpośredniej zamiany (np. Conductive Shock: woda i prąd)
-		if (Reaction.BonusInstantDamage > 0.0f)
+		if (IncomingStatus == EStatusEffectType::Electrified)
 		{
-			UKineticForceLibrary::ApplyExplosion(this, GetActorLocation(), Radius, Reaction.BonusInstantDamage, 600.0f, HitInstigator ? HitInstigator : this, nullptr, false);
+			EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
+			const FStatusEffectConfig& ElectrifiedConfig = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified);
+			const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ElectrifiedConfig.GetBaseDuration();
+			ServerEndTime = GetWorld()->GetTimeSeconds() + ShockDuration;
+			EffectConfig.ContinuousDamagePerSec = ElectrifiedConfig.GetDamagePerSecond();
 
-			if (IncomingStatus == EStatusEffectType::Electrified)
-			{
-				EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
-				const FStatusEffectConfig& ElectrifiedConfig = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified);
-				const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ElectrifiedConfig.GetBaseDuration();
-				ServerEndTime = GetWorld()->GetTimeSeconds() + ShockDuration;
-				EffectConfig.ContinuousDamagePerSec = ElectrifiedConfig.GetDamagePerSecond();
-
-				OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
-				FlushNetDormancy();
-				ForceNetUpdate();
-			}
-
-			ProcessActiveOverlaps();
-			return;
+			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
+			FlushNetDormancy();
+			ForceNetUpdate();
 		}
+
+		ProcessActiveOverlaps();
+		return;
 	}
 }
 

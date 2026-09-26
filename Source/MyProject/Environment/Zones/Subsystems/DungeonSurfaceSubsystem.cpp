@@ -7,7 +7,6 @@
 
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
-#include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
@@ -231,31 +230,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		return false;
 	}
 
-	// Obsługa ewentualnego wybuchu / obrażeń z reakcji
-	if (Result.Reaction.bReactionOccurred && Result.Reaction.BonusInstantDamage > 0.0f)
-	{
-		const FVector CellCenter = Coord.ToWorldLocation(CellSize);
-		UKineticForceLibrary::ApplyExplosion(
-			this,
-			CellCenter,
-			CellSize * 1.5f,
-			Result.Reaction.BonusInstantDamage,
-			800.0f,
-			Instigator,
-			nullptr,
-			false);
 
-		// Jeśli wybuch zniszczył strukturę podtrzymującą tę komórkę, przerywamy i nie zapisujemy stanu w siatce!
-		EPhysicalMaterialType PostExplosionMat;
-		if (!GetSurfaceMaterialAtCoord(Coord, PostExplosionMat))
-		{
-			UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) structure was destroyed by reaction explosion! Aborting state save."),
-				Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
-			ActiveCells.Remove(Coord);
-			OnSurfaceCellChanged.Broadcast(Coord, EStatusEffectType::None, Instigator);
-			return true;
-		}
-	}
 
 	// Komórka została opróżniona (np. ugaszenie ognia wodą)
 	if (Result.bCellBecameEmpty)
@@ -871,19 +846,6 @@ void UDungeonSurfaceSubsystem::ApplyActorEffectsToFloor(
 				if (CellData->HasStatus(TargetStatus))
 				{
 					continue;
-				}
-
-				// Zadawanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok przewodzenia)
-				if (Reaction.BonusInstantDamage > 0.0f)
-				{
-					if (UDamageableComponent* Damageable = Actor->FindComponentByClass<UDamageableComponent>())
-					{
-						Damageable->ApplyDamage(Reaction.BonusInstantDamage);
-						if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
-						{
-							return;
-						}
-					}
 				}
 
 				// Jeśli status obiektu uległ zużyciu w reakcji
