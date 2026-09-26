@@ -154,7 +154,49 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
             {
                 const FStatusEffectConfig& ResultConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
                 const float ResultBaseDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ResultConfig.GetBaseDuration(Tier);
-                const float ResultDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
+                float ResultDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
+
+                if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Reaction.ResultingStatus))
+                {
+                    if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Reaction.ResultingStatus))
+                    {
+                        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+                        {
+                            if (ActiveInst.EffectType != Reaction.ResultingStatus &&
+                                (UElementalReactionRules::DoesStatusSyncWithCarrier(Reaction.ResultingStatus, ActiveInst.EffectType) ||
+                                 ResultConfig.BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
+                            {
+                                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
+                                if (CarrierRemaining > 0.0f)
+                                {
+                                    if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::DoesStatusSyncWithCarrier(Reaction.ResultingStatus, ActiveInst.EffectType))
+                                    {
+                                        ResultDuration = CarrierRemaining;
+                                    }
+                                    else
+                                    {
+                                        ResultDuration = FMath::Min(ResultDuration, CarrierRemaining);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (Reaction.bSyncWithCarrierDuration)
+                    {
+                        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+                        {
+                            if (ActiveInst.EffectType != Reaction.ResultingStatus)
+                            {
+                                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
+                                if (CarrierRemaining > 0.0f)
+                                {
+                                    ResultDuration = FMath::Max(ResultDuration, CarrierRemaining);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 const float ResultEndTime = GetCurrentSyncedTime() + ResultDuration;
 
                 if (FActiveStatusEffectInstance* ExistingResult = FindInstance(Reaction.ResultingStatus))
@@ -189,18 +231,44 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
         return false;
     }
 
-    // Jeśli zachodzi synchronizacja czasu z nośnikiem (np. woda dla prądu na postaci)
+    // Jeśli zachodzi synchronizacja czasu z nośnikiem (np. woda dla prądu na kamieniu, olej dla ognia na kamieniu)
     float FinalDuration = Duration;
-    if (Reaction.bSyncWithCarrierDuration)
+    if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, NewStatus))
     {
-        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+        if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, NewStatus))
         {
-            if (ActiveInst.EffectType != NewStatus)
+            for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
             {
-                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
-                if (CarrierRemaining > 0.0f)
+                if (ActiveInst.EffectType != NewStatus &&
+                    (UElementalReactionRules::DoesStatusSyncWithCarrier(NewStatus, ActiveInst.EffectType) ||
+                     Config.BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
                 {
-                    FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+                    const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
+                    if (CarrierRemaining > 0.0f)
+                    {
+                        if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::DoesStatusSyncWithCarrier(NewStatus, ActiveInst.EffectType))
+                        {
+                            FinalDuration = CarrierRemaining;
+                        }
+                        else
+                        {
+                            FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
+                        }
+                    }
+                }
+            }
+        }
+        else if (Reaction.bSyncWithCarrierDuration)
+        {
+            for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+            {
+                if (ActiveInst.EffectType != NewStatus)
+                {
+                    const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
+                    if (CarrierRemaining > 0.0f)
+                    {
+                        FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+                    }
                 }
             }
         }
@@ -209,6 +277,16 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
 
     // 4. Zarejestrowanie nowego statusu
     AddNewStatusInstance(NewStatus, Tier, FinalDuration, FinalEndTime, InstigatorActor);
+
+    // Jeśli nowo dodany status jest nośnikiem (np. wylano olej na płonącą postać lub oblano wodą naelektryzowaną),
+    // synchronizujemy czas trwania istniejących statusów zależnych od tego nośnika!
+    for (FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
+    {
+        if (OtherInst.EffectType != NewStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherInst.EffectType, NewStatus))
+        {
+            OtherInst.ServerEndTime = FMath::Max(OtherInst.ServerEndTime, FinalEndTime);
+        }
+    }
 
     return true;
 }
@@ -286,7 +364,36 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
         Existing.TickInterval = (NewTickInterval > 0.0f) ? NewTickInterval : 1.0f;
     }
 
-    Existing.ServerEndTime = FMath::Max(Existing.ServerEndTime, NewEndTime);
+    const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
+    float TargetEndTime = NewEndTime;
+
+    // Jeśli status zależy od nośnika na tym materiale (np. ogień na kamieniu z olejem),
+    // jego czas synchronizuje się z czasem nośnika
+    if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Existing.EffectType))
+    {
+        float MaxCarrierEndTime = 0.0f;
+        bool bHasSyncRule = false;
+        for (const FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
+        {
+            if (OtherInst.EffectType != Existing.EffectType &&
+                (UElementalReactionRules::DoesStatusSyncWithCarrier(Existing.EffectType, OtherInst.EffectType) ||
+                 UElementalReactionRules::GetEffectConfig(Existing.EffectType).BypassTraitsIfActive.Contains(OtherInst.EffectType)))
+            {
+                MaxCarrierEndTime = FMath::Max(MaxCarrierEndTime, OtherInst.ServerEndTime);
+                if (UElementalReactionRules::DoesStatusSyncWithCarrier(Existing.EffectType, OtherInst.EffectType))
+                {
+                    bHasSyncRule = true;
+                }
+            }
+        }
+
+        if (MaxCarrierEndTime > 0.0f)
+        {
+            TargetEndTime = bHasSyncRule ? MaxCarrierEndTime : FMath::Min(NewEndTime, MaxCarrierEndTime);
+        }
+    }
+
+    Existing.ServerEndTime = FMath::Max(Existing.ServerEndTime, TargetEndTime);
     Existing.TotalDuration = FMath::Max(Existing.TotalDuration, Duration);
     if (InstigatorActor)
     {
@@ -400,7 +507,52 @@ bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
 #endif
 
     OnStatusEffectRemoved.Broadcast(StatusToRemove);
+
+    // Czyszczenie osieroconych statusów: jeśli usunięto nośnik (np. olej lub wodę),
+    // każdy pozostały status, który nie może legalnie istnieć na tym materiale bez nośnika,
+    // zostaje natychmiastowo wygaszony.
+    CleanOrphanedStatuses();
+
     return true;
+}
+
+bool UStatusEffectComponent::CleanOrphanedStatuses()
+{
+    REQUIRE_AUTHORITY_RET(false);
+
+    if (bIsCleaningOrphans)
+    {
+        return false;
+    }
+
+    TGuardValue<bool> CleaningGuard(bIsCleaningOrphans, true);
+    const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
+
+    bool bAnyEvicted = false;
+    bool bNeedsRecheck = true;
+
+    while (bNeedsRecheck)
+    {
+        bNeedsRecheck = false;
+        const TArray<EStatusEffectType> CurrentStatuses = GetActiveStatuses();
+
+        for (EStatusEffectType Status : CurrentStatuses)
+        {
+            if (!UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, Status, CurrentStatuses))
+            {
+                UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s: Evicted orphaned status %s on material %s (carrier expired/removed)"),
+                    *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(),
+                    *UEnum::GetValueAsString(Status), *UEnum::GetValueAsString(OwnerMaterial));
+
+                RemoveStatus(Status);
+                bAnyEvicted = true;
+                bNeedsRecheck = true;
+                break;
+            }
+        }
+    }
+
+    return bAnyEvicted;
 }
 
 void UStatusEffectComponent::ClearAllStatuses()

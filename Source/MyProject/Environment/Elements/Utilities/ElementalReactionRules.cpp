@@ -388,6 +388,11 @@ bool UElementalReactionRules::DoesStatusSyncWithCarrier(EStatusEffectType Depend
 	return false;
 }
 
+bool UElementalReactionRules::RequiresCarrierToSustain(EPhysicalMaterialType Material, EStatusEffectType Status)
+{
+	return !CanMaterialReceiveStatus(Material, Status, {});
+}
+
 bool UElementalReactionRules::CleanOrphanedStatuses(FSurfaceCellData& InOutCellData, EStatusEffectType StatusToPreserve)
 {
 	bool bEvictedAny = false;
@@ -445,15 +450,27 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	{
 		float AllowedDuration = Duration;
 		// Jeśli odświeżany status zależy od innego nośnika (np. prąd na wodzie, ogień na oleju),
-		// jego czas trwania NIE MOŻE przekroczyć pozostałego czasu trwania tego nośnika!
-		for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+		// jego czas trwania synchronizuje się z pozostałym czasem trwania tego nośnika!
+		if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
 		{
-			if (Entry.Status != IncomingStatus && DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
+			for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
 			{
-				const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-				if (CarrierRemaining > 0.0f)
+				if (Entry.Status != IncomingStatus &&
+					(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
+					 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
 				{
-					AllowedDuration = FMath::Min(AllowedDuration, CarrierRemaining);
+					const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+					if (CarrierRemaining > 0.0f)
+					{
+						if (DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
+						{
+							AllowedDuration = CarrierRemaining;
+						}
+						else
+						{
+							AllowedDuration = FMath::Min(AllowedDuration, CarrierRemaining);
+						}
+					}
 				}
 			}
 		}
@@ -492,14 +509,33 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 				float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : FallbackResultDuration;
 				if (Reaction.bSyncWithCarrierDuration)
 				{
-					for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+					if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, Reaction.ResultingStatus))
 					{
-						if (Entry.Status != Reaction.ResultingStatus)
+						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
 						{
-							const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-							if (CarrierRemaining > 0.0f)
+							if (Entry.Status != Reaction.ResultingStatus &&
+								(DoesStatusSyncWithCarrier(Reaction.ResultingStatus, Entry.Status) ||
+								 GetEffectConfig(Reaction.ResultingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
 							{
-								NewDuration = CarrierRemaining;
+								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+								if (CarrierRemaining > 0.0f)
+								{
+									NewDuration = CarrierRemaining;
+								}
+							}
+						}
+					}
+					else
+					{
+						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+						{
+							if (Entry.Status != Reaction.ResultingStatus)
+							{
+								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+								if (CarrierRemaining > 0.0f)
+								{
+									NewDuration = FMath::Max(NewDuration, CarrierRemaining);
+								}
 							}
 						}
 					}
@@ -526,15 +562,34 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 				float FinalDuration = (Duration > 0.0f) ? Duration : GetEffectConfig(IncomingStatus).GetBaseDuration();
 				if (Reaction.bSyncWithCarrierDuration)
 				{
-					// Synchronizacja z czasem nośnika w komórce: status zależny trwa dokładnie tyle, ile pozostało nośnika
-					for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+					if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
 					{
-						if (Entry.Status != IncomingStatus && DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
+						// Status zależny od nośnika na tym materiale przyjmuje dokładnie czas nośnika (np. ogień płonie dopóki jest olej)
+						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
 						{
-							const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-							if (CarrierRemaining > 0.0f)
+							if (Entry.Status != IncomingStatus &&
+								(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
+								 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
 							{
-								FinalDuration = CarrierRemaining;
+								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+								if (CarrierRemaining > 0.0f)
+								{
+									FinalDuration = CarrierRemaining;
+								}
+							}
+						}
+					}
+					else
+					{
+						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+						{
+							if (Entry.Status != IncomingStatus && DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
+							{
+								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+								if (CarrierRemaining > 0.0f)
+								{
+									FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+								}
 							}
 						}
 					}
@@ -549,6 +604,17 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 				{
 					InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + FinalDuration, Instigator });
 				}
+
+				// Kluczowe: jeśli nowo dodany status jest nośnikiem (np. dolano olej do ognia lub wodę do prądu),
+				// zsynchronizuj czas istniejących statusów, które od tego nośnika zależą!
+				for (FSurfaceCellStatusEntry& OtherEntry : InOutCellData.ActiveStatuses)
+				{
+					if (OtherEntry.Status != IncomingStatus && DoesStatusSyncWithCarrier(OtherEntry.Status, IncomingStatus))
+					{
+						OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CurrentTime + FinalDuration);
+					}
+				}
+
 				Result.bAccepted = true;
 				Result.bStateModified = true;
 			}
@@ -568,13 +634,20 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 		const EStatusEffectType DominantLiquid = IsLiquidStatus(Reaction.ResultingStatus) ? Reaction.ResultingStatus : (IsLiquidStatus(IncomingStatus) && !Reaction.bConsumeIncomingStatus ? IncomingStatus : EStatusEffectType::None);
 		if (DominantLiquid != EStatusEffectType::None)
 		{
+			bool bLiquidRemoved = false;
 			for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
 			{
 				if (InOutCellData.ActiveStatuses[Index].Status != DominantLiquid && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
 				{
 					InOutCellData.ActiveStatuses.RemoveAt(Index);
 					Result.bStateModified = true;
+					bLiquidRemoved = true;
 				}
+			}
+
+			if (bLiquidRemoved)
+			{
+				CleanOrphanedStatuses(InOutCellData, DominantLiquid);
 			}
 		}
 
@@ -602,16 +675,58 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 			// ZŁOTA ZASADA: Jeśli dodajemy płyn, usuwamy wszelkie inne płyny
 			if (IsLiquidStatus(IncomingStatus))
 			{
+				bool bLiquidRemoved = false;
 				for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
 				{
 					if (InOutCellData.ActiveStatuses[Index].Status != IncomingStatus && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
 					{
 						InOutCellData.ActiveStatuses.RemoveAt(Index);
+						bLiquidRemoved = true;
+					}
+				}
+
+				if (bLiquidRemoved)
+				{
+					CleanOrphanedStatuses(InOutCellData, IncomingStatus);
+				}
+			}
+
+			float FinalDuration = Duration;
+			if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
+			{
+				for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
+				{
+					if (Entry.Status != IncomingStatus &&
+						(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
+						 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
+					{
+						const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+						if (CarrierRemaining > 0.0f)
+						{
+							if (DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
+							{
+								FinalDuration = CarrierRemaining;
+							}
+							else
+							{
+								FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
+							}
+						}
 					}
 				}
 			}
 
-			InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
+			InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + FinalDuration, Instigator });
+
+			// Synchronizacja czasu dla statusów zależnych od nowo dodanego nośnika
+			for (FSurfaceCellStatusEntry& OtherEntry : InOutCellData.ActiveStatuses)
+			{
+				if (OtherEntry.Status != IncomingStatus && DoesStatusSyncWithCarrier(OtherEntry.Status, IncomingStatus))
+				{
+					OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CurrentTime + FinalDuration);
+				}
+			}
+
 			Result.bAccepted = true;
 			Result.bStateModified = true;
 			return Result;

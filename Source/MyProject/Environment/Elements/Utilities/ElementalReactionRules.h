@@ -69,6 +69,13 @@ public:
 	static bool DoesStatusSyncWithCarrier(EStatusEffectType DependentStatus, EStatusEffectType CarrierStatus);
 
 	/**
+	 * Sprawdza, czy dany materiał bez żadnych aktywnych nośników/powłok wymaga nośnika,
+	 * aby w ogóle móc utrzymać ten status (np. Stone dla Burning lub Electrified).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool RequiresCarrierToSustain(EPhysicalMaterialType Material, EStatusEffectType Status);
+
+	/**
 	 * Główny resolver stanu komórki powierzchniowej.
 	 * Wylicza całkowity nowy stan komórki (reakcje, nośniki, wygaszanie, tożsamość materiałowa).
 	 * Modyfikuje InOutCellData i zwraca raport z przejścia stanu.

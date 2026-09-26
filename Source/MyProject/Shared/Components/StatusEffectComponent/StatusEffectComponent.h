@@ -89,6 +89,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     bool RemoveStatus(EStatusEffectType StatusToRemove);
 
+    /** Usuwa z obiektu statusy, które bez swoich nośników nie mogą dłużej legalnie istnieć na tym materiale (Tylko Serwer) */
+    UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
+    bool CleanOrphanedStatuses();
+
     /** Usuwa wszystkie aktywne statusy (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
     void ClearAllStatuses();
@@ -170,4 +174,7 @@ private:
 
     /** Tworzy i rejestruje nową instancję statusu na podstawie danych z rejestru */
     void AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
+
+    /** Flaga chroniąca przed zapętleniem rekurencji podczas czyszczenia osieroconych statusów */
+    bool bIsCleaningOrphans = false;
 };
