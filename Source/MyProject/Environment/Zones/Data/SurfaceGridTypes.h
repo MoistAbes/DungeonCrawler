@@ -147,6 +147,13 @@ struct MYPROJECT_API FSurfaceCellCoord
 		}
 	}
 
+	/** Alias ścieżki rozprzestrzeniania */
+	using FSpreadPath = struct FSurfaceSpreadPath;
+
+	/** Zwraca 4 ortogonalne ścieżki rozprzestrzeniania z hierarchią: najpierw współpłaszczyznowa, potem narożna */
+	void GetDirectionalSpreadPaths(TArray<struct FSurfaceSpreadPath, TInlineAllocator<4>>& OutPaths) const;
+
+
 	/** Zwraca wszystkich sąsiadów: 4 współpłaszczyznowe oraz sąsiadów na krawędziach 90° (podłoga <-> ściany <-> sufit) */
 	void GetAdjacentNeighbors(TArray<FSurfaceCellCoord>& OutNeighbors) const
 	{
@@ -333,6 +340,78 @@ struct MYPROJECT_API FSurfaceCellCoord
 };
 
 /**
+ * Pojedyncza ortogonalna ścieżka rozprzestrzeniania z hierarchią: najpierw płaszczyzna, potem narożnik.
+ */
+USTRUCT(BlueprintType)
+struct MYPROJECT_API FSurfaceSpreadPath
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	FSurfaceCellCoord Coplanar;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	FSurfaceCellCoord Corner;
+
+	FSurfaceSpreadPath() = default;
+
+	FSurfaceSpreadPath(const FSurfaceCellCoord& InCoplanar, const FSurfaceCellCoord& InCorner)
+		: Coplanar(InCoplanar), Corner(InCorner)
+	{
+	}
+};
+
+FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpreadPath, TInlineAllocator<4>>& OutPaths) const
+{
+	OutPaths.Reset(4);
+	switch (Face)
+	{
+	case ESurfaceFaceDirection::Up:
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		break;
+
+	case ESurfaceFaceDirection::Down:
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		break;
+
+	case ESurfaceFaceDirection::North:
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		break;
+
+	case ESurfaceFaceDirection::South:
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		break;
+
+	case ESurfaceFaceDirection::East:
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		break;
+
+	case ESurfaceFaceDirection::West:
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		break;
+	}
+}
+
+
+/**
  * Pojedynczy aktywny status żywiołowy na komórce siatki wraz z czasem wygaśnięcia i instigatorem.
  */
 USTRUCT(BlueprintType)
@@ -374,6 +453,14 @@ struct MYPROJECT_API FSurfaceCellData
 	/** Materiał fizyczny architektury podłoża (np. Stone, Wood, Metal) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|SurfaceGrid")
 	EPhysicalMaterialType SurfaceMaterial = EPhysicalMaterialType::Stone;
+
+	/** Aktor fundamentu/struktury lochu, na którym znajduje się ta komórka */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	TWeakObjectPtr<AActor> SurfaceActor = nullptr;
+
+	/** Czas serwera (GetTimeSeconds), w którym komórka spróbuje rozprzestrzenić stały ogień na sąsiadów */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	float NextFuelSpreadTime = 0.0f;
 
 	bool IsEmpty() const
 	{

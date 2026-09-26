@@ -107,7 +107,8 @@ public:
 		EStatusEffectType IncomingStatus,
 		float Duration,
 		AActor* Instigator = nullptr,
-		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone);
+		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone,
+		AActor* SurfaceActor = nullptr);
 
 	/**
 	 * Wewnętrzna wersja metody PaintSurface z możliwością przekazania zbioru przetworzonych koordynatów
@@ -170,6 +171,12 @@ private:
 	/** Propaguje żywioły na sąsiednie komórki (Cellular Automata) */
 	void PropagateElementalSpreads(float CurrentTime, float SafeCellSize);
 
+	/** Rozprzestrzenia stały ogień po materiale stanowiącym paliwo (bSelfSustainingFuel, np. drewno) */
+	void ProcessSolidFuelCombustion(float CurrentTime, float SafeCellSize);
+
+	/** Aplikuje zagregowane obrażenia od aktywnych komórek żywiołów do fundamentów architektury lochu */
+	void ProcessSurfaceStructuralDamage(float CurrentTime, float DeltaTime);
+
 	/** Ewaluuje dwukierunkową interakcję z zarejestrowanymi komponentami statusów */
 	void ProcessActorInteractions(float CurrentTime);
 
@@ -194,6 +201,9 @@ private:
 
 	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową. Zwraca false jeśli brak fizycznej geometrii. */
 	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;
+
+	/** Pobiera materiał fizyczny oraz wskaźnik do aktora architektury lochu pod daną komórką powierzchniową. */
+	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
 
 	/** Rejestr aktywnych komponentów statusów w świecie podlegających interakcji z podłożem */
 	UPROPERTY()

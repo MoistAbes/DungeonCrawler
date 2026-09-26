@@ -115,13 +115,13 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			};
 
 			// Reakcja: Olej trafia w Płonący cel (Natychmiastowy zapłon nowo wylanego oleju)
-			// Olej jest paliwem - NIE synchronizuje swojego czasu trwania z płomieniem
+			// Olej jest paliwem - NIE synchronizuje swojego czasu trwania z płomieniem i sam nie rozprzestrzenia się na sąsiadów
 			Oiled.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
 				/* ReactionTag             */ FName(TEXT("Oil_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::None,
-				/* bCanSpreadToNeighbor    */ true,
+				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 6.0f,
 				/* bSyncWithCarrierDuration */ false
 			});
@@ -132,7 +132,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 				/* bRemoveExistingStatus   */ true,
 				/* ReactionTag             */ FName(TEXT("Oil_Electric_Ignition")),
 				/* ResultingStatus         */ EStatusEffectType::Burning,
-				/* bCanSpreadToNeighbor    */ true,
+				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 6.0f,
 				/* bSyncWithCarrierDuration */ false
 			});
@@ -424,6 +424,11 @@ bool UElementalReactionRules::CleanOrphanedStatuses(FSurfaceCellData& InOutCellD
 
 namespace
 {
+	FORCEINLINE bool IsPermanentEffect(EPhysicalMaterialType Material, EStatusEffectType Status)
+	{
+		return (Status == EStatusEffectType::Burning) && PhysicalMaterialUtils::GetTraits(Material).bSelfSustainingFuel;
+	}
+
 	/** Wylicza ostateczny czas trwania statusu z uwzględnieniem fizycznych nośników obecnych w komórce */
 	float ComputeAdjustedDuration(
 		EPhysicalMaterialType Material,
@@ -433,6 +438,13 @@ namespace
 		const FSurfaceCellData& CellData,
 		float CurrentTime)
 	{
+		// Cechy materiału stałego paliwa: jeśli materiał sam w sobie podtrzymuje ogień (np. drewno),
+		// ogień staje się procesem ciągłym (0.0f = nieskończony/trwały do ugaszenia lub zniszczenia fundamentu)
+		if (IsPermanentEffect(Material, Status))
+		{
+			return 0.0f;
+		}
+
 		const float FallbackDuration = UElementalReactionRules::GetEffectConfig(Status).GetBaseDuration();
 		float FinalDuration = (RequestedDuration > 0.0f) ? RequestedDuration : FallbackDuration;
 
@@ -442,7 +454,8 @@ namespace
 				(UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status) ||
 				 UElementalReactionRules::GetEffectConfig(Status).BypassTraitsIfActive.Contains(Entry.Status)))
 			{
-				const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+				const bool bCarrierPermanent = (Entry.ServerEndTime <= 0.0f);
+				const float CarrierRemaining = bCarrierPermanent ? FallbackDuration : (Entry.ServerEndTime - CurrentTime);
 				if (CarrierRemaining > 0.0f)
 				{
 					if (UElementalReactionRules::RequiresCarrierToSustain(Material, Status))
@@ -464,15 +477,26 @@ namespace
 			}
 		}
 
-		return FinalDuration;
+		return FMath::Max(0.1f, FinalDuration);
 	}
 
 	/** Aktualizuje czas istniejącego wpisu w komórce lub dodaje nowy wpis (Upsert) */
 	void UpsertStatusEntry(FSurfaceCellData& CellData, EStatusEffectType Status, float EndTime, AActor* Instigator)
 	{
+		const bool bCanBePermanent = IsPermanentEffect(CellData.SurfaceMaterial, Status);
+
 		if (FSurfaceCellStatusEntry* Existing = CellData.FindStatus(Status))
 		{
-			Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, EndTime);
+			// Jeśli status może być permanentny i którykolwiek wpis jest permanentny, pozostaje permanentny
+			if (bCanBePermanent && (Existing->ServerEndTime == 0.0f || EndTime == 0.0f))
+			{
+				Existing->ServerEndTime = 0.0f;
+			}
+			else
+			{
+				Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, EndTime);
+			}
+
 			if (Instigator)
 			{
 				Existing->Instigator = Instigator;
@@ -480,7 +504,8 @@ namespace
 		}
 		else
 		{
-			CellData.ActiveStatuses.Add({ Status, EndTime, Instigator });
+			const float SafeEndTime = (bCanBePermanent && EndTime == 0.0f) ? 0.0f : EndTime;
+			CellData.ActiveStatuses.Add({ Status, SafeEndTime, Instigator });
 		}
 	}
 
@@ -491,7 +516,15 @@ namespace
 		{
 			if (OtherEntry.Status != CarrierStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherEntry.Status, CarrierStatus))
 			{
-				OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CarrierEndTime);
+				const bool bDependentCanBePermanent = IsPermanentEffect(CellData.SurfaceMaterial, OtherEntry.Status);
+				if (CarrierEndTime == 0.0f && bDependentCanBePermanent)
+				{
+					OtherEntry.ServerEndTime = 0.0f;
+				}
+				else if (CarrierEndTime > 0.0f && OtherEntry.ServerEndTime != 0.0f)
+				{
+					OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CarrierEndTime);
+				}
 			}
 		}
 	}
@@ -532,7 +565,7 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 {
 	FSurfaceCellTransitionResult Result;
 
-	if (IncomingStatus == EStatusEffectType::None || Duration <= 0.0f)
+	if (IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
 	{
 		return Result;
 	}
@@ -546,7 +579,10 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 			return Result;
 		}
 
-		InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
+		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
+		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
+
+		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
 		Result.bAccepted = true;
 		Result.bStateModified = true;
 		return Result;
@@ -556,7 +592,7 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	if (InOutCellData.HasStatus(IncomingStatus))
 	{
 		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
-		const float EndTime = CurrentTime + FinalDuration;
+		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
 
 		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
 		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);
@@ -584,7 +620,7 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 		{
 			const float RequestedDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
 			const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, StatusToApply, RequestedDuration, Reaction.bSyncWithCarrierDuration, InOutCellData, CurrentTime);
-			const float EndTime = CurrentTime + FinalDuration;
+			const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, StatusToApply) ? 0.0f : (CurrentTime + FinalDuration);
 
 			UpsertStatusEntry(InOutCellData, StatusToApply, EndTime, Instigator);
 			SyncDependentsWithCarrier(InOutCellData, StatusToApply, EndTime);
@@ -619,7 +655,7 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 		}
 
 		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
-		const float EndTime = CurrentTime + FinalDuration;
+		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
 
 		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
 		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);

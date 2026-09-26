@@ -30,8 +30,9 @@ namespace
 		float CurrentTime,
 		FPendingSpreadCell& OutSpread)
 	{
-		const float RemainingSourceTime = SourceEntry.ServerEndTime - CurrentTime;
-		if (RemainingSourceTime <= 0.1f)
+		const bool bIsPermanent = (SourceEntry.ServerEndTime <= 0.0f);
+		const float RemainingSourceTime = bIsPermanent ? 999999.0f : (SourceEntry.ServerEndTime - CurrentTime);
+		if (!bIsPermanent && RemainingSourceTime <= 0.1f)
 		{
 			return false;
 		}
@@ -59,13 +60,20 @@ namespace
 
 				if (SpreadReaction.bSyncWithCarrierDuration)
 				{
-					const float NeighborCarrierRemaining = NeighborEntry.ServerEndTime - CurrentTime;
-					if (NeighborCarrierRemaining > 0.0f)
+					if (NeighborEntry.ServerEndTime <= 0.0f)
 					{
-						CalculatedDuration = NeighborCarrierRemaining;
+						CalculatedDuration = FallbackSpreadDuration;
+					}
+					else
+					{
+						const float NeighborCarrierRemaining = NeighborEntry.ServerEndTime - CurrentTime;
+						if (NeighborCarrierRemaining > 0.0f)
+						{
+							CalculatedDuration = NeighborCarrierRemaining;
+						}
 					}
 				}
-				else if (RemainingSourceTime > 0.0f)
+				else if (!bIsPermanent && RemainingSourceTime > 0.0f)
 				{
 					CalculatedDuration = FMath::Min(CalculatedDuration, RemainingSourceTime);
 				}
@@ -179,9 +187,10 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	EStatusEffectType IncomingStatus,
 	float Duration,
 	AActor* Instigator,
-	EPhysicalMaterialType ExplicitMaterial)
+	EPhysicalMaterialType ExplicitMaterial,
+	AActor* SurfaceActor)
 {
-	if (!GetWorld() || IncomingStatus == EStatusEffectType::None || Duration <= 0.0f)
+	if (!GetWorld() || IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
 	{
 		return false;
 	}
@@ -192,18 +201,29 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	// Jeśli komórka nie istnieje w siatce, ustalamy tożsamość materiałową podłoża
 	// oraz upewniamy się, że pod komórką faktycznie istnieje fizyczna architektura lochu.
 	EPhysicalMaterialType SurfaceMat = ExplicitMaterial;
+	AActor* ResolvedSurfaceActor = SurfaceActor;
+
 	if (!Existing)
 	{
-		if (!GetSurfaceMaterialAtCoord(Coord, SurfaceMat))
+		AActor* ProbedActor = nullptr;
+		if (!GetSurfaceMaterialAtCoord(Coord, SurfaceMat, ProbedActor))
 		{
 			UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) rejected: No valid surface geometry present!"),
 				Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
 			return false;
 		}
+		if (!ResolvedSurfaceActor)
+		{
+			ResolvedSurfaceActor = ProbedActor;
+		}
 	}
 	else
 	{
 		SurfaceMat = Existing->SurfaceMaterial;
+		if (!ResolvedSurfaceActor)
+		{
+			ResolvedSurfaceActor = Existing->SurfaceActor.Get();
+		}
 	}
 
 	FSurfaceCellData CellData;
@@ -214,6 +234,11 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	else
 	{
 		CellData.SurfaceMaterial = SurfaceMat;
+	}
+
+	if (ResolvedSurfaceActor)
+	{
+		CellData.SurfaceActor = ResolvedSurfaceActor;
 	}
 
 	// Cała chemia, reakcje, nośniki i wygaszanie są liczone w centralnym silniku zasad (UElementalReactionRules).
@@ -230,7 +255,15 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		return false;
 	}
 
-
+	// Inicjalizacja czasu rozprzestrzeniania dla stałego paliwa (np. drewno)
+	if (CellData.HasStatus(EStatusEffectType::Burning))
+	{
+		const FPhysicalMaterialTraits Traits = PhysicalMaterialUtils::GetTraits(CellData.SurfaceMaterial);
+		if (Traits.bSelfSustainingFuel && CellData.NextFuelSpreadTime <= 0.0f)
+		{
+			CellData.NextFuelSpreadTime = CurrentTime + Traits.FuelSpreadInterval;
+		}
+	}
 
 	// Komórka została opróżniona (np. ugaszenie ognia wodą)
 	if (Result.bCellBecameEmpty)
@@ -250,7 +283,14 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		FString StatusesStr;
 		for (const auto& St : CellData.ActiveStatuses)
 		{
-			StatusesStr += FString::Printf(TEXT("[%s: %.1fs] "), *UEnum::GetValueAsString(St.Status), St.ServerEndTime - CurrentTime);
+			if (St.ServerEndTime <= 0.0f)
+			{
+				StatusesStr += FString::Printf(TEXT("[%s: Permanent] "), *UEnum::GetValueAsString(St.Status));
+			}
+			else
+			{
+				StatusesStr += FString::Printf(TEXT("[%s: %.1fs] "), *UEnum::GetValueAsString(St.Status), St.ServerEndTime - CurrentTime);
+			}
 		}
 		UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) Updated -> %s"),
 			Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face), *StatusesStr);
@@ -341,7 +381,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
 
 			// JEDYNY PUNKT STYKU: ApplyStatusToCell decyduje o reakcji i stanie komórki
-			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat))
+			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceHit.GetActor()))
 			{
 				AffectedCount++;
 			}
@@ -488,11 +528,23 @@ void UDungeonSurfaceSubsystem::UnregisterStatusComponent(UStatusEffectComponent*
 
 bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const
 {
+	AActor* DummyActor = nullptr;
+	return GetSurfaceMaterialAtCoord(Coord, OutMaterial, DummyActor);
+}
+
+bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const
+{
+	OutSurfaceActor = nullptr;
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 	const FVector Center = Coord.ToWorldLocation(SafeCellSize);
 	FHitResult Hit;
-	return SurfaceGridGeometryUtils::ProbeSurfaceAt(GetWorld(), Center, Normal, SafeCellSize * 0.8f, Hit, OutMaterial);
+	const bool bHit = SurfaceGridGeometryUtils::ProbeSurfaceAt(GetWorld(), Center, Normal, SafeCellSize * 0.8f, Hit, OutMaterial);
+	if (bHit)
+	{
+		OutSurfaceActor = Hit.GetActor();
+	}
+	return bHit;
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
@@ -617,16 +669,20 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 	// 1. Wygaszanie przeterminowanych statusów w komórkach
 	ExpireCellStatuses(CurrentTime);
 
-	// 2. Propagacja żywiołów na sąsiednie komórki (Cellular Automata)
+	// 2. Propagacja żywiołów na sąsiednie komórki (Cellular Automata - nośniki płynne)
 	PropagateElementalSpreads(CurrentTime, SafeCellSize);
 
-	// 3. Server-Authoritative: dwukierunkowa interakcja żywiołowa między obiektami a komórkami
+	// 3. Rozprzestrzenianie ognia stałego paliwa (np. drewno) w interwale czasowym
+	ProcessSolidFuelCombustion(CurrentTime, SafeCellSize);
+
+	// 4. Server-Authoritative: dwukierunkowa interakcja z postaciami oraz aplikacja obrażeń do fundamentów
 	if (World->GetNetMode() != NM_Client && ActiveCells.Num() > 0)
 	{
 		ProcessActorInteractions(CurrentTime);
+		ProcessSurfaceStructuralDamage(CurrentTime, SubsystemTickInterval);
 	}
 
-	// 4. Debug visuals
+	// 5. Debug visuals
 	DrawDebugVisuals();
 }
 
@@ -689,13 +745,25 @@ void UDungeonSurfaceSubsystem::PropagateElementalSpreads(float CurrentTime, floa
 
 		for (const FSurfaceCellCoord& NeighborCoord : NeighborCoords)
 		{
+			// Bezpiecznik 1: pomijamy komórki w tym samym voxelu (X, Y, Z)
+			if (NeighborCoord.X == SourceCoord.X && NeighborCoord.Y == SourceCoord.Y && NeighborCoord.Z == SourceCoord.Z)
+			{
+				continue;
+			}
+
 			const FSurfaceCellData* NeighborData = ActiveCells.Find(NeighborCoord);
 			if (!NeighborData || NeighborData->IsEmpty())
 			{
 				continue;
 			}
 
-			// Bezpiecznik fizyczny w 3D: odległość między centrami powierzchni musi być <= 1.5 * SafeCellSize (np. 75 cm)
+			// Bezpiecznik 2: ta sama struktura nie może rozprzestrzeniać statusów między swoimi wewnętrznymi prostopadłymi płaszczyznami
+			if (NeighborCoord.Face != SourceCoord.Face && NeighborData->SurfaceActor.IsValid() && NeighborData->SurfaceActor == SourceData.SurfaceActor)
+			{
+				continue;
+			}
+
+			// Bezpiecznik 3 fizyczny w 3D: odległość między centrami powierzchni musi być <= 1.5 * SafeCellSize (np. 75 cm)
 			const FVector SourceSurfacePos = SourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face) * (SafeCellSize * 0.45f);
 			const FVector NeighborSurfacePos = NeighborCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(NeighborCoord.Face) * (SafeCellSize * 0.45f);
 			if (FVector::DistSquared(SourceSurfacePos, NeighborSurfacePos) > FMath::Square(SafeCellSize * 1.5f))
@@ -710,7 +778,18 @@ void UDungeonSurfaceSubsystem::PropagateElementalSpreads(float CurrentTime, floa
 				{
 					if (FPendingSpreadCell* ExistingPending = PendingSpreads.Find(NeighborCoord))
 					{
-						ExistingPending->Duration = FMath::Max(ExistingPending->Duration, Spread.Duration);
+						// Jeśli mamy już oczekujący spread na tę komórkę, preferujemy ten o tym samym statusie
+						if (Spread.NewStatus == ExistingPending->NewStatus)
+						{
+							if (Spread.Duration == 0.0f || ExistingPending->Duration == 0.0f)
+							{
+								ExistingPending->Duration = 0.0f;
+							}
+							else
+							{
+								ExistingPending->Duration = FMath::Max(ExistingPending->Duration, Spread.Duration);
+							}
+						}
 					}
 					else
 					{
@@ -726,6 +805,244 @@ void UDungeonSurfaceSubsystem::PropagateElementalSpreads(float CurrentTime, floa
 	{
 		const FPendingSpreadCell& Pending = PendingPair.Value;
 		ApplyStatusToCell(Pending.Coord, Pending.NewStatus, Pending.Duration, Pending.Instigator.Get());
+	}
+}
+
+void UDungeonSurfaceSubsystem::ProcessSolidFuelCombustion(float CurrentTime, float SafeCellSize)
+{
+	struct FPendingFuelSpread
+	{
+		FSurfaceCellCoord Coord;
+		EPhysicalMaterialType Material = EPhysicalMaterialType::Wood;
+		TWeakObjectPtr<AActor> SurfaceActor = nullptr;
+		TWeakObjectPtr<AActor> Instigator = nullptr;
+	};
+
+	TMap<FSurfaceCellCoord, FPendingFuelSpread> PendingFuelSpreads;
+
+	for (auto& Pair : ActiveCells)
+	{
+		const FSurfaceCellCoord& SourceCoord = Pair.Key;
+		FSurfaceCellData& SourceData = Pair.Value;
+
+		if (!SourceData.HasStatus(EStatusEffectType::Burning))
+		{
+			continue;
+		}
+
+		const FPhysicalMaterialTraits Traits = PhysicalMaterialUtils::GetTraits(SourceData.SurfaceMaterial);
+		if (!Traits.bSelfSustainingFuel)
+		{
+			continue;
+		}
+
+		// Inicjalizacja czasu pierwszego rozprzestrzenienia jeśli był zerowy
+		if (SourceData.NextFuelSpreadTime <= 0.0f)
+		{
+			SourceData.NextFuelSpreadTime = CurrentTime + Traits.FuelSpreadInterval;
+			continue;
+		}
+
+		// Sprawdzamy interwał rozprzestrzeniania (np. co 2.0s)
+		if (CurrentTime < SourceData.NextFuelSpreadTime)
+		{
+			continue;
+		}
+
+		// Resetujemy licznik do następnej próby za kolejne FuelSpreadInterval sekund
+		SourceData.NextFuelSpreadTime = CurrentTime + Traits.FuelSpreadInterval;
+
+		TArray<FSurfaceSpreadPath, TInlineAllocator<4>> SpreadPaths;
+		SourceCoord.GetDirectionalSpreadPaths(SpreadPaths);
+
+		for (const auto& Path : SpreadPaths)
+		{
+			// 1. Sprawdzamy kandydata współpłaszczyznowego (Coplanar)
+			bool bCoplanarSurfaceExists = false;
+			EPhysicalMaterialType CoplanarMat = EPhysicalMaterialType::Stone;
+			AActor* CoplanarActor = nullptr;
+
+			const FSurfaceCellData* ExistingCoplanar = ActiveCells.Find(Path.Coplanar);
+			if (ExistingCoplanar)
+			{
+				bCoplanarSurfaceExists = true;
+				CoplanarMat = ExistingCoplanar->SurfaceMaterial;
+				CoplanarActor = ExistingCoplanar->SurfaceActor.Get();
+			}
+			else if (GetSurfaceMaterialAtCoord(Path.Coplanar, CoplanarMat, CoplanarActor))
+			{
+				bCoplanarSurfaceExists = true;
+			}
+
+			if (bCoplanarSurfaceExists)
+			{
+				// Powierzchnia kontynuuje się w tej samej płaszczyźnie!
+				if (!ExistingCoplanar || !ExistingCoplanar->HasStatus(EStatusEffectType::Burning))
+				{
+					if (PhysicalMaterialUtils::GetTraits(CoplanarMat).bSelfSustainingFuel)
+					{
+						if (!PendingFuelSpreads.Contains(Path.Coplanar))
+						{
+							FPendingFuelSpread Spread;
+							Spread.Coord = Path.Coplanar;
+							Spread.Material = CoplanarMat;
+							Spread.SurfaceActor = CoplanarActor;
+							Spread.Instigator = SourceData.GetDominantInstigator();
+							PendingFuelSpreads.Add(Path.Coplanar, Spread);
+
+							UE_LOG(LogDungeonElements, Log, TEXT("[SolidFuel] Spread Coplanar -> (%d, %d, %d, %s) on Actor: %s"),
+								Path.Coplanar.X, Path.Coplanar.Y, Path.Coplanar.Z,
+								*UEnum::GetValueAsString(Path.Coplanar.Face),
+								CoplanarActor ? *CoplanarActor->GetName() : TEXT("None"));
+						}
+					}
+				}
+				// ZŁOTA ZASADA GEOMETRII: Skoro płaszczyzna kontynuuje się w linii prostej (np. łączenie dwóch równych desek w szeregu),
+				// ściana NIE zagina się w tym miejscu pod kątem 90° (zapobiega to uderzaniu raycastów w wewnętrzną grubość łączeń ścian!)
+				continue;
+			}
+
+			// 2. Skoro płaszczyzna w tym kierunku się skończyła (krawędź ściany/posadzki),
+			// sprawdzamy narożnik wklęsły 90° (np. przejście ściana <-> posadzka, sufit lub ściana prostopadła)
+			bool bCornerSurfaceExists = false;
+			EPhysicalMaterialType CornerMat = EPhysicalMaterialType::Stone;
+			AActor* CornerActor = nullptr;
+
+			const FSurfaceCellData* ExistingCorner = ActiveCells.Find(Path.Corner);
+			if (ExistingCorner)
+			{
+				bCornerSurfaceExists = true;
+				CornerMat = ExistingCorner->SurfaceMaterial;
+				CornerActor = ExistingCorner->SurfaceActor.Get();
+			}
+			else if (GetSurfaceMaterialAtCoord(Path.Corner, CornerMat, CornerActor))
+			{
+				bCornerSurfaceExists = true;
+			}
+
+			if (!bCornerSurfaceExists)
+			{
+				continue;
+			}
+
+			// ZASADA SEPARACJI STRUKTUR: Obiekt nie może podpalać prostopadłych krawędzi samego siebie
+			// (np. boku deski, szczeliny montażowej czy spodu ściany) - narożniki łączą różne obiekty (ściana -> podłoga)
+			if (CornerActor && CornerActor == SourceData.SurfaceActor.Get())
+			{
+				continue;
+			}
+
+			// Jeśli narożnik już płonie, pomijamy
+			if (ExistingCorner && ExistingCorner->HasStatus(EStatusEffectType::Burning))
+			{
+				continue;
+			}
+
+			if (PhysicalMaterialUtils::GetTraits(CornerMat).bSelfSustainingFuel)
+			{
+				if (!PendingFuelSpreads.Contains(Path.Corner))
+				{
+					FPendingFuelSpread Spread;
+					Spread.Coord = Path.Corner;
+					Spread.Material = CornerMat;
+					Spread.SurfaceActor = CornerActor;
+					Spread.Instigator = SourceData.GetDominantInstigator();
+					PendingFuelSpreads.Add(Path.Corner, Spread);
+
+					UE_LOG(LogDungeonElements, Log, TEXT("[SolidFuel] Spread Corner 90° -> (%d, %d, %d, %s) on Actor: %s"),
+						Path.Corner.X, Path.Corner.Y, Path.Corner.Z,
+						*UEnum::GetValueAsString(Path.Corner.Face),
+						CornerActor ? *CornerActor->GetName() : TEXT("None"));
+				}
+			}
+		}
+	}
+
+	// Aplikujemy zapłony stałego paliwa przez atomowy punkt styku
+	const float BaseDuration = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Burning).GetBaseDuration();
+	for (const auto& Pair : PendingFuelSpreads)
+	{
+		const FPendingFuelSpread& Spread = Pair.Value;
+		ApplyStatusToCell(Spread.Coord, EStatusEffectType::Burning, BaseDuration, Spread.Instigator.Get(), Spread.Material, Spread.SurfaceActor.Get());
+	}
+}
+
+void UDungeonSurfaceSubsystem::ProcessSurfaceStructuralDamage(float CurrentTime, float DeltaTime)
+{
+	if (ActiveCells.IsEmpty() || DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	// 1. Zbieramy i agregujemy obrażenia per unikalny aktor architektury lochu oraz typ obrażeń.
+	// Klucz: TPair<TWeakObjectPtr<AActor>, EDamageType>, Wartość: Suma obrażeń na sekundę (DPS) oraz ostatni instigator
+	struct FDamageAggregate
+	{
+		float TotalDPS = 0.0f;
+		TWeakObjectPtr<AActor> LastInstigator = nullptr;
+	};
+
+	TMap<TPair<TWeakObjectPtr<AActor>, EDamageType>, FDamageAggregate> AggregatedDamage;
+
+	constexpr float MaxStructuralDPS = 25.0f; // Górny limit DPS na pojedynczą strukturę lochu dla danego typu obrażeń
+
+	for (const auto& Pair : ActiveCells)
+	{
+		const FSurfaceCellData& Cell = Pair.Value;
+		if (Cell.IsEmpty() || !Cell.SurfaceActor.IsValid())
+		{
+			continue;
+		}
+
+		for (const FSurfaceCellStatusEntry& StatusEntry : Cell.ActiveStatuses)
+		{
+			const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(StatusEntry.Status);
+			if (Config.bIsDoTType)
+			{
+				const EDamageType DmgType = PhysicalMaterialUtils::StatusToDamageType(StatusEntry.Status);
+				const float BaseDPS = Config.GetDamagePerSecond();
+				if (BaseDPS > 0.0f)
+				{
+					const TPair<TWeakObjectPtr<AActor>, EDamageType> Key(Cell.SurfaceActor, DmgType);
+					FDamageAggregate& Agg = AggregatedDamage.FindOrAdd(Key);
+					Agg.TotalDPS += BaseDPS;
+					if (StatusEntry.Instigator.IsValid())
+					{
+						Agg.LastInstigator = StatusEntry.Instigator;
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Aplikujemy zagregowane pakiety obrażeń do UDamageableComponent fundamentów
+	for (const auto& AggPair : AggregatedDamage)
+	{
+		AActor* StructureActor = AggPair.Key.Key.Get();
+		if (!StructureActor || !IsValid(StructureActor) || StructureActor->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		const EDamageType DmgType = AggPair.Key.Value;
+		const FDamageAggregate& Agg = AggPair.Value;
+
+		if (Agg.TotalDPS <= 0.0f)
+		{
+			continue;
+		}
+
+		UDamageableComponent* DmgComp = StructureActor->FindComponentByClass<UDamageableComponent>();
+		if (!DmgComp || DmgComp->IsDestroyed() || DmgComp->IsInvulnerable())
+		{
+			continue;
+		}
+
+		const float ClampedDPS = FMath::Min(Agg.TotalDPS, MaxStructuralDPS);
+		const float DamageAmount = ClampedDPS * DeltaTime;
+
+		// UDamageableComponent automatycznie uwzględnia TotalResistance (np. 100% dla kamienia, 0% dla drewna na ogień, 50% na prąd)
+		DmgComp->ApplyDamage(DamageAmount, DmgType, Agg.LastInstigator.Get());
 	}
 }
 

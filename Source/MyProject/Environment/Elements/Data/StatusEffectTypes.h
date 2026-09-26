@@ -165,6 +165,7 @@ struct FStatusEffectConfig
 	}
 
 	float GetDamagePerSecond(int32 TierIndex = 0) const { return GetTier(TierIndex).DamagePerSecond; }
+	float GetBaseDamagePerSecond(int32 TierIndex = 0) const { return GetDamagePerSecond(TierIndex); }
 	float GetBaseDuration(int32 TierIndex = 0) const { return GetTier(TierIndex).BaseDuration; }
 	float GetTickInterval(int32 TierIndex = 0) const { return GetTier(TierIndex).TickInterval; }
 };
