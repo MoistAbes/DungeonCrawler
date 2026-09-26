@@ -56,4 +56,27 @@ namespace SurfaceGridGeometryUtils
 
 	/** Zwraca prekomputowane 18 kierunków skanowania wybuchu żywiołowego w 3D */
 	MYPROJECT_API const TArray<FVector>& GetBurstScanDirections();
+
+	/** Kandydat na rozprzestrzenienie statusu (komórka, materiał, aktor, flaga narożnika) */
+	struct FSurfaceSpreadCandidate
+	{
+		FSurfaceCellCoord Coord;
+		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
+		AActor* SurfaceActor = nullptr;
+		bool bIsCorner = false;
+	};
+
+	/**
+	 * Wyznacza prawidłowych fizycznie i geometrycznie kandydatów rozprzestrzeniania dla komórki:
+	 * - Sprawdza 4 ortogonalne ścieżki (hierarchia: Coplanar -> Corner 90°).
+	 * - Zapobiega podpalaniu bocznych/dolnych krawędzi samego siebie przez strukturę.
+	 * - Wykorzystuje dane z ActiveCells lub weryfikuje geometrię świata (ProbeSurfaceAt).
+	 */
+	MYPROJECT_API void FindSpreadCandidates(
+		const UWorld* World,
+		const FSurfaceCellCoord& SourceCoord,
+		const AActor* SourceActor,
+		const TMap<FSurfaceCellCoord, FSurfaceCellData>& ActiveCells,
+		float CellSize,
+		TArray<FSurfaceSpreadCandidate>& OutCandidates);
 }

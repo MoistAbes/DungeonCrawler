@@ -201,4 +201,72 @@ namespace SurfaceGridGeometryUtils
 		}();
 		return ScanDirections;
 	}
+
+	void FindSpreadCandidates(
+		const UWorld* World,
+		const FSurfaceCellCoord& SourceCoord,
+		const AActor* SourceActor,
+		const TMap<FSurfaceCellCoord, FSurfaceCellData>& ActiveCells,
+		float CellSize,
+		TArray<FSurfaceSpreadCandidate>& OutCandidates)
+	{
+		OutCandidates.Reset();
+		if (!World)
+		{
+			return;
+		}
+
+		TArray<FSurfaceSpreadPath, TInlineAllocator<4>> SpreadPaths;
+		SourceCoord.GetDirectionalSpreadPaths(SpreadPaths);
+
+		auto QuerySurface = [World, &ActiveCells, CellSize](const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMat, AActor*& OutActor) -> bool
+		{
+			const FSurfaceCellData* Existing = ActiveCells.Find(Coord);
+			if (Existing)
+			{
+				OutMat = Existing->SurfaceMaterial;
+				OutActor = Existing->SurfaceActor.Get();
+				return true;
+			}
+
+			const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
+			const FVector Center = Coord.ToWorldLocation(CellSize);
+			FHitResult Hit;
+			const bool bHit = ProbeSurfaceAt(World, Center, Normal, CellSize * 0.8f, Hit, OutMat);
+			if (bHit)
+			{
+				OutActor = Hit.GetActor();
+			}
+			return bHit;
+		};
+
+		for (const auto& Path : SpreadPaths)
+		{
+			// 1. Sprawdzamy kandydata współpłaszczyznowego (Coplanar)
+			EPhysicalMaterialType CoplanarMat = EPhysicalMaterialType::Stone;
+			AActor* CoplanarActor = nullptr;
+
+			if (QuerySurface(Path.Coplanar, CoplanarMat, CoplanarActor))
+			{
+				OutCandidates.Add({ Path.Coplanar, CoplanarMat, CoplanarActor, false });
+				// ZŁOTA ZASADA: Skoro płaszczyzna kontynuuje się w linii prostej, ściana nie zagina się w tym miejscu pod kątem 90°
+				continue;
+			}
+
+			// 2. Skoro płaszczyzna się skończyła, sprawdzamy narożnik wklęsły 90° (Corner)
+			EPhysicalMaterialType CornerMat = EPhysicalMaterialType::Stone;
+			AActor* CornerActor = nullptr;
+
+			if (QuerySurface(Path.Corner, CornerMat, CornerActor))
+			{
+				// ZASADA SEPARACJI STRUKTUR: Obiekt nie może podpalać prostopadłych krawędzi samego siebie
+				if (CornerActor && CornerActor == SourceActor)
+				{
+					continue;
+				}
+
+				OutCandidates.Add({ Path.Corner, CornerMat, CornerActor, true });
+			}
+		}
+	}
 }

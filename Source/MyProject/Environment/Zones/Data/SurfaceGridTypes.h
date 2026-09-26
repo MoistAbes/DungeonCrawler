@@ -423,13 +423,32 @@ struct MYPROJECT_API FSurfaceCellStatusEntry
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
 	EStatusEffectType Status = EStatusEffectType::None;
 
-	/** Czas serwera (GetTimeSeconds), w którym ten konkretny status wygasa */
+	/** Poziom/Tier nałożonego statusu (0 = bazowy, 1 = silny, 2 = piekielny) decydujący o DPS i parametrach */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	uint8 Tier = 0;
+
+	/** Czas serwera (GetTimeSeconds), w którym ten konkretny status wygasa (wartość <= 0.0f oznacza efekt permanentny) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
 	float ServerEndTime = 0.0f;
 
 	/** Aktor, który nałożył ten status */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
 	TWeakObjectPtr<AActor> Instigator = nullptr;
+
+	FSurfaceCellStatusEntry() = default;
+
+	FSurfaceCellStatusEntry(EStatusEffectType InStatus, float InEndTime, AActor* InInstigator = nullptr, uint8 InTier = 0)
+		: Status(InStatus), Tier(InTier), ServerEndTime(InEndTime), Instigator(InInstigator)
+	{
+	}
+
+	FORCEINLINE bool IsPermanent() const { return ServerEndTime <= 0.0f; }
+	FORCEINLINE void SetPermanent() { ServerEndTime = 0.0f; }
+	FORCEINLINE bool IsExpired(float CurrentTime) const { return !IsPermanent() && CurrentTime >= ServerEndTime; }
+	FORCEINLINE float GetRemainingDuration(float CurrentTime) const 
+	{ 
+		return IsPermanent() ? 999999.0f : FMath::Max(0.0f, ServerEndTime - CurrentTime); 
+	}
 
 	bool operator==(const FSurfaceCellStatusEntry& Other) const
 	{

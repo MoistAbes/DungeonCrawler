@@ -262,6 +262,25 @@ System realizuje uniwersalny mechanizm nośników (`DoesStatusSyncWithCarrier`, 
 3. **Zasada Wyłączności Cieczy (Liquid Mutual Exclusivity):**
    Zunifikowana w metodach `EnforceLiquidMutualExclusivity` / `DisplaceOtherLiquids`. Nałożenie cieczy usuwa wszelkie inne ciecze i wygasza osierocone przez nie ładunki.
 
+### 5.5. Spalanie Paliw Stałych (Solid Fuel Combustion) i Destrukcja Architektur
+
+System realizuje model fizycznego spalania palnych materiałów konstrukcyjnych lochu (`Wood`):
+
+1. **Paliwo Samoistne (`bSelfSustainingFuel`):**
+   Materiały z cechą `bSelfSustainingFuel = true` traktują ogień jako proces ciągły (`IsPermanent() == true`). Płomień nie wygasa z upływem czasu, lecz pali się do momentu fizycznego zniszczenia struktury lub ugaszenia cieczą chłodzącą (`Wet`).
+2. **Ortogonalna Topologia Rozprzestrzeniania (`SurfaceGridGeometryUtils::FindSpreadCandidates`):**
+   - **`Coplanar` (Priorytet 1):** Ogień rozchodzi się w płaszczyźnie tej samej ściany lub podłogi (kierunki $\pm U, \pm V$). Jeśli ściany stoją w szeregu, płomień płynnie przechodzi między nimi.
+   - **`Corner` (Priorytet 2):** Na fizycznym końcu płaszczyzny (brak kontynuacji w linii prostej) badany jest wewnętrzny narożnik wklęsły 90° (np. ściana $\leftrightarrow$ podłoga, sufit lub ściana prostopadła).
+   - **Zasada Separacji Struktur:** `CornerActor != SourceActor` — obiekt architektury nie podpala bocznych szczelin ani spodu samego siebie.
+   - **Brak Sztucznych Blokad na Wodę:** Komórki `Wet` nie blokują spreadu sztucznym `if`, lecz uczestniczą w reakcji `Steam_Extinguish`, odparowując wodę i generując parę wodną.
+3. **Niezależne Poziomy Mocy (Multi-Tier Cell Statuses):**
+   Każdy wpis w komórce (`FSurfaceCellStatusEntry`) przechowuje własny `uint8 Tier`. Pozwala to na precyzyjne rozliczanie obrażeń z różnych żywiołów koegzystujących na jednym kafelku:
+   $$\text{BaseDPS} = \text{Config.GetDamagePerSecond(StatusEntry.Tier)}$$
+4. **Agregacja Obrażeń Strukturalnych (`ProcessSurfaceStructuralDamage`):**
+   Obrażenia DoT komórek są agregowane per unikalny aktor architektury lochu oraz typ obrażeń (`EDamageType::Fire`, `EDamageType::Lightning`), z ograniczeniem `MaxStructuralDPS = 25.0f`. Obrażenia trafiają do `UDamageableComponent`, który aplikuje rezystancje materiałowe.
+5. **Czyszczenie po Zawaleniu (`ClearCellsInBounds`):**
+   Zniszczenie ściany/podłogi natychmiast wywołuje `ClearCellsInBounds`, czyszcząc wszystkie przypięte komórki w czasie $O(1)$.
+
 ---
 
 ## 6. Wydajność i Skalowalność
@@ -299,6 +318,7 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | **Ciągła Integracja Stref z Siatką (`RegisteredStatusZones`)** | **[ZREALIZOWANE]** | Automatyczna rejestracja stref wolumetrycznych w subsystemie; natychmiastowy zapłon plam pod chmurami oraz obsługa ruchomych stref i aur. |
 | **Dwukierunkowa Synchronizacja Nośników (`bSyncWithCarrierDuration`)** | **[ZREALIZOWANE]** | Spójna synchronizacja czasów paliwa i nośnika w siatce oraz aktorach (`SyncDependentStatusesWithCarrier`). |
 | **Refaktoryzacja i Eliminacja Duplikacji Logiki** | **[ZREALIZOWANE]** | Uproszczenie `ElementalReactionRules.cpp` i `StatusEffectComponent.cpp` do spójnych funkcji pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`). |
+| **Spalanie Paliw Stałych i Niszczenie Architektur (`SolidFuelCombustion`)** | **[ZREALIZOWANE]** | Stałe paliwo drewna (`bSelfSustainingFuel`), ortogonalny spread Coplanar/Corner, odparowywanie wody (`Steam_Extinguish`), niezależne Tiery statusów i agregacja DPS struktur. |
 | **Event-Driven Overlap dla Stref Wolumetrycznych** | Planowane | Zastąpienie periodycznego `GetOverlappingActors` lokalnym zbiorem aktorów w oparciu o delegaty Begin/EndOverlap. |
 | **Timer Phase Staggering** | Planowane | Losowe mikro-przesunięcie fazy pierwszego ticka strefy eliminujące skoki obciążenia w pojedynczych klatkach serwera. |
 | **LoS Caching dla Promieni Wybuchu** | Planowane | Pamięć podręczna widoczności celów odświeżana tylko przy przemieszczeniu celu o więcej niż 30 cm. |

@@ -44,10 +44,6 @@ struct FPhysicalMaterialTraits
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Material", meta = (ClampMin = "0.5", ClampMax = "10.0"))
 	float FuelSpreadInterval = 2.0f;
 
-	/** Obrażenia zadawane strukturze przez pojedynczy płonący kafel na sekundę */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Material", meta = (ClampMin = "0.1", ClampMax = "100.0"))
-	float StructuralDamagePerSecond = 5.0f;
-
 	/** Czy materiał z natury przewodzi prąd elektryczny (np. Metal, Ciało) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Material")
 	bool bConductive = false;
@@ -68,7 +64,6 @@ namespace PhysicalMaterialUtils
 			Traits.bFlammable = true;
 			Traits.bSelfSustainingFuel = true;
 			Traits.FuelSpreadInterval = 2.0f;
-			Traits.StructuralDamagePerSecond = 5.0f;
 			break;
 		case EPhysicalMaterialType::Flesh:
 			Traits.bFlammable = true;

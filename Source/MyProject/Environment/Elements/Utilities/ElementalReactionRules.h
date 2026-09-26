@@ -86,7 +86,8 @@ public:
 		EStatusEffectType IncomingStatus,
 		float Duration,
 		AActor* Instigator,
-		float CurrentTime);
+		float CurrentTime,
+		uint8 Tier = 0);
 
 	/** Usuwa z komórki statusy, które bez swoich nośników nie mogą dłużej legalnie istnieć na tym materiale */
 	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")

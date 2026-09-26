@@ -76,7 +76,8 @@ public:
 		float Radius,
 		EStatusEffectType Status,
 		float Duration,
-		AActor* Instigator = nullptr);
+		AActor* Instigator = nullptr,
+		uint8 Tier = 0);
 
 	/**
 	 * Maluje strefę żywiołu na powierzchniach wokół punktu uderzenia.
@@ -92,7 +93,8 @@ public:
 		float Radius,
 		EStatusEffectType Status,
 		float Duration,
-		AActor* Instigator = nullptr);
+		AActor* Instigator = nullptr,
+		uint8 Tier = 0);
 
 	/**
 	 * JEDYNY ATOMOWY PUNKT STYKU (Single Point of Truth) dla stanu komórki w siatce.
@@ -108,7 +110,8 @@ public:
 		float Duration,
 		AActor* Instigator = nullptr,
 		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone,
-		AActor* SurfaceActor = nullptr);
+		AActor* SurfaceActor = nullptr,
+		uint8 Tier = 0);
 
 	/**
 	 * Wewnętrzna wersja metody PaintSurface z możliwością przekazania zbioru przetworzonych koordynatów
@@ -121,7 +124,8 @@ public:
 		EStatusEffectType Status,
 		float Duration,
 		AActor* Instigator = nullptr,
-		TSet<FSurfaceCellCoord>* ProcessedCoords = nullptr);
+		TSet<FSurfaceCellCoord>* ProcessedCoords = nullptr,
+		uint8 Tier = 0);
 
 	/**
 	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.
@@ -144,7 +148,8 @@ public:
 		float Radius,
 		EStatusEffectType Status,
 		float Duration = 5.0f,
-		AActor* Instigator = nullptr);
+		AActor* Instigator = nullptr,
+		uint8 Tier = 0);
 
 	/** Zdarzenie wywoływane przy zmianie stanu komórki (podstawa dla systemów VFX/SFX) */
 	UPROPERTY(BlueprintAssignable, Category = "Custom|Events")

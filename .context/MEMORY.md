@@ -82,9 +82,11 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
-\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, continuous zone evaluation, and actor interaction.
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, solid fuel combustion orchestration, structural damage aggregation, and actor interaction.
 
-\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateCellTransition`, `CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, dynamic carrier/fuel duration syncing, and propagation.
+\* `SurfaceGridGeometryUtils` — spatial sampling and physical topology engine (`ProbeSurfaceAt`, `FindSpreadCandidates` with `Coplanar`/`Corner` hierarchy and structural separation `CornerActor != SourceActor`).
+
+\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateCellTransition`, `CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, and propagation.
 
 
 
