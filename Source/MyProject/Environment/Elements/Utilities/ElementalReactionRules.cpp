@@ -304,6 +304,20 @@ FElementalReactionResult UElementalReactionRules::EvaluateReaction(
 				Result.ResultingStatus = EStatusEffectType::None;
 			}
 
+			// ZŁOTA ZASADA CHEMICZNA: Jeśli przychodzący płyn nie uległ zgaszeniu/zużyciu i cel ma inny płyn,
+			// a dedykowana reguła nie wskazała innego statusu do usunięcia, to istniejący płyn zostaje bezwzględnie wyparty!
+			if (IncomingConfig.bIsLiquid && !Result.bConsumeIncomingStatus && Result.ExistingStatusToRemove == EStatusEffectType::None)
+			{
+				for (EStatusEffectType OtherActive : ActiveStatuses)
+				{
+					if (OtherActive != IncomingStatus && IsLiquidStatus(OtherActive))
+					{
+						Result.ExistingStatusToRemove = OtherActive;
+						break;
+					}
+				}
+			}
+
 			Result.bCanSpreadToNeighbor = Rule->bCanSpreadToNeighbor;
 			Result.ResultingDuration = Rule->ResultingDuration;
 			Result.bSyncWithCarrierDuration = Rule->bSyncWithCarrierDuration;
@@ -560,6 +574,25 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 			CleanOrphanedStatuses(InOutCellData, Reaction.ResultingStatus);
 		}
 
+		// E. ZŁOTA ZASADA CHEMICZNA: Komórka nigdy nie może posiadać dwóch płynów jednocześnie.
+		const EStatusEffectType DominantLiquid = IsLiquidStatus(Reaction.ResultingStatus) ? Reaction.ResultingStatus : (IsLiquidStatus(IncomingStatus) && !Reaction.bConsumeIncomingStatus ? IncomingStatus : EStatusEffectType::None);
+		if (DominantLiquid != EStatusEffectType::None)
+		{
+			for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
+			{
+				if (InOutCellData.ActiveStatuses[Index].Status != DominantLiquid && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
+				{
+					InOutCellData.ActiveStatuses.RemoveAt(Index);
+					Result.bStateModified = true;
+				}
+			}
+		}
+
+		if (Result.bStateModified)
+		{
+			Result.bAccepted = true;
+		}
+
 		if (InOutCellData.IsEmpty())
 		{
 			Result.bCellBecameEmpty = true;
@@ -576,6 +609,18 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	{
 		if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
 		{
+			// ZŁOTA ZASADA: Jeśli dodajemy płyn, usuwamy wszelkie inne płyny
+			if (IsLiquidStatus(IncomingStatus))
+			{
+				for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
+				{
+					if (InOutCellData.ActiveStatuses[Index].Status != IncomingStatus && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
+					{
+						InOutCellData.ActiveStatuses.RemoveAt(Index);
+					}
+				}
+			}
+
 			InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + Duration, Instigator });
 			Result.bAccepted = true;
 			Result.bStateModified = true;

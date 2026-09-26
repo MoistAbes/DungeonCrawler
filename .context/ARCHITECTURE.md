@@ -740,33 +740,24 @@ Environment/Zones/Shapes/
 
 
 
-Surface splashes are NOT actor subclasses. They are handled by UDungeonSurfaceSubsystem (a UWorldSubsystem) as a sparse surface cell grid (TMap<FSurfaceCellCoord, FSurfaceCellData>), with no per-splash actors and no decals. AVolumetricStatusZone is the only actor-based zone shape.
+Surface effects are handled by `UDungeonSurfaceSubsystem` (a `UWorldSubsystem`) as a sparse 3D surface cell grid (`TMap<FSurfaceCellCoord, FSurfaceCellData>`) with 6-face orientation awareness (`ESurfaceFaceDirection`). Active status zones (`AStatusZoneBase`) automatically register with the surface subsystem upon spawn, enabling continuous evaluation (`ProcessGridTick`) and instantaneous reactions when surfaces are painted under active volumetric zones (`ApplyStatusToCell` via `bCheckOverlappingZones`).
 
+`AVolumetricStatusZone` provides 3D volumetric fields (such as gas clouds, energy spheres, or smoke) that interact with both overlapping actors and underlying surface cells.
 
-
-Elemental reaction rules (material compatibility, reactions, propagation) are centralized in UElementalReactionRules, shared by both UStatusEffectComponent (targets) and UDungeonSurfaceSubsystem (surface cells).
-
-
+All elemental chemistry and state transitions are centralized in `UElementalReactionRules::CalculateElementalTransition` as the Single Source of Truth, shared by both `UStatusEffectComponent` (actors and targets) and `UDungeonSurfaceSubsystem` (surface grid cells). The rules engine enforces physical material traits, liquid displacement, and clearly distinguishes between `CanMaterialReceiveStatus` (ingress validation) and `CanMaterialSustainStatus` (continuous combustion vs parasitic conduction).
 
 The base zone architecture handles responsibilities such as:
 
+* zone lifecycle and server-authoritative timer (`ServerEndTime`),
+* duration and Zone Merging (`MergeWithZone`),
+* overlap/target evaluation (`ProcessActiveOverlaps`),
+* point geometry testing (`IsPointWithinZoneGeometry`),
+* registration with `UDungeonSurfaceSubsystem`,
+* effect application and continuous DoT,
+* environmental and chemical interactions,
+* zero-bandwidth replicated state (`DORM_DormantAll`).
 
-
-\* zone lifecycle,
-
-\* duration,
-
-\* overlap/target evaluation,
-
-\* effect application,
-
-\* environmental interactions,
-
-\* relevant replicated state.
-
-
-
-Shape-specific classes should primarily provide geometry/shape-specific behavior rather than duplicate the complete zone system.
+Shape-specific classes provide geometry-specific behavior (`IsActorWithinZoneGeometry`, `IsPointWithinZoneGeometry`) rather than duplicate the complete zone system.
 
 
 

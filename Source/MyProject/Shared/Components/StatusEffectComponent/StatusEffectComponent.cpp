@@ -226,6 +226,22 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
         RemoveStatus(Reaction.ExistingStatusToRemove);
     }
 
+    // ZŁOTA ZASADA CHEMICZNA: Jeśli przychodzący status jest płynem (np. Wet),
+    // to KAŻDY inny aktywny płyn (np. Oiled) zostaje bezwzględnie zmyty z celu,
+    // nawet jeśli reakcja dotyczyła innego statusu (np. woda gasząca ogień na naoliwionej postaci zmywa też olej).
+    if (UElementalReactionRules::IsLiquidStatus(NewStatus))
+    {
+        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
+        {
+            if (ActiveStatusEffects[Idx].EffectType != NewStatus && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
+            {
+                UE_LOG(LogDungeonElements, Log, TEXT("[StatusReaction] Liquid %s washed away liquid %s on %s"),
+                    *UEnum::GetValueAsString(NewStatus), *UEnum::GetValueAsString(ActiveStatusEffects[Idx].EffectType), *GetOwner()->GetName());
+                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
+            }
+        }
+    }
+
     // Zadanie natychmiastowych obrażeń reakcji (np. wybuch oleju, szok elektryczny)
     if (Reaction.BonusInstantDamage > 0.0f && DamageableComponent)
     {
@@ -255,6 +271,18 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
 
 void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
+    // ZŁOTA ZASADA CHEMICZNA: Jeśli odświeżany status jest płynem, żaden inny płyn nie może istnieć
+    if (UElementalReactionRules::IsLiquidStatus(Existing.EffectType))
+    {
+        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
+        {
+            if (ActiveStatusEffects[Idx].EffectType != Existing.EffectType && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
+            {
+                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
+            }
+        }
+    }
+
     // Jeśli nowy tier jest wyższy, podnosimy tier
     if (Tier > Existing.Tier)
     {
@@ -296,6 +324,21 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
 
 void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
+    // ZŁOTA ZASADA CHEMICZNA: Całkowity zakaz koegzystencji dwóch płynów (Liquid Mutual Exclusivity).
+    // Nowy płyn (np. Wet lub Oiled) bezwzględnie zmywa/wypiera każdy inny aktywny płyn na obiekcie.
+    if (UElementalReactionRules::IsLiquidStatus(NewStatus))
+    {
+        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
+        {
+            if (ActiveStatusEffects[Idx].EffectType != NewStatus && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
+            {
+                UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect] Displacing existing liquid %s with new liquid %s on %s"),
+                    *UEnum::GetValueAsString(ActiveStatusEffects[Idx].EffectType), *UEnum::GetValueAsString(NewStatus), *GetOwner()->GetName());
+                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
+            }
+        }
+    }
+
     const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(NewStatus);
     const float ConfigTickInterval = Def.GetTickInterval(Tier);
 

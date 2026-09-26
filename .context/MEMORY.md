@@ -76,15 +76,15 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusEffectComponent` — status-effect state.
 
-\* `AStatusZoneBase` and derived status-zone actors — environmental status zones.
+\* `AStatusZoneBase` and derived status-zone actors — environmental status zones with automatic `UDungeonSurfaceSubsystem` registration and point geometry evaluation.
 
 \* `UKineticForceLibrary` — shared kinetic/physics force operations.
 
-\* `UStatusZoneLibrary` — status-zone/effect delivery operations.
+\* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
-\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors.
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, continuous zone evaluation, and actor interaction.
 
-\* `UElementalReactionRules` — centralized elemental reaction physics, material traits, and propagation rules.
+\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid displacement, and propagation.
 
 
 

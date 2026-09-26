@@ -19,6 +19,56 @@
 
 namespace
 {
+	/** Rozpoznaje tożsamość materiałową aktora lochu z bezpiecznym fallbackiem do Stone */
+	static EPhysicalMaterialType GetMaterialFromActor(const AActor* Actor)
+	{
+		if (Actor && Actor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
+		{
+			return IMaterialProviderInterface::Execute_GetMaterialType(Actor);
+		}
+		return EPhysicalMaterialType::Stone;
+	}
+
+	/** Uniwersalny próbnik powierzchni: weryfikuje geometrię architektury i zwraca materiał */
+	static bool ProbeSurfaceAt(
+		const UWorld* World,
+		const FVector& ProbeLocation,
+		const FVector& SurfaceNormal,
+		float ProbeDistance,
+		FHitResult& OutHit,
+		EPhysicalMaterialType& OutMaterial,
+		const FCollisionQueryParams& Params = FCollisionQueryParams::DefaultQueryParam)
+	{
+		OutMaterial = EPhysicalMaterialType::Stone;
+		if (!World)
+		{
+			return false;
+		}
+
+		const FVector ProbeStart = ProbeLocation + SurfaceNormal * 20.0f;
+		const FVector ProbeEnd = ProbeLocation - SurfaceNormal * ProbeDistance;
+
+		TArray<FHitResult> Hits;
+		const FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
+		if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
+		{
+			for (const FHitResult& Hit : Hits)
+			{
+				AActor* HitActor = Hit.GetActor();
+				if (HitActor && UDungeonSurfaceSubsystem::IsValidSurfaceTarget(HitActor))
+				{
+					if (FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal) > 0.4f)
+					{
+						OutHit = Hit;
+						OutMaterial = GetMaterialFromActor(HitActor);
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+	}
+
 	/** Sprawdza, czy w danym punkcie fizycznie istnieje płaszczyzna architektury (Drop-off test na krawędziach filarów i ścian) */
 	static bool CheckSurfacePresenceAt(
 		const UWorld* World,
@@ -27,37 +77,8 @@ namespace
 		FHitResult& OutHit,
 		const FCollisionQueryParams& Params)
 	{
-		if (!World)
-		{
-			return false;
-		}
-
-		const FVector ProbeStart = SamplePoint + SurfaceNormal * 20.0f;
-		const FVector ProbeEnd = SamplePoint - SurfaceNormal * 30.0f;
-
-		TArray<FHitResult> Hits;
-		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
-		if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
-		{
-			for (const FHitResult& Hit : Hits)
-			{
-				if (Hit.GetActor() && UDungeonSurfaceSubsystem::IsValidSurfaceTarget(Hit.GetActor()))
-				{
-					const float NormalDot = FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal);
-					if (NormalDot > 0.65f)
-					{
-						const float DistFromPlane = FMath::Abs(FVector::DotProduct(Hit.ImpactPoint - SamplePoint, SurfaceNormal));
-						if (DistFromPlane < 25.0f)
-						{
-							OutHit = Hit;
-							return true;
-						}
-					}
-				}
-			}
-		}
-
-		return false;
+		EPhysicalMaterialType IgnoredMat;
+		return ProbeSurfaceAt(World, SamplePoint, SurfaceNormal, 30.0f, OutHit, IgnoredMat, Params);
 	}
 
 	/** Sprawdza, czy między punktem uderzenia a próbką na powierzchni nie ma przeszkody pionowej (LoS test - filary, narożniki) */
@@ -88,16 +109,6 @@ namespace
 		}
 
 		return true;
-	}
-
-	/** Rozpoznaje tożsamość materiałową aktora lochu z bezpiecznym fallbackiem do Stone */
-	static EPhysicalMaterialType GetMaterialFromActor(const AActor* Actor)
-	{
-		if (Actor && Actor->GetClass()->ImplementsInterface(UMaterialProviderInterface::StaticClass()))
-		{
-			return IMaterialProviderInterface::Execute_GetMaterialType(Actor);
-		}
-		return EPhysicalMaterialType::Stone;
 	}
 
 	/** Wyznacza wektory styczne płaszczyzny dla zadanego kierunku ściany lub podłogi */
@@ -492,8 +503,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	float Duration,
 	AActor* Instigator)
 {
-	TSet<FSurfaceCellCoord> ProcessedCoords;
-	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, &ProcessedCoords);
+	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr);
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
@@ -612,77 +622,90 @@ void UDungeonSurfaceSubsystem::GetCellsTouchingActor(const AActor* Actor, TArray
 {
 	OutCoords.Reset();
 
-	if (!Actor)
+	if (!Actor || ActiveCells.Num() == 0)
 	{
 		return;
 	}
 
-	FBoxSphereBounds Bounds;
+	// Pełna bryła kolizyjna 3D (kapsuła gracza, mesh potwora lub skrzynki/kamienia)
+	FBox ActorBox;
 	if (const UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
 	{
-		Bounds = RootPrim->Bounds;
+		ActorBox = RootPrim->Bounds.GetBox();
 	}
 	else
 	{
-		Bounds = Actor->GetComponentsBoundingBox(true);
+		ActorBox = Actor->GetComponentsBoundingBox(true);
 	}
 
-	if (Bounds.BoxExtent.IsNearlyZero())
+	if (!ActorBox.IsValid)
 	{
-		Bounds.Origin = Actor->GetActorLocation();
-		Bounds.BoxExtent = FVector(34.0f, 34.0f, 88.0f);
+		const FVector Loc = Actor->GetActorLocation();
+		ActorBox = FBox(Loc - FVector(34.0f, 34.0f, 88.0f), Loc + FVector(34.0f, 34.0f, 88.0f));
 	}
 
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-	const float FootZ = Bounds.Origin.Z - Bounds.BoxExtent.Z + 10.0f;
-	const float HalfExtentX = Bounds.BoxExtent.X * 0.6f;
-	const float HalfExtentY = Bounds.BoxExtent.Y * 0.6f;
+	constexpr float ContactMargin = 15.0f;
+	const FBox TouchBox = ActorBox.ExpandBy(ContactMargin);
 
-	const FVector ProbePoints[6] = {
-		FVector(Bounds.Origin.X, Bounds.Origin.Y, FootZ),
-		FVector(Bounds.Origin.X + HalfExtentX, Bounds.Origin.Y, FootZ),
-		FVector(Bounds.Origin.X - HalfExtentX, Bounds.Origin.Y, FootZ),
-		FVector(Bounds.Origin.X, Bounds.Origin.Y + HalfExtentY, FootZ),
-		FVector(Bounds.Origin.X, Bounds.Origin.Y - HalfExtentY, FootZ),
-		Bounds.Origin
+	// Zakres wokseli obejmowanych przez bryłę aktora w przestrzeni siatki
+	const int32 MinX = FMath::FloorToInt(TouchBox.Min.X / SafeCellSize);
+	const int32 MaxX = FMath::FloorToInt(TouchBox.Max.X / SafeCellSize);
+	const int32 MinY = FMath::FloorToInt(TouchBox.Min.Y / SafeCellSize);
+	const int32 MaxY = FMath::FloorToInt(TouchBox.Max.Y / SafeCellSize);
+	const int32 MinZ = FMath::FloorToInt(TouchBox.Min.Z / SafeCellSize);
+	const int32 MaxZ = FMath::FloorToInt(TouchBox.Max.Z / SafeCellSize);
+
+	constexpr ESurfaceFaceDirection AllFaces[6] = {
+		ESurfaceFaceDirection::Up,
+		ESurfaceFaceDirection::Down,
+		ESurfaceFaceDirection::North,
+		ESurfaceFaceDirection::South,
+		ESurfaceFaceDirection::East,
+		ESurfaceFaceDirection::West
 	};
 
-	TSet<FSurfaceCellCoord> UniqueCoords;
-
-	for (const FVector& Pt : ProbePoints)
+	for (int32 X = MinX; X <= MaxX; ++X)
 	{
-		// Podłoga (+Z Floor)
-		const float SampleZOffsets[3] = { 0.0f, -15.0f, 15.0f };
-		for (float ZOffset : SampleZOffsets)
+		for (int32 Y = MinY; Y <= MaxY; ++Y)
 		{
-			const FVector SamplePos = Pt + FVector(0.0f, 0.0f, ZOffset);
-			const FSurfaceCellCoord FloorCoord = FSurfaceCellCoord::FromWorldLocation(SamplePos, FVector::UpVector, SafeCellSize);
-			if (ActiveCells.Contains(FloorCoord))
+			for (int32 Z = MinZ; Z <= MaxZ; ++Z)
 			{
-				UniqueCoords.Add(FloorCoord);
-			}
-		}
+				for (ESurfaceFaceDirection Face : AllFaces)
+				{
+					const FSurfaceCellCoord Candidate(X, Y, Z, Face);
+					if (ActiveCells.Contains(Candidate))
+					{
+						const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Face);
+						const FVector Center = Candidate.ToWorldLocation(SafeCellSize);
 
-		// Ściany wokół próbki
-		const ESurfaceFaceDirection WallFaces[4] = {
-			ESurfaceFaceDirection::North,
-			ESurfaceFaceDirection::South,
-			ESurfaceFaceDirection::East,
-			ESurfaceFaceDirection::West
-		};
+						// Wyznaczamy cienką powłokę powierzchniową komórki
+						FVector CellHalfExtent(SafeCellSize * 0.5f);
+						if (Face == ESurfaceFaceDirection::Up || Face == ESurfaceFaceDirection::Down)
+						{
+							CellHalfExtent.Z = ContactMargin;
+						}
+						else if (Face == ESurfaceFaceDirection::North || Face == ESurfaceFaceDirection::South)
+						{
+							CellHalfExtent.X = ContactMargin;
+						}
+						else
+						{
+							CellHalfExtent.Y = ContactMargin;
+						}
 
-		for (ESurfaceFaceDirection Face : WallFaces)
-		{
-			const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Face);
-			const FSurfaceCellCoord WallCoord = FSurfaceCellCoord::FromWorldLocation(Pt + Normal * (SafeCellSize * 0.4f), Normal, SafeCellSize);
-			if (ActiveCells.Contains(WallCoord))
-			{
-				UniqueCoords.Add(WallCoord);
+						const FVector SurfaceCenter = Center - Normal * (SafeCellSize * 0.5f - ContactMargin * 0.5f);
+						const FBox SurfaceBox(SurfaceCenter - CellHalfExtent, SurfaceCenter + CellHalfExtent);
+
+						if (ActorBox.Intersect(SurfaceBox))
+						{
+							OutCoords.AddUnique(Candidate);
+						}
+					}
+				}
 			}
 		}
 	}
-
-	OutCoords = UniqueCoords.Array();
 }
 
 void UDungeonSurfaceSubsystem::RegisterStatusComponent(UStatusEffectComponent* Comp)
@@ -700,41 +723,11 @@ void UDungeonSurfaceSubsystem::UnregisterStatusComponent(UStatusEffectComponent*
 
 bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const
 {
-	OutMaterial = EPhysicalMaterialType::Stone;
-
-	UWorld* World = GetWorld();
-	if (!World)
-	{
-		return false;
-	}
-
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 	const FVector Center = Coord.ToWorldLocation(SafeCellSize);
-	const FVector ProbeStart = Center + Normal * (SafeCellSize * 0.8f);
-	const FVector ProbeEnd = Center - Normal * (SafeCellSize * 0.8f);
-
-	TArray<FHitResult> Hits;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(SurfaceMatQuery), false);
-	FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
-	if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
-	{
-		for (const FHitResult& Hit : Hits)
-		{
-			AActor* HitActor = Hit.GetActor();
-			if (HitActor && UDungeonSurfaceSubsystem::IsValidSurfaceTarget(HitActor))
-			{
-				const float NormalDot = FVector::DotProduct(Hit.ImpactNormal, Normal);
-				if (NormalDot > 0.4f)
-				{
-					OutMaterial = GetMaterialFromActor(HitActor);
-					return true;
-				}
-			}
-		}
-	}
-
-	return false;
+	FHitResult Hit;
+	return ProbeSurfaceAt(GetWorld(), Center, Normal, SafeCellSize * 0.8f, Hit, OutMaterial);
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
@@ -815,66 +808,33 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 		TraceParams.AddIgnoredActor(Instigator);
 	}
 
-	struct FPaintedSurfaceRecord
-	{
-		FVector ImpactPoint;
-		FVector ImpactNormal;
-		float Radius;
-	};
-	TArray<FPaintedSurfaceRecord> PaintedPlanes;
-
 	for (const FVector& RayDir : ScanDirections)
 	{
-		// Dla podłogi dajemy lekki margines zasięgu (wybuch beczki może być na Z+50)
 		const float TraceDist = (RayDir.Z < -0.9f) ? (Radius + 100.0f) : Radius;
 		const FVector TraceEnd = Origin + RayDir * TraceDist;
 
 		FHitResult SurfaceHit;
 		if (GetWorld()->LineTraceSingleByChannel(SurfaceHit, Origin, TraceEnd, ECC_Visibility, TraceParams))
 		{
-			AActor* HitActor = SurfaceHit.GetActor();
-			if (!HitActor || !IsValidSurfaceTarget(HitActor))
+			if (SurfaceHit.GetActor() && IsValidSurfaceTarget(SurfaceHit.GetActor()))
 			{
-				continue;
+				const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, Radius);
+				const float BaseDiscRadius = FMath::Sqrt(FMath::Max(0.0f, RadiusSq - FMath::Square(DistToSurface)));
+				const float SplashRadius = (RayDir.Z < -0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
+
+				AffectedCount += PaintSurfaceInternal(
+					SurfaceHit.ImpactPoint,
+					SurfaceHit.ImpactNormal,
+					SplashRadius,
+					Status,
+					Duration,
+					Instigator,
+					&ProcessedCoords);
 			}
-
-			const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, Radius);
-			const float BaseDiscRadius = FMath::Sqrt(FMath::Max(0.0f, RadiusSq - FMath::Square(DistToSurface)));
-			const float SurfaceSplashRadius = (RayDir.Z < -0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
-
-			bool bAlreadyCovered = false;
-			for (const FPaintedSurfaceRecord& Existing : PaintedPlanes)
-			{
-				const float NormalDot = FVector::DotProduct(SurfaceHit.ImpactNormal, Existing.ImpactNormal);
-				const float PlaneDist = FMath::Abs(FVector::DotProduct(SurfaceHit.ImpactPoint - Existing.ImpactPoint, Existing.ImpactNormal));
-				const float DistSq = FVector::DistSquared(SurfaceHit.ImpactPoint, Existing.ImpactPoint);
-
-				if (NormalDot > 0.90f && PlaneDist < 25.0f && DistSq < FMath::Square(FMath::Max(Existing.Radius, SurfaceSplashRadius) * 0.85f))
-				{
-					bAlreadyCovered = true;
-					break;
-				}
-			}
-
-			if (bAlreadyCovered)
-			{
-				continue;
-			}
-
-			AffectedCount += PaintSurfaceInternal(
-				SurfaceHit.ImpactPoint,
-				SurfaceHit.ImpactNormal,
-				SurfaceSplashRadius,
-				Status,
-				Duration,
-				Instigator,
-				&ProcessedCoords);
-
-			PaintedPlanes.Add({ SurfaceHit.ImpactPoint, SurfaceHit.ImpactNormal, SurfaceSplashRadius });
 		}
 	}
 
-	UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyElementalBurst FINISH -> AffectedCount: %d"), AffectedCount);
+	UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyElementalBurst FINISH -> AffectedCount: %d"), AffectedCount);
 	return AffectedCount;
 }
 
@@ -1006,33 +966,22 @@ void UDungeonSurfaceSubsystem::PropagateElementalSpreads(float CurrentTime, floa
 
 void UDungeonSurfaceSubsystem::ProcessActorInteractions(float CurrentTime)
 {
-	if (RegisteredStatusComponents.Num() > 0)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
-		for (int32 Idx = RegisteredStatusComponents.Num() - 1; Idx >= 0; --Idx)
-		{
-			UStatusEffectComponent* StatusComp = RegisteredStatusComponents[Idx].Get();
-			if (!StatusComp || !IsValid(StatusComp))
-			{
-				RegisteredStatusComponents.RemoveAt(Idx);
-				continue;
-			}
-
-			AActor* OwnerActor = StatusComp->GetOwner();
-			ProcessActorInteraction(OwnerActor, StatusComp, CurrentTime);
-		}
+		return;
 	}
-	else if (UWorld* World = GetWorld())
+
+	// Jeśli rejestr jest pusty (np. po Live Coding w trakcie sesji), uzupełniamy go
+	if (RegisteredStatusComponents.Num() == 0)
 	{
-		// Fallback (np. w trakcie Live Coding zanim obiekty wywołają BeginPlay).
-		// Rejestrujemy znalezione komponenty, by kolejne ticki szły optymalną ścieżką O(N).
 		for (TActorIterator<APawn> It(World); It; ++It)
 		{
 			if (APawn* Pawn = *It)
 			{
 				if (UStatusEffectComponent* StatusComp = Pawn->FindComponentByClass<UStatusEffectComponent>())
 				{
-					RegisterStatusComponent(StatusComp);
-					ProcessActorInteraction(Pawn, StatusComp, CurrentTime);
+					RegisteredStatusComponents.AddUnique(StatusComp);
 				}
 			}
 		}
@@ -1042,10 +991,46 @@ void UDungeonSurfaceSubsystem::ProcessActorInteractions(float CurrentTime)
 			{
 				if (UStatusEffectComponent* StatusComp = Prop->FindComponentByClass<UStatusEffectComponent>())
 				{
-					RegisterStatusComponent(StatusComp);
-					ProcessActorInteraction(Prop, StatusComp, CurrentTime);
+					RegisteredStatusComponents.AddUnique(StatusComp);
 				}
 			}
+		}
+	}
+
+	if (RegisteredStatusComponents.Num() == 0)
+	{
+		return;
+	}
+
+	// Kopia lokalna (snapshot) wskaźników słabych.
+	// Kluczowa ochrona: jeśli wybuch/reakcja w trakcie pętli zniszczy aktora (np. wybuchająca beczka),
+	// jego EndPlay wywoła UnregisterStatusComponent modyfikujący RegisteredStatusComponents.
+	// Dzięki kopii lokalnej nie ryzykujemy błędu Array Index Out of Bounds.
+	const TArray<TWeakObjectPtr<UStatusEffectComponent>> ComponentsToProcess = RegisteredStatusComponents;
+
+	for (const TWeakObjectPtr<UStatusEffectComponent>& WeakComp : ComponentsToProcess)
+	{
+		UStatusEffectComponent* StatusComp = WeakComp.Get();
+		if (!StatusComp || !IsValid(StatusComp))
+		{
+			continue;
+		}
+
+		AActor* OwnerActor = StatusComp->GetOwner();
+		if (!OwnerActor || OwnerActor->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		ProcessActorInteraction(OwnerActor, StatusComp, CurrentTime);
+	}
+
+	// Czyszczenie martwych wskaźników z głównego rejestru podsystemu
+	for (int32 Idx = RegisteredStatusComponents.Num() - 1; Idx >= 0; --Idx)
+	{
+		if (!RegisteredStatusComponents[Idx].IsValid())
+		{
+			RegisteredStatusComponents.RemoveAt(Idx);
 		}
 	}
 }
@@ -1068,6 +1053,11 @@ void UDungeonSurfaceSubsystem::ProcessActorInteraction(AActor* Actor, UStatusEff
 	UElementalReactionRules::SortByReactionPriority(ActorStatuses);
 
 	TMap<EStatusEffectType, TWeakObjectPtr<AActor>> FloorStatusesToApply;
+	EStatusEffectType DominantLiquid = EStatusEffectType::None;
+	TWeakObjectPtr<AActor> DominantLiquidInstigator = nullptr;
+	float MinLiquidDistSq = TNumericLimits<float>::Max();
+	const FVector ActorLocation = Actor->GetActorLocation();
+	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 
 	for (const FSurfaceCellCoord& CellCoord : TouchedCells)
 	{
@@ -1081,9 +1071,9 @@ void UDungeonSurfaceSubsystem::ProcessActorInteraction(AActor* Actor, UStatusEff
 		for (int32 StatusIdx = 0; StatusIdx < ActorStatuses.Num(); ++StatusIdx)
 		{
 			const EStatusEffectType ActorStatus = ActorStatuses[StatusIdx];
-			if (ActorStatus == EStatusEffectType::None)
+			if (ActorStatus == EStatusEffectType::None || ActorStatus == EStatusEffectType::Oiled)
 			{
-				continue;
+				continue; // Olej na ciele aktora jest pasywny - nie wylewa się na posadzkę
 			}
 
 			// Czy komórka nadal istnieje i ma z czym reagować?
@@ -1116,10 +1106,14 @@ void UDungeonSurfaceSubsystem::ProcessActorInteraction(AActor* Actor, UStatusEff
 					if (UDamageableComponent* Damageable = Actor->FindComponentByClass<UDamageableComponent>())
 					{
 						Damageable->ApplyDamage(Reaction.BonusInstantDamage);
+						if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+						{
+							return;
+						}
 					}
 				}
 
-				// Jeśli status obiektu uległ zużyciu w reakcji (np. woda na obiekcie odparowała przy gaszeniu ognia)
+				// Jeśli status obiektu uległ zużyciu w reakcji (np. woda na obiekcie gasi ogień na posadzce, lub woda na posadzce gasi ogień na obiekcie)
 				if (Reaction.bConsumeIncomingStatus)
 				{
 					StatusComp->RemoveStatus(ActorStatus);
@@ -1138,9 +1132,21 @@ void UDungeonSurfaceSubsystem::ProcessActorInteraction(AActor* Actor, UStatusEff
 		// Zbieranie statusów z tej komórki do unikalnego zbioru dla obiektu
 		if (CellData && !CellData->IsEmpty())
 		{
+			const float CellDistSq = FVector::DistSquared(CellCoord.ToWorldLocation(SafeCellSize), ActorLocation);
+
 			for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)
 			{
-				if (!FloorStatusesToApply.Contains(Entry.Status))
+				// ZŁOTA ZASADA CHEMICZNA: Na styku komórek postać może w danym ticku przyjąć tylko JEDEN płyn (z najbliższej komórki)
+				if (UElementalReactionRules::IsLiquidStatus(Entry.Status))
+				{
+					if (CellDistSq < MinLiquidDistSq)
+					{
+						MinLiquidDistSq = CellDistSq;
+						DominantLiquid = Entry.Status;
+						DominantLiquidInstigator = Entry.Instigator;
+					}
+				}
+				else if (!FloorStatusesToApply.Contains(Entry.Status))
 				{
 					FloorStatusesToApply.Add(Entry.Status, Entry.Instigator);
 				}
@@ -1148,12 +1154,34 @@ void UDungeonSurfaceSubsystem::ProcessActorInteraction(AActor* Actor, UStatusEff
 		}
 	}
 
-	// B. Interakcja Komórka -> Obiekt: aplikacja każdego unikalnego statusu z posadzki tylko RAZ na obiekt na tick
+	if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	// B. Interakcja Komórka -> Obiekt:
+	// 1. ZŁOTA ZASADA: NAJPIERW aplikujemy płyn podłoża (fizyczny nośnik otoczenia, np. woda zmywa olej)
+	if (DominantLiquid != EStatusEffectType::None)
+	{
+		UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying dominant floor liquid %s to %s"),
+			*UEnum::GetValueAsString(DominantLiquid), *Actor->GetName());
+		StatusComp->ApplyStatus(DominantLiquid, 0, -1.0f, DominantLiquidInstigator.Get());
+
+		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+		{
+			return;
+		}
+	}
+
+	// 2. NASTĘPNIE aplikujemy pozostałe statusy środowiskowe (energia: prąd, ogień)
 	for (const auto& StatusPair : FloorStatusesToApply)
 	{
-		UE_LOG(LogDungeonElements, Log, TEXT("[ProcessGridTick] Applying floor status %s to %s"),
-			*UEnum::GetValueAsString(StatusPair.Key), *Actor->GetName());
-		StatusComp->ApplyStatus(StatusPair.Key, 0, -1.0f, StatusPair.Value.Get());
+		if (StatusPair.Key != DominantLiquid)
+		{
+			UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying secondary floor status %s to %s"),
+				*UEnum::GetValueAsString(StatusPair.Key), *Actor->GetName());
+			StatusComp->ApplyStatus(StatusPair.Key, 0, -1.0f, StatusPair.Value.Get());
+		}
 	}
 }
 
