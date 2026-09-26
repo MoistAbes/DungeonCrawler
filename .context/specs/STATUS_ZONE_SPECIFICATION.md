@@ -246,11 +246,21 @@ W systemie obowiązuje ścisłe fizyczne rozróżnienie pomiędzy **przyjęciem 
 
 | Istniejący Status | Przychodzący Status | Tag Reakcji (`ReactionTag`) | Skutek Fizyczno-Chemiczny |
 | :--- | :--- | :--- | :--- |
-| Olej (`Oiled`) | Ogień (`Burning`) | `Oil_Ignition` | Natychmiastowy zapłon oleju: usunięcie `Oiled`, nałożenie `Burning` (6s), obrażenia wybuchowe, propagacja ognia na sąsiednie komórki. |
-| Olej (`Oiled`) | Prąd (`Electrified`) | `Oil_Electric_Ignition` | Iskra elektryczna detonuje olej: usunięcie `Oiled`, nałożenie `Burning` (6s), obrażenia wybuchowe, propagacja ognia na sąsiednie komórki. |
+| Olej (`Oiled`) | Ogień (`Burning`) | `Oil_Ignition` | Zapłon plamy oleju: olej staje się paliwem podtrzymującym płomień `[Oiled, Burning]`. Czas trwania ognia synchronizuje się z pozostałym czasem oleju (`bSyncWithCarrierDuration`), obrażenia, propagacja ognia na sąsiednie komórki. |
+| Olej (`Oiled`) | Prąd (`Electrified`) | `Oil_Electric_Ignition` | Iskra elektryczna detonuje plamę oleju: zapłon paliwa `[Oiled, Burning]`, synchronizacja czasu z nośnikiem (`bSyncWithCarrierDuration`), obrażenia, propagacja ognia na sąsiednie komórki. |
 | Ogień (`Burning`) | Woda (`Wet`) | `Steam_Extinguish` | Ugaszenie ognia: usunięcie `Burning`, odparowanie wody (para wodna), brak DoT. |
-| Woda (`Wet`) | Prąd (`Electrified`) | `Conductive_Shock` | Przewodzenie: koegzystencja obu statusów `[Wet, Electrified]`, obrażenia szokowe, propagacja prądu po całej kałuży. |
-| Płyn A (`Wet` / `Oiled`) | Płyn B (`Oiled` / `Wet`) | `Liquid_Displaced` | Wypieranie powłoki płynnej: nowy płyn zmywa obecny płyn na powierzchni, zajmując jego miejsce. |
+| Woda (`Wet`) | Prąd (`Electrified`) | `Conductive_Shock` | Przewodzenie: koegzystencja obu statusów `[Wet, Electrified]`, obrażenia szokowe, propagacja prądu po całej kałuży. Czas trwania prądu na izolatorach jest ograniczony do czasu obecności wody. |
+| Płyn A (`Wet` / `Oiled`) | Płyn B (`Oiled` / `Wet`) | `Liquid_Displaced` | Wypieranie powłoki płynnej: nowy płyn bezwzględnie zmywa obecny płyn na powierzchni, zajmując jego miejsce (Liquid Mutual Exclusivity). |
+
+### 5.4. Dynamiczna Synchronizacja Nośnika (Carrier Duration Synchronization)
+
+System realizuje uniwersalny mechanizm nośników (`DoesStatusSyncWithCarrier`, `bSyncWithCarrierDuration`):
+1. **Wektor Zależny $\rightarrow$ Nośnik (Inherit):**
+   Gdy status zależny (np. `Burning` na kamieniu lub `Electrified` na kamieniu) jest nakładany na cel posiadający aktywny nośnik (`Oiled` lub `Wet`), jego czas trwania jest wyliczany funkcją `ComputeAdjustedDuration` i synchronizowany z pozostałym czasem paliwa/nośnika.
+2. **Wektor Nośnik $\rightarrow$ Zależny (Extend / Forward Sync):**
+   Gdy do celu posiadającego już aktywny status zależny (np. płonąca posadzka lub naelektryzowany wróg) zostanie dodany nowy nośnik (np. wylanie butli oleju 30s na palący się kamień lub oblanie wodą naelektryzowanego wroga), funkcje `SyncDependentsWithCarrier` (dla siatki) i `SyncDependentStatusesWithCarrier` (dla komponentu aktora) automatycznie wydłużają czas trwania statusów zależnych do nowego czasu życia nośnika.
+3. **Zasada Wyłączności Cieczy (Liquid Mutual Exclusivity):**
+   Zunifikowana w metodach `EnforceLiquidMutualExclusivity` / `DisplaceOtherLiquids`. Nałożenie cieczy usuwa wszelkie inne ciecze i wygasza osierocone przez nie ładunki.
 
 ---
 
@@ -268,7 +278,12 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
    - Replikacja oparta o stały czas zakończenia `ServerEndTime` (Zero-Bandwidth).
    - Zone Merging (`MergeWithZone`) zapobiega mnożeniu instancji stref tego samego żywiołu w tym samym miejscu.
 
-3. **Bezpieczeństwo Wywołań i Brak Zapętleń:**
+3. **Komponent Statusów Aktorów (`UStatusEffectComponent`):**
+   - Modułowa architektura oparta na wyodrębnionych funkcjach pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `SyncDependentStatusesWithCarrier`, `UpsertStatus`).
+   - Linearny przebieg `ApplyStatus` bez zduplikowanych pętli i if-ologii.
+   - Zero-Tick Idle: komponent wyłącza swój tick, gdy brak aktywnych statusów.
+
+4. **Bezpieczeństwo Wywołań i Brak Zapętleń:**
    - Flaga `bCheckOverlappingZones = false` w podrzędnych wywołaniach `ApplyStatusToCell` gwarantuje maksymalną głębokość stosu równą 1 przy natychmiastowych reakcjach cieczy ze strefami.
    - W pętli `ProcessGridTick` modyfikowane koordynaty są buforowane w lokalnej tablicy `CellsToAffect` przed aplikacją, co zapobiega modyfikacji kontenera w trakcie iteracji.
 
@@ -282,6 +297,8 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | **Single Source of Truth (`CalculateElementalTransition`)** | **[ZREALIZOWANE]** | Centralizacja logiki chemicznej, wypierania płynów i czyszczenia statusów w jednej funkcji. |
 | **Rozróżnienie Receive vs Sustain (`CanMaterialSustainStatus`)** | **[ZREALIZOWANE]** | Płomień po spaleniu oleju trwa przez pełny czas spalania paliwa na posadzce; prąd zanika bez wody. |
 | **Ciągła Integracja Stref z Siatką (`RegisteredStatusZones`)** | **[ZREALIZOWANE]** | Automatyczna rejestracja stref wolumetrycznych w subsystemie; natychmiastowy zapłon plam pod chmurami oraz obsługa ruchomych stref i aur. |
+| **Dwukierunkowa Synchronizacja Nośników (`bSyncWithCarrierDuration`)** | **[ZREALIZOWANE]** | Spójna synchronizacja czasów paliwa i nośnika w siatce oraz aktorach (`SyncDependentStatusesWithCarrier`). |
+| **Refaktoryzacja i Eliminacja Duplikacji Logiki** | **[ZREALIZOWANE]** | Uproszczenie `ElementalReactionRules.cpp` i `StatusEffectComponent.cpp` do spójnych funkcji pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`). |
 | **Event-Driven Overlap dla Stref Wolumetrycznych** | Planowane | Zastąpienie periodycznego `GetOverlappingActors` lokalnym zbiorem aktorów w oparciu o delegaty Begin/EndOverlap. |
 | **Timer Phase Staggering** | Planowane | Losowe mikro-przesunięcie fazy pierwszego ticka strefy eliminujące skoki obciążenia w pojedynczych klatkach serwera. |
 | **LoS Caching dla Promieni Wybuchu** | Planowane | Pamięć podręczna widoczności celów odświeżana tylko przy przemieszczeniu celu o więcej niż 30 cm. |

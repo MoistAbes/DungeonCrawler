@@ -74,7 +74,7 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UDamageableComponent` — shared damage/durability behavior.
 
-\* `UStatusEffectComponent` — status-effect state.
+\* `UStatusEffectComponent` — status-effect state with Zero-Bandwidth networking, dynamic carrier/fuel duration syncing, and modular helpers (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`).
 
 \* `AStatusZoneBase` and derived status-zone actors — environmental status zones with automatic `UDungeonSurfaceSubsystem` registration and point geometry evaluation.
 
@@ -84,7 +84,7 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, continuous zone evaluation, and actor interaction.
 
-\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid displacement, and propagation.
+\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateCellTransition`, `CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, dynamic carrier/fuel duration syncing, and propagation.
 
 
 

@@ -682,13 +682,21 @@ This prevents the player character from needing specialized knowledge of every o
 
 `UStatusEffectComponent` provides reusable status-effect state/behavior for actors that can receive status effects.
 
-
-
 It is used as a shared gameplay component rather than embedding status state separately inside every affected actor.
 
+Key architectural responsibilities include:
+* **Server-Authoritative Lifecycle:** All status applications, tier upgrades, reactions, and periodic DoT damage are executed exclusively on the server.
+* **Zero-Bandwidth Networking:** The replicated `FActiveStatusEffectInstance` array transmits only compact state including `ServerEndTime`. Clients compute remaining durations locally, eliminating per-frame timer network traffic.
+* **Zero-Tick Idle:** Component tick is disabled when no active effects are present on the actor (`UpdateTickState`).
+* **Modular Single-Responsibility Architecture:** Internal operations are cleanly segmented into dedicated helpers matching the surface cell pipeline:
+  - `ComputeAdjustedDuration`: Computes adjusted duration considering active fuel/carrier durations and physical material traits.
+  - `DisplaceOtherLiquids`: Enforces Liquid Mutual Exclusivity (e.g. `Wet` displacing `Oiled` and vice versa).
+  - `SyncDependentStatusesWithCarrier`: Dynamically extends dependent status durations when a carrier is added or refreshed.
+  - `UpsertStatus`: Atomically refreshes existing status instances or creates new ones.
+* **Carrier Duration Synchronization:** Statuses requiring a carrier or having `bSyncWithCarrierDuration` (e.g. `Burning` on oil fuel) synchronize their duration with the carrier's remaining time.
+* **Orphan Cleanup:** `CleanOrphanedStatuses` evicts any parasitic status that can no longer legally exist on the actor's material when its carrier expires or is removed, guarded with `TGuardValue` against recursion.
 
-
-Environmental systems such as Status Zones can interact with this capability without requiring knowledge of every concrete target actor.
+Environmental systems such as Status Zones and the Dungeon Surface Subsystem interact with this capability without requiring knowledge of every concrete target actor.
 
 
 

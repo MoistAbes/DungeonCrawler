@@ -192,10 +192,16 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 
 const FStatusEffectConfig& UElementalReactionRules::GetEffectConfig(EStatusEffectType Status)
 {
-	// 1. Sprawdzamy czy w ustawieniach projektu skonfigurowano UStatusEffectConfigAsset
+	// 1. Sprawdzamy czy w ustawieniach projektu skonfigurowano UStatusEffectConfigAsset (z buforowaniem)
 	if (const UDungeonElementalSettings* Settings = GetDefault<UDungeonElementalSettings>())
 	{
-		if (UStatusEffectConfigAsset* ConfigAsset = Settings->StatusEffectConfigAsset.LoadSynchronous())
+		static TWeakObjectPtr<UStatusEffectConfigAsset> CachedAsset = nullptr;
+		if (!CachedAsset.IsValid())
+		{
+			CachedAsset = Settings->StatusEffectConfigAsset.LoadSynchronous();
+		}
+
+		if (UStatusEffectConfigAsset* ConfigAsset = CachedAsset.Get())
 		{
 			if (const FStatusEffectConfig* FoundInAsset = ConfigAsset->FindConfig(Status))
 			{
@@ -416,6 +422,107 @@ bool UElementalReactionRules::CleanOrphanedStatuses(FSurfaceCellData& InOutCellD
 	return bEvictedAny;
 }
 
+namespace
+{
+	/** Wylicza ostateczny czas trwania statusu z uwzględnieniem fizycznych nośników obecnych w komórce */
+	float ComputeAdjustedDuration(
+		EPhysicalMaterialType Material,
+		EStatusEffectType Status,
+		float RequestedDuration,
+		bool bSyncWithCarrier,
+		const FSurfaceCellData& CellData,
+		float CurrentTime)
+	{
+		const float FallbackDuration = UElementalReactionRules::GetEffectConfig(Status).GetBaseDuration();
+		float FinalDuration = (RequestedDuration > 0.0f) ? RequestedDuration : FallbackDuration;
+
+		for (const FSurfaceCellStatusEntry& Entry : CellData.ActiveStatuses)
+		{
+			if (Entry.Status != Status &&
+				(UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status) ||
+				 UElementalReactionRules::GetEffectConfig(Status).BypassTraitsIfActive.Contains(Entry.Status)))
+			{
+				const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
+				if (CarrierRemaining > 0.0f)
+				{
+					if (UElementalReactionRules::RequiresCarrierToSustain(Material, Status))
+					{
+						if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status))
+						{
+							FinalDuration = CarrierRemaining;
+						}
+						else
+						{
+							FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
+						}
+					}
+					else if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status))
+					{
+						FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+					}
+				}
+			}
+		}
+
+		return FinalDuration;
+	}
+
+	/** Aktualizuje czas istniejącego wpisu w komórce lub dodaje nowy wpis (Upsert) */
+	void UpsertStatusEntry(FSurfaceCellData& CellData, EStatusEffectType Status, float EndTime, AActor* Instigator)
+	{
+		if (FSurfaceCellStatusEntry* Existing = CellData.FindStatus(Status))
+		{
+			Existing->ServerEndTime = FMath::Max(Existing->ServerEndTime, EndTime);
+			if (Instigator)
+			{
+				Existing->Instigator = Instigator;
+			}
+		}
+		else
+		{
+			CellData.ActiveStatuses.Add({ Status, EndTime, Instigator });
+		}
+	}
+
+	/** Synchronizuje (przedłuża) czasy trwania statusów zależnych, gdy dodano lub odświeżono nośnik */
+	void SyncDependentsWithCarrier(FSurfaceCellData& CellData, EStatusEffectType CarrierStatus, float CarrierEndTime)
+	{
+		for (FSurfaceCellStatusEntry& OtherEntry : CellData.ActiveStatuses)
+		{
+			if (OtherEntry.Status != CarrierStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherEntry.Status, CarrierStatus))
+			{
+				OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CarrierEndTime);
+			}
+		}
+	}
+
+	/** Egzekwuje zasadę wyłączności płynów: usuwa wszelkie inne ciecze i wygasza osierocone przez nie statusy */
+	bool EnforceLiquidMutualExclusivity(FSurfaceCellData& CellData, EStatusEffectType DominantLiquid)
+	{
+		if (!UElementalReactionRules::IsLiquidStatus(DominantLiquid))
+		{
+			return false;
+		}
+
+		bool bRemovedAny = false;
+		for (int32 Index = CellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
+		{
+			if (CellData.ActiveStatuses[Index].Status != DominantLiquid && UElementalReactionRules::IsLiquidStatus(CellData.ActiveStatuses[Index].Status))
+			{
+				CellData.ActiveStatuses.RemoveAt(Index);
+				bRemovedAny = true;
+			}
+		}
+
+		if (bRemovedAny)
+		{
+			UElementalReactionRules::CleanOrphanedStatuses(CellData, DominantLiquid);
+		}
+
+		return bRemovedAny;
+	}
+}
+
 FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	FSurfaceCellData& InOutCellData,
 	EStatusEffectType IncomingStatus,
@@ -446,46 +553,13 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	}
 
 	// 2. Identyczny żywioł: odświeżamy czas trwania i synchronizujemy nośniki
-	if (FSurfaceCellStatusEntry* ExistingEntry = InOutCellData.FindStatus(IncomingStatus))
+	if (InOutCellData.HasStatus(IncomingStatus))
 	{
-		float AllowedDuration = Duration;
-		// Jeśli odświeżany status zależy od innego nośnika (np. prąd na wodzie, ogień na oleju),
-		// jego czas trwania synchronizuje się z pozostałym czasem trwania tego nośnika!
-		if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
-		{
-			for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-			{
-				if (Entry.Status != IncomingStatus &&
-					(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
-					 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
-				{
-					const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-					if (CarrierRemaining > 0.0f)
-					{
-						if (DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
-						{
-							AllowedDuration = CarrierRemaining;
-						}
-						else
-						{
-							AllowedDuration = FMath::Min(AllowedDuration, CarrierRemaining);
-						}
-					}
-				}
-			}
-		}
+		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
+		const float EndTime = CurrentTime + FinalDuration;
 
-		ExistingEntry->ServerEndTime = FMath::Max(ExistingEntry->ServerEndTime, CurrentTime + AllowedDuration);
-		ExistingEntry->Instigator = Instigator;
-
-		// Sprawdzamy, czy w komórce współistnieją inne statusy zależne od tego nośnika (np. prąd na wodzie przy dolewaniu wody)
-		for (FSurfaceCellStatusEntry& OtherEntry : InOutCellData.ActiveStatuses)
-		{
-			if (OtherEntry.Status != IncomingStatus && DoesStatusSyncWithCarrier(OtherEntry.Status, IncomingStatus))
-			{
-				OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, ExistingEntry->ServerEndTime);
-			}
-		}
+		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
+		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);
 
 		Result.bAccepted = true;
 		Result.bStateModified = true;
@@ -500,237 +574,59 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 
 	if (Reaction.bReactionOccurred)
 	{
-		// A. Status wynikowy reakcji (np. Olej + Iskra -> Burning)
-		if (Reaction.ResultingStatus != EStatusEffectType::None)
+		// Określamy status do nałożenia: status wynikowy reakcji (np. Burning z iskry na oleju)
+		// lub przychodzący status jeśli nie został zużyty (np. Conductive Shock: prąd w wodzie)
+		const EStatusEffectType StatusToApply = (Reaction.ResultingStatus != EStatusEffectType::None)
+			? Reaction.ResultingStatus
+			: (!Reaction.bConsumeIncomingStatus ? IncomingStatus : EStatusEffectType::None);
+
+		if (StatusToApply != EStatusEffectType::None && CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, StatusToApply, ActiveStatusesBefore))
 		{
-			if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, Reaction.ResultingStatus, ActiveStatusesBefore))
-			{
-				const float FallbackResultDuration = (Duration > 0.0f) ? Duration : GetEffectConfig(Reaction.ResultingStatus).GetBaseDuration();
-				float NewDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : FallbackResultDuration;
-				if (Reaction.bSyncWithCarrierDuration)
-				{
-					if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, Reaction.ResultingStatus))
-					{
-						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-						{
-							if (Entry.Status != Reaction.ResultingStatus &&
-								(DoesStatusSyncWithCarrier(Reaction.ResultingStatus, Entry.Status) ||
-								 GetEffectConfig(Reaction.ResultingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
-							{
-								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-								if (CarrierRemaining > 0.0f)
-								{
-									NewDuration = CarrierRemaining;
-								}
-							}
-						}
-					}
-					else
-					{
-						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-						{
-							if (Entry.Status != Reaction.ResultingStatus)
-							{
-								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-								if (CarrierRemaining > 0.0f)
-								{
-									NewDuration = FMath::Max(NewDuration, CarrierRemaining);
-								}
-							}
-						}
-					}
-				}
+			const float RequestedDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
+			const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, StatusToApply, RequestedDuration, Reaction.bSyncWithCarrierDuration, InOutCellData, CurrentTime);
+			const float EndTime = CurrentTime + FinalDuration;
 
-				if (FSurfaceCellStatusEntry* ResEntry = InOutCellData.FindStatus(Reaction.ResultingStatus))
-				{
-					ResEntry->ServerEndTime = FMath::Max(ResEntry->ServerEndTime, CurrentTime + NewDuration);
-					ResEntry->Instigator = Instigator;
-				}
-				else
-				{
-					InOutCellData.ActiveStatuses.Add({ Reaction.ResultingStatus, CurrentTime + NewDuration, Instigator });
-				}
-				Result.bAccepted = true;
-				Result.bStateModified = true;
-			}
-		}
-		// B. Jeśli przychodzący status nie został skonsumowany (np. Conductive Shock: woda i prąd; Oil Ignition: olej i ogień)
-		else if (!Reaction.bConsumeIncomingStatus)
-		{
-			if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
-			{
-				float FinalDuration = (Duration > 0.0f) ? Duration : GetEffectConfig(IncomingStatus).GetBaseDuration();
-				if (Reaction.bSyncWithCarrierDuration)
-				{
-					if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
-					{
-						// Status zależny od nośnika na tym materiale przyjmuje dokładnie czas nośnika (np. ogień płonie dopóki jest olej)
-						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-						{
-							if (Entry.Status != IncomingStatus &&
-								(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
-								 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
-							{
-								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-								if (CarrierRemaining > 0.0f)
-								{
-									FinalDuration = CarrierRemaining;
-								}
-							}
-						}
-					}
-					else
-					{
-						for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-						{
-							if (Entry.Status != IncomingStatus && DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
-							{
-								const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-								if (CarrierRemaining > 0.0f)
-								{
-									FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
-								}
-							}
-						}
-					}
-				}
-
-				if (FSurfaceCellStatusEntry* ExistingIncoming = InOutCellData.FindStatus(IncomingStatus))
-				{
-					ExistingIncoming->ServerEndTime = FMath::Max(ExistingIncoming->ServerEndTime, CurrentTime + FinalDuration);
-					ExistingIncoming->Instigator = Instigator;
-				}
-				else
-				{
-					InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + FinalDuration, Instigator });
-				}
-
-				// Kluczowe: jeśli nowo dodany status jest nośnikiem (np. dolano olej do ognia lub wodę do prądu),
-				// zsynchronizuj czas istniejących statusów, które od tego nośnika zależą!
-				for (FSurfaceCellStatusEntry& OtherEntry : InOutCellData.ActiveStatuses)
-				{
-					if (OtherEntry.Status != IncomingStatus && DoesStatusSyncWithCarrier(OtherEntry.Status, IncomingStatus))
-					{
-						OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CurrentTime + FinalDuration);
-					}
-				}
-
-				Result.bAccepted = true;
-				Result.bStateModified = true;
-			}
+			UpsertStatusEntry(InOutCellData, StatusToApply, EndTime, Instigator);
+			SyncDependentsWithCarrier(InOutCellData, StatusToApply, EndTime);
+			Result.bStateModified = true;
 		}
 
-		// C. Usunięcie wygaszonego/skonsumowanego statusu
+		// Usunięcie wygaszonego/skonsumowanego statusu
 		if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
 		{
 			InOutCellData.RemoveStatus(Reaction.ExistingStatusToRemove);
+			CleanOrphanedStatuses(InOutCellData, StatusToApply);
 			Result.bStateModified = true;
-
-			// D. Wycofanie osieroconych statusów zależnych (chronimy nowo dodany status wynikowy)
-			CleanOrphanedStatuses(InOutCellData, Reaction.ResultingStatus);
 		}
 
-		// E. ZŁOTA ZASADA CHEMICZNA: Komórka nigdy nie może posiadać dwóch płynów jednocześnie.
-		const EStatusEffectType DominantLiquid = IsLiquidStatus(Reaction.ResultingStatus) ? Reaction.ResultingStatus : (IsLiquidStatus(IncomingStatus) && !Reaction.bConsumeIncomingStatus ? IncomingStatus : EStatusEffectType::None);
-		if (DominantLiquid != EStatusEffectType::None)
+		// ZŁOTA ZASADA CHEMICZNA: Komórka nigdy nie może posiadać dwóch płynów jednocześnie
+		if (EnforceLiquidMutualExclusivity(InOutCellData, StatusToApply))
 		{
-			bool bLiquidRemoved = false;
-			for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
-			{
-				if (InOutCellData.ActiveStatuses[Index].Status != DominantLiquid && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
-				{
-					InOutCellData.ActiveStatuses.RemoveAt(Index);
-					Result.bStateModified = true;
-					bLiquidRemoved = true;
-				}
-			}
-
-			if (bLiquidRemoved)
-			{
-				CleanOrphanedStatuses(InOutCellData, DominantLiquid);
-			}
-		}
-
-		if (Result.bStateModified)
-		{
-			Result.bAccepted = true;
-		}
-
-		if (InOutCellData.IsEmpty())
-		{
-			Result.bCellBecameEmpty = true;
-			Result.bAccepted = true;
 			Result.bStateModified = true;
-			return Result;
 		}
 
+		Result.bAccepted = Result.bStateModified;
+		Result.bCellBecameEmpty = InOutCellData.IsEmpty();
 		return Result;
 	}
 
-	// 4. Brak reakcji: sprawdzamy czy materiał pozwala na koegzystencję nowego statusu z obecnymi powłokami
-	if (!InOutCellData.HasStatus(IncomingStatus))
+	// 4. Brak reakcji chemicznej: koegzystencja nowego żywiołu z obecnymi powłokami
+	if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
 	{
-		if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
+		if (EnforceLiquidMutualExclusivity(InOutCellData, IncomingStatus))
 		{
-			// ZŁOTA ZASADA: Jeśli dodajemy płyn, usuwamy wszelkie inne płyny
-			if (IsLiquidStatus(IncomingStatus))
-			{
-				bool bLiquidRemoved = false;
-				for (int32 Index = InOutCellData.ActiveStatuses.Num() - 1; Index >= 0; --Index)
-				{
-					if (InOutCellData.ActiveStatuses[Index].Status != IncomingStatus && IsLiquidStatus(InOutCellData.ActiveStatuses[Index].Status))
-					{
-						InOutCellData.ActiveStatuses.RemoveAt(Index);
-						bLiquidRemoved = true;
-					}
-				}
-
-				if (bLiquidRemoved)
-				{
-					CleanOrphanedStatuses(InOutCellData, IncomingStatus);
-				}
-			}
-
-			float FinalDuration = Duration;
-			if (RequiresCarrierToSustain(InOutCellData.SurfaceMaterial, IncomingStatus))
-			{
-				for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
-				{
-					if (Entry.Status != IncomingStatus &&
-						(DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status) ||
-						 GetEffectConfig(IncomingStatus).BypassTraitsIfActive.Contains(Entry.Status)))
-					{
-						const float CarrierRemaining = Entry.ServerEndTime - CurrentTime;
-						if (CarrierRemaining > 0.0f)
-						{
-							if (DoesStatusSyncWithCarrier(IncomingStatus, Entry.Status))
-							{
-								FinalDuration = CarrierRemaining;
-							}
-							else
-							{
-								FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
-							}
-						}
-					}
-				}
-			}
-
-			InOutCellData.ActiveStatuses.Add({ IncomingStatus, CurrentTime + FinalDuration, Instigator });
-
-			// Synchronizacja czasu dla statusów zależnych od nowo dodanego nośnika
-			for (FSurfaceCellStatusEntry& OtherEntry : InOutCellData.ActiveStatuses)
-			{
-				if (OtherEntry.Status != IncomingStatus && DoesStatusSyncWithCarrier(OtherEntry.Status, IncomingStatus))
-				{
-					OtherEntry.ServerEndTime = FMath::Max(OtherEntry.ServerEndTime, CurrentTime + FinalDuration);
-				}
-			}
-
-			Result.bAccepted = true;
 			Result.bStateModified = true;
-			return Result;
 		}
+
+		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
+		const float EndTime = CurrentTime + FinalDuration;
+
+		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
+		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);
+
+		Result.bAccepted = true;
+		Result.bStateModified = true;
+		return Result;
 	}
 
 	return Result;

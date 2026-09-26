@@ -169,6 +169,18 @@ private:
     /** Przetwarza potencjalną reakcję chemiczną żywiołów. Zwraca wynik ewaluacji reakcji */
     FElementalReactionResult ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
 
+    /** Wylicza ostateczny czas trwania statusu z uwzględnieniem fizycznych nośników obecnych na obiekcie */
+    float ComputeAdjustedDuration(EStatusEffectType Status, float BaseDuration, bool bSyncWithCarrier) const;
+
+    /** Egzekwuje wyłączność płynów: usuwa wszelkie inne ciecze aktywne na obiekcie */
+    void DisplaceOtherLiquids(EStatusEffectType IncomingLiquid);
+
+    /** Synchronizuje czas trwania statusów zależnych, gdy nośnik został dodany lub przedłużony */
+    void SyncDependentStatusesWithCarrier(EStatusEffectType CarrierStatus, float CarrierEndTime);
+
+    /** Dodaje nową instancję statusu lub odświeża istniejącą (Upsert) */
+    void UpsertStatus(EStatusEffectType Status, int32 Tier, float Duration, float EndTime, AActor* InstigatorActor);
+
     /** Odświeża czas trwania i parametry istniejącego statusu */
     void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
 

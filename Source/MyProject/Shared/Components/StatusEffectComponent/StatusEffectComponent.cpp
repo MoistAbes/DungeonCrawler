@@ -114,6 +114,84 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
     }
 }
 
+float UStatusEffectComponent::ComputeAdjustedDuration(EStatusEffectType Status, float BaseDuration, bool bSyncWithCarrier) const
+{
+    const EPhysicalMaterialType Material = GetOwnerMaterialType();
+    const float CurrentTime = GetCurrentSyncedTime();
+    float FinalDuration = BaseDuration;
+
+    for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
+    {
+        if (ActiveInst.EffectType != Status &&
+            (UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType) ||
+             UElementalReactionRules::GetEffectConfig(Status).BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
+        {
+            const float CarrierRemaining = ActiveInst.ServerEndTime - CurrentTime;
+            if (CarrierRemaining > 0.0f)
+            {
+                if (UElementalReactionRules::RequiresCarrierToSustain(Material, Status))
+                {
+                    if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType))
+                    {
+                        FinalDuration = CarrierRemaining;
+                    }
+                    else
+                    {
+                        FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
+                    }
+                }
+                else if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType))
+                {
+                    FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
+                }
+            }
+        }
+    }
+
+    return FinalDuration;
+}
+
+void UStatusEffectComponent::DisplaceOtherLiquids(EStatusEffectType IncomingLiquid)
+{
+    if (!UElementalReactionRules::IsLiquidStatus(IncomingLiquid))
+    {
+        return;
+    }
+
+    for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
+    {
+        if (ActiveStatusEffects[Idx].EffectType != IncomingLiquid && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
+        {
+            UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect] Displacing existing liquid %s with incoming liquid %s on %s"),
+                *UEnum::GetValueAsString(ActiveStatusEffects[Idx].EffectType), *UEnum::GetValueAsString(IncomingLiquid), *GetOwner()->GetName());
+            RemoveStatus(ActiveStatusEffects[Idx].EffectType);
+        }
+    }
+}
+
+void UStatusEffectComponent::SyncDependentStatusesWithCarrier(EStatusEffectType CarrierStatus, float CarrierEndTime)
+{
+    for (FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
+    {
+        if (OtherInst.EffectType != CarrierStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherInst.EffectType, CarrierStatus))
+        {
+            OtherInst.ServerEndTime = FMath::Max(OtherInst.ServerEndTime, CarrierEndTime);
+        }
+    }
+}
+
+void UStatusEffectComponent::UpsertStatus(EStatusEffectType Status, int32 Tier, float Duration, float EndTime, AActor* InstigatorActor)
+{
+    if (FActiveStatusEffectInstance* Existing = FindInstance(Status))
+    {
+        RefreshExistingStatus(*Existing, Tier, Duration, EndTime, InstigatorActor);
+    }
+    else
+    {
+        AddNewStatusInstance(Status, Tier, Duration, EndTime, InstigatorActor);
+    }
+}
+
 bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier, float OverrideDuration, AActor* InstigatorActor)
 {
     REQUIRE_AUTHORITY_RET(false);
@@ -124,8 +202,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
     }
 
     const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(NewStatus);
-    const FStatusEffectTier& TierConfig = Config.GetTier(Tier);
-    const float Duration = (OverrideDuration > 0.0f) ? OverrideDuration : TierConfig.BaseDuration;
+    const float Duration = (OverrideDuration > 0.0f) ? OverrideDuration : Config.GetBaseDuration(Tier);
     if (Duration <= 0.0f)
     {
         return false;
@@ -154,59 +231,11 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
             {
                 const FStatusEffectConfig& ResultConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
                 const float ResultBaseDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ResultConfig.GetBaseDuration(Tier);
-                float ResultDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
-
-                if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Reaction.ResultingStatus))
-                {
-                    if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Reaction.ResultingStatus))
-                    {
-                        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
-                        {
-                            if (ActiveInst.EffectType != Reaction.ResultingStatus &&
-                                (UElementalReactionRules::DoesStatusSyncWithCarrier(Reaction.ResultingStatus, ActiveInst.EffectType) ||
-                                 ResultConfig.BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
-                            {
-                                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
-                                if (CarrierRemaining > 0.0f)
-                                {
-                                    if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::DoesStatusSyncWithCarrier(Reaction.ResultingStatus, ActiveInst.EffectType))
-                                    {
-                                        ResultDuration = CarrierRemaining;
-                                    }
-                                    else
-                                    {
-                                        ResultDuration = FMath::Min(ResultDuration, CarrierRemaining);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else if (Reaction.bSyncWithCarrierDuration)
-                    {
-                        for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
-                        {
-                            if (ActiveInst.EffectType != Reaction.ResultingStatus)
-                            {
-                                const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
-                                if (CarrierRemaining > 0.0f)
-                                {
-                                    ResultDuration = FMath::Max(ResultDuration, CarrierRemaining);
-                                }
-                            }
-                        }
-                    }
-                }
-
+                const float ResultInitialDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
+                const float ResultDuration = ComputeAdjustedDuration(Reaction.ResultingStatus, ResultInitialDuration, Reaction.bSyncWithCarrierDuration);
                 const float ResultEndTime = GetCurrentSyncedTime() + ResultDuration;
 
-                if (FActiveStatusEffectInstance* ExistingResult = FindInstance(Reaction.ResultingStatus))
-                {
-                    RefreshExistingStatus(*ExistingResult, Tier, ResultDuration, ResultEndTime, InstigatorActor);
-                }
-                else
-                {
-                    AddNewStatusInstance(Reaction.ResultingStatus, Tier, ResultDuration, ResultEndTime, InstigatorActor);
-                }
+                UpsertStatus(Reaction.ResultingStatus, Tier, ResultDuration, ResultEndTime, InstigatorActor);
             }
             return true;
         }
@@ -231,62 +260,11 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
         return false;
     }
 
-    // Jeśli zachodzi synchronizacja czasu z nośnikiem (np. woda dla prądu na kamieniu, olej dla ognia na kamieniu)
-    float FinalDuration = Duration;
-    if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, NewStatus))
-    {
-        if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, NewStatus))
-        {
-            for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
-            {
-                if (ActiveInst.EffectType != NewStatus &&
-                    (UElementalReactionRules::DoesStatusSyncWithCarrier(NewStatus, ActiveInst.EffectType) ||
-                     Config.BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
-                {
-                    const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
-                    if (CarrierRemaining > 0.0f)
-                    {
-                        if (Reaction.bSyncWithCarrierDuration || UElementalReactionRules::DoesStatusSyncWithCarrier(NewStatus, ActiveInst.EffectType))
-                        {
-                            FinalDuration = CarrierRemaining;
-                        }
-                        else
-                        {
-                            FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
-                        }
-                    }
-                }
-            }
-        }
-        else if (Reaction.bSyncWithCarrierDuration)
-        {
-            for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
-            {
-                if (ActiveInst.EffectType != NewStatus)
-                {
-                    const float CarrierRemaining = ActiveInst.ServerEndTime - GetCurrentSyncedTime();
-                    if (CarrierRemaining > 0.0f)
-                    {
-                        FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
-                    }
-                }
-            }
-        }
-    }
+    // 4. Wyliczenie skorygowanego czasu trwania z nośnikiem i zarejestrowanie statusu
+    const float FinalDuration = ComputeAdjustedDuration(NewStatus, Duration, Reaction.bSyncWithCarrierDuration);
     const float FinalEndTime = GetCurrentSyncedTime() + FinalDuration;
 
-    // 4. Zarejestrowanie nowego statusu
-    AddNewStatusInstance(NewStatus, Tier, FinalDuration, FinalEndTime, InstigatorActor);
-
-    // Jeśli nowo dodany status jest nośnikiem (np. wylano olej na płonącą postać lub oblano wodą naelektryzowaną),
-    // synchronizujemy czas trwania istniejących statusów zależnych od tego nośnika!
-    for (FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
-    {
-        if (OtherInst.EffectType != NewStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherInst.EffectType, NewStatus))
-        {
-            OtherInst.ServerEndTime = FMath::Max(OtherInst.ServerEndTime, FinalEndTime);
-        }
-    }
+    UpsertStatus(NewStatus, Tier, FinalDuration, FinalEndTime, InstigatorActor);
 
     return true;
 }
@@ -306,20 +284,9 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
     }
 
     // ZŁOTA ZASADA CHEMICZNA: Jeśli przychodzący status jest płynem (np. Wet),
-    // to KAŻDY inny aktywny płyn (np. Oiled) zostaje bezwzględnie zmyty z celu,
-    // nawet jeśli reakcja dotyczyła innego statusu (np. woda gasząca ogień na naoliwionej postaci zmywa też olej).
-    if (UElementalReactionRules::IsLiquidStatus(NewStatus))
-    {
-        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
-        {
-            if (ActiveStatusEffects[Idx].EffectType != NewStatus && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
-            {
-                UE_LOG(LogDungeonElements, Log, TEXT("[StatusReaction] Liquid %s washed away liquid %s on %s"),
-                    *UEnum::GetValueAsString(NewStatus), *UEnum::GetValueAsString(ActiveStatusEffects[Idx].EffectType), *GetOwner()->GetName());
-                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
-            }
-        }
-    }
+    // to KAŻDY inny aktywny płyn (np. Oiled) zostaje bezwzględnie zmyty z celu
+    DisplaceOtherLiquids(NewStatus);
+
     UE_LOG(LogDungeonElements, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
 
@@ -344,16 +311,7 @@ FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatu
 void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
     // ZŁOTA ZASADA CHEMICZNA: Jeśli odświeżany status jest płynem, żaden inny płyn nie może istnieć
-    if (UElementalReactionRules::IsLiquidStatus(Existing.EffectType))
-    {
-        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
-        {
-            if (ActiveStatusEffects[Idx].EffectType != Existing.EffectType && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
-            {
-                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
-            }
-        }
-    }
+    DisplaceOtherLiquids(Existing.EffectType);
 
     // Jeśli nowy tier jest wyższy, podnosimy tier
     if (Tier > Existing.Tier)
@@ -364,34 +322,9 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
         Existing.TickInterval = (NewTickInterval > 0.0f) ? NewTickInterval : 1.0f;
     }
 
-    const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
-    float TargetEndTime = NewEndTime;
-
-    // Jeśli status zależy od nośnika na tym materiale (np. ogień na kamieniu z olejem),
-    // jego czas synchronizuje się z czasem nośnika
-    if (UElementalReactionRules::RequiresCarrierToSustain(OwnerMaterial, Existing.EffectType))
-    {
-        float MaxCarrierEndTime = 0.0f;
-        bool bHasSyncRule = false;
-        for (const FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
-        {
-            if (OtherInst.EffectType != Existing.EffectType &&
-                (UElementalReactionRules::DoesStatusSyncWithCarrier(Existing.EffectType, OtherInst.EffectType) ||
-                 UElementalReactionRules::GetEffectConfig(Existing.EffectType).BypassTraitsIfActive.Contains(OtherInst.EffectType)))
-            {
-                MaxCarrierEndTime = FMath::Max(MaxCarrierEndTime, OtherInst.ServerEndTime);
-                if (UElementalReactionRules::DoesStatusSyncWithCarrier(Existing.EffectType, OtherInst.EffectType))
-                {
-                    bHasSyncRule = true;
-                }
-            }
-        }
-
-        if (MaxCarrierEndTime > 0.0f)
-        {
-            TargetEndTime = bHasSyncRule ? MaxCarrierEndTime : FMath::Min(NewEndTime, MaxCarrierEndTime);
-        }
-    }
+    // Wyliczamy skorygowany czas trwania z uwzględnieniem nośnika (jeśli wymagany)
+    const float AdjustedDuration = ComputeAdjustedDuration(Existing.EffectType, Duration, false);
+    const float TargetEndTime = GetCurrentSyncedTime() + AdjustedDuration;
 
     Existing.ServerEndTime = FMath::Max(Existing.ServerEndTime, TargetEndTime);
     Existing.TotalDuration = FMath::Max(Existing.TotalDuration, Duration);
@@ -401,13 +334,7 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
     }
 
     // Synchronizacja czasu dla statusów zależnych od tego nośnika (np. prąd na mokrej postaci)
-    for (FActiveStatusEffectInstance& OtherInst : ActiveStatusEffects)
-    {
-        if (OtherInst.EffectType != Existing.EffectType && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherInst.EffectType, Existing.EffectType))
-        {
-            OtherInst.ServerEndTime = FMath::Max(OtherInst.ServerEndTime, Existing.ServerEndTime);
-        }
-    }
+    SyncDependentStatusesWithCarrier(Existing.EffectType, Existing.ServerEndTime);
 
     UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Tier %d, Remaining: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), Existing.Tier, GetRemainingDuration(Existing.EffectType));
@@ -426,19 +353,7 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
 void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
     // ZŁOTA ZASADA CHEMICZNA: Całkowity zakaz koegzystencji dwóch płynów (Liquid Mutual Exclusivity).
-    // Nowy płyn (np. Wet lub Oiled) bezwzględnie zmywa/wypiera każdy inny aktywny płyn na obiekcie.
-    if (UElementalReactionRules::IsLiquidStatus(NewStatus))
-    {
-        for (int32 Idx = ActiveStatusEffects.Num() - 1; Idx >= 0; --Idx)
-        {
-            if (ActiveStatusEffects[Idx].EffectType != NewStatus && UElementalReactionRules::IsLiquidStatus(ActiveStatusEffects[Idx].EffectType))
-            {
-                UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect] Displacing existing liquid %s with new liquid %s on %s"),
-                    *UEnum::GetValueAsString(ActiveStatusEffects[Idx].EffectType), *UEnum::GetValueAsString(NewStatus), *GetOwner()->GetName());
-                RemoveStatus(ActiveStatusEffects[Idx].EffectType);
-            }
-        }
-    }
+    DisplaceOtherLiquids(NewStatus);
 
     const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(NewStatus);
     const float ConfigTickInterval = Def.GetTickInterval(Tier);
@@ -454,6 +369,10 @@ void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, i
 
     ActiveStatusEffects.Add(NewInstance);
     UpdateTickState();
+
+    // Jeśli nowo dodany status jest nośnikiem (np. wylano olej na płonącą postać lub oblano wodą naelektryzowaną),
+    // synchronizujemy czas trwania istniejących statusów zależnych od tego nośnika!
+    SyncDependentStatusesWithCarrier(NewStatus, NewEndTime);
 
     UE_LOG(LogDungeonElements, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Tier %d, Duration: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Tier, Duration);
