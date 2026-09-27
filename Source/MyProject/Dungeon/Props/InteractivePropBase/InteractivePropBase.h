@@ -109,7 +109,7 @@ protected:
     float KnockbackStrengthMultiplier = 1.0f;
 
     UFUNCTION()
-    virtual void HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+    virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
                                    UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                    const FHitResult& Hit);
 

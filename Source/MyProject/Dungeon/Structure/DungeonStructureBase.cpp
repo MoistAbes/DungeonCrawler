@@ -4,6 +4,7 @@
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
@@ -68,12 +69,12 @@ void ADungeonStructureBase::HandleComponentHit(
 {
 	REQUIRE_AUTHORITY();
 
-	if (DamageableComponent->IsDestroyed())
+	if (!bIsDestructible || !OtherActor || OtherActor == this)
 	{
 		return;
 	}
 
-	// 1. Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
+	// Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
 	if (const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(OtherActor))
 	{
 		if (Grabbable->IsGrabbed())
@@ -82,17 +83,13 @@ void ADungeonStructureBase::HandleComponentHit(
 		}
 	}
 
-	// 2. Obliczamy prędkość uderzenia prostopadłego przez zunifikowaną bibliotekę kinetyczną
-	const float ImpactSpeed = UKineticForceLibrary::CalculateImpactSpeed(StructureMesh, OtherActor, OtherComp, Hit.ImpactNormal);
-
-	UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure]%s %s hit by %s | ImpactSpeed: %.1f cm/s"),
-		*NetUtils::GetNetRolePrefix(this), *GetName(), OtherActor ? *OtherActor->GetName() : TEXT("None"), ImpactSpeed);
-
-	// 3. Jeśli obiekt faktycznie uderza w strukturę prostopadle z prędkością powyżej progu
-	if (ImpactSpeed > 0.0f)
-	{
-		DamageableComponent->ApplyKineticImpact(ImpactSpeed);
-	}
+	UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
+		OtherActor,
+		OtherComp,
+		this,
+		StructureMesh,
+		Hit,
+		PunchThroughVelocityRetention);
 }
 
 void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
@@ -111,20 +108,17 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 	// 0. Czyszczenie komórek powierzchniowych w zniszczonym obszarze fundamentu
 	ClearSurfaceGrid(World);
 
-	// 1. Natychmiastowe usunięcie kolizji bryły i widoczności, by przepuścić obiekty w locie
+	// 1. Zabezpieczenie: natychmiastowe usunięcie kolizji bryły i widoczności
 	StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	StructureMesh->SetVisibility(false);
 
-	// 2. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych), by nie lewitowały w powietrzu
+	// 2. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych)
 	DestroyAttachedActors();
 
-	// 3. Mechanika Punch-Through: postacie pędzące w wyrwę kontynuują bieg z zachowaniem części pędu
-	ApplyPunchThrough(World);
-
-	// 4. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
+	// 3. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
 	SpawnDebris(World);
 
-	// 5. Po krótkiej chwili (na dokończenie ewentualnych replikacji) niszczymy aktora
+	// 4. Po krótkiej chwili na dokończenie replikacji niszczymy aktora
 	SetLifeSpan(0.1f);
 }
 
@@ -146,28 +140,6 @@ void ADungeonStructureBase::DestroyAttachedActors()
 		if (Attached && !Attached->IsActorBeingDestroyed())
 		{
 			Attached->Destroy();
-		}
-	}
-}
-
-void ADungeonStructureBase::ApplyPunchThrough(UWorld* World)
-{
-	TArray<FOverlapResult> Overlaps;
-	const FCollisionShape BoxShape = FCollisionShape::MakeBox(FVector(100.0f, 100.0f, 150.0f));
-	const FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(PunchThroughQuery), false, this);
-
-	if (World->OverlapMultiByChannel(Overlaps, GetActorLocation(), GetActorRotation().Quaternion(), ECC_Pawn, BoxShape, QueryParams))
-	{
-		for (const FOverlapResult& Overlap : Overlaps)
-		{
-			if (ACharacter* Character = Cast<ACharacter>(Overlap.GetActor()))
-			{
-				const FVector PenetrationVelocity = Character->GetVelocity() * PunchThroughVelocityRetention;
-				Character->LaunchCharacter(PenetrationVelocity, true, true);
-
-				UE_LOG(LogDungeonPhysics, Log, TEXT("[DungeonStructure] Punch-Through: Character %s penetrated destroyed wall with velocity %s"),
-					*Character->GetName(), *Character->GetVelocity().ToString());
-			}
 		}
 	}
 }

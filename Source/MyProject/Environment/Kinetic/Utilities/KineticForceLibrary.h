@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
@@ -27,6 +27,20 @@ public:
         const AActor* OtherActor,
         const UPrimitiveComponent* OtherComp,
         const FVector& HitNormal);
+
+    /**
+     * Zunifikowana obsługa zderzenia kinetycznego dla dowolnej pary obiektów (gracz, prop, ściana).
+     * Oblicza prędkości i masy obu ciał, aplikuje obrażenia kinetyczne, a w przypadku zniszczenia celu
+     * umożliwia uderzającemu obiektowi przebicie się przez wyrwę (Punch-Through) z zachowaniem części pędu.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic")
+    static void HandleKineticImpactAndPunchThrough(
+        AActor* InstigatorActor,
+        UPrimitiveComponent* InstigatorComp,
+        AActor* TargetActor,
+        UPrimitiveComponent* TargetComp,
+        const FHitResult& Hit,
+        float PunchThroughRetention = 0.85f);
 
     /**
      * Sprawdza widoczność celu z punktu wybuchu (Line of Sight / Occlusion).

@@ -1,4 +1,4 @@
-﻿#include "InteractivePropBase.h"
+#include "InteractivePropBase.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -54,7 +54,7 @@ void AInteractivePropBase::PostInitializeComponents()
 
     if (MeshComponent)
     {
-        MeshComponent->OnComponentHit.AddDynamic(this, &AInteractivePropBase::HandleImpactDamage);
+        MeshComponent->OnComponentHit.AddDynamic(this, &AInteractivePropBase::HandleComponentHit);
     }
 
     if (DamageableComponent)
@@ -129,7 +129,7 @@ float AInteractivePropBase::GetMass() const
     return MeshComponent ? MeshComponent->GetMass() : 0.0f;
 }
 
-void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+void AInteractivePropBase::HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
                                              UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                              const FHitResult& Hit)
 {
@@ -141,7 +141,7 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
         return;
     }
 
-    // 1. Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
+    // Jeśli obiekt uderzający jest aktualnie trzymany przez postać - ignorujemy ocieranie
     if (const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(OtherActor))
     {
         if (Grabbable->IsGrabbed())
@@ -150,75 +150,14 @@ void AInteractivePropBase::HandleImpactDamage(UPrimitiveComponent* HitComponent,
         }
     }
 
-    // 2. Obliczamy prostopadłą prędkość zderzenia przez zunifikowaną bibliotekę kinetyczną
-    const float ImpactSpeed = UKineticForceLibrary::CalculateImpactSpeed(MeshComponent, OtherActor, OtherComp, Hit.ImpactNormal);
-
-    // 3. Aplikacja obrażeń kinetycznych na samego siebie
-    if (ImpactSpeed > 0.0f && DamageableComponent)
-    {
-        DamageableComponent->ApplyKineticImpact(ImpactSpeed);
-    }
-
-    // 4. Przekazywanie pędu i odrzutu uderzanemu celowi (np. gracz lub potwory z KnockbackComponent)
-    if (bTransferKineticKnockback && OtherActor)
-    {
-        const FVector PropVelocity = MeshComponent->GetPhysicsLinearVelocity();
-        const float PropSpeed = PropVelocity.Size();
-
-        if (PropSpeed >= MinImpactSpeedForKnockback)
-        {
-            // Sprawdzamy prędkość zbliżania propa do celu
-            const FVector ToTarget = (OtherActor->GetActorLocation() - GetActorLocation()).GetSafeNormal();
-            const float ClosingSpeedByNormal = -FVector::DotProduct(PropVelocity, Hit.ImpactNormal);
-            const float ClosingSpeedByDirection = FVector::DotProduct(PropVelocity, ToTarget);
-            float EffectivePropSpeed = FMath::Max(ClosingSpeedByNormal, ClosingSpeedByDirection);
-
-            // Chaos Physics Rebound Compensation:
-            // Jeśli obiekt uderzył w sztywną kapsułę postaci i solver fizyki już go odbił do tyłu
-            // (ClosingSpeed staje się ujemne), siła uderzenia odpowiada modułowi odbicia lub prędkości propa
-            if (EffectivePropSpeed < MinImpactSpeedForKnockback && PropSpeed >= MinImpactSpeedForKnockback)
-            {
-                EffectivePropSpeed = FMath::Max(FMath::Abs(ClosingSpeedByNormal), PropSpeed * 0.75f);
-            }
-
-            if (EffectivePropSpeed >= MinImpactSpeedForKnockback)
-            {
-                // Skalowanie masą (np. 170kg uderza mocniej niż lekki stołek 25kg)
-                const float Mass = GetMass();
-                const float MassFactor = FMath::Clamp(Mass > 0.0f ? (Mass / 50.0f) : 1.0f, 0.5f, 3.5f);
-                const float KnockbackForce = EffectivePropSpeed * MassFactor * KnockbackStrengthMultiplier;
-
-                // Kierunek odrzutu: ZAWSZE od środka propa w stronę celu (ToTarget) z podbiciem w górę (Upward Bias).
-                // Nigdy nie używamy odbitego PropVelocity, bo odrzuciłoby cel w stronę propa.
-                FVector KnockbackDir = ToTarget;
-                if (KnockbackDir.IsNearlyZero())
-                {
-                    KnockbackDir = -Hit.ImpactNormal;
-                }
-                if (KnockbackDir.IsNearlyZero())
-                {
-                    KnockbackDir = FVector::ForwardVector;
-                }
-                KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.25f, 0.1f, 1.0f);
-                KnockbackDir.Normalize();
-
-                // Aplikujemy odrzut na cel
-                if (UKnockbackComponent* TargetKnockback = OtherActor->FindComponentByClass<UKnockbackComponent>())
-                {
-                    TargetKnockback->ApplyImpulseForce(KnockbackDir, KnockbackForce, this);
-                }
-
-                // Zadajemy obrażenia uderzonemu celowi
-                if (UDamageableComponent* TargetDamageable = OtherActor->FindComponentByClass<UDamageableComponent>())
-                {
-                    TargetDamageable->ApplyKineticImpact(EffectivePropSpeed * MassFactor);
-                }
-
-                UE_LOG(LogDungeonPhysics, Warning, TEXT("[PropKineticTransfer]%s %s slammed into %s at Speed: %.1f cm/s | Force: %.1f (Mass: %.1f kg)"),
-                    *NetUtils::GetNetRolePrefix(this), *GetName(), *OtherActor->GetName(), EffectivePropSpeed, KnockbackForce, Mass);
-            }
-        }
-    }
+    // Zunifikowana obsługa zderzenia kinetycznego i punch-through
+    UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
+        this,
+        MeshComponent,
+        OtherActor,
+        OtherComp,
+        Hit,
+        0.85f);
 }
 
 void AInteractivePropBase::HandleOnDestroyed(AActor* DestroyedActor)

@@ -87,6 +87,8 @@ namespace KineticHelpers
     }
 }
 
+#include "MyProject/Logging/DungeonLogCategories.h"
+
 float UKineticForceLibrary::CalculateImpactSpeed(
     const UPrimitiveComponent* SelfComp,
     const AActor* OtherActor,
@@ -102,6 +104,165 @@ float UKineticForceLibrary::CalculateImpactSpeed(
     const float ClosingSpeed = -FVector::DotProduct(RelativeVelocity, HitNormal);
 
     return FMath::Max(0.0f, ClosingSpeed);
+}
+
+void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
+    AActor* InstigatorActor,
+    UPrimitiveComponent* InstigatorComp,
+    AActor* TargetActor,
+    UPrimitiveComponent* TargetComp,
+    const FHitResult& Hit,
+    float PunchThroughRetention)
+{
+    if (!InstigatorActor || !TargetActor || InstigatorActor == TargetActor)
+    {
+        return;
+    }
+
+    // 1. Zabezpieczenie przed wyścigami Chaosu (obustronny callback OnComponentHit)
+    UDamageableComponent* TargetDamageable = TargetActor->FindComponentByClass<UDamageableComponent>();
+    UDamageableComponent* InstigatorDamageable = InstigatorActor->FindComponentByClass<UDamageableComponent>();
+
+    if ((TargetDamageable && TargetDamageable->IsDestroyed()) || (InstigatorDamageable && InstigatorDamageable->IsDestroyed()))
+    {
+        return;
+    }
+
+    // 2. Określamy niszczyciela (Breaker - porusza się szybciej) i cel (Victim)
+    AActor* BreakerActor = InstigatorActor;
+    UPrimitiveComponent* BreakerComp = InstigatorComp;
+    UDamageableComponent* BreakerDamageable = InstigatorDamageable;
+
+    AActor* VictimActor = TargetActor;
+    UPrimitiveComponent* VictimComp = TargetComp;
+    UDamageableComponent* VictimDamageable = TargetDamageable;
+
+    const FVector VelA = KineticHelpers::GetEntityVelocity(InstigatorActor, InstigatorComp);
+    const FVector VelB = KineticHelpers::GetEntityVelocity(TargetActor, TargetComp);
+
+    if (VelB.SizeSquared() > VelA.SizeSquared())
+    {
+        Swap(BreakerActor, VictimActor);
+        Swap(BreakerComp, VictimComp);
+        Swap(BreakerDamageable, VictimDamageable);
+    }
+
+    const FVector BreakerVelocity = KineticHelpers::GetEntityVelocity(BreakerActor, BreakerComp);
+    const FVector VictimVelocity = KineticHelpers::GetEntityVelocity(VictimActor, VictimComp);
+
+    // Masy obu ciał
+    float BreakerMass = 80.0f;
+    if (const ACharacter* Character = Cast<ACharacter>(BreakerActor))
+    {
+        if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+        {
+            BreakerMass = CMC->Mass > 0.0f ? CMC->Mass : 80.0f;
+        }
+    }
+    else if (BreakerComp)
+    {
+        BreakerMass = FMath::Max(1.0f, BreakerComp->GetMass());
+    }
+
+    // 3. Prędkość uderzenia
+    const FVector RelativeVelocity = BreakerVelocity - VictimVelocity;
+    const float ClosingSpeed = FMath::Abs(FVector::DotProduct(RelativeVelocity, Hit.ImpactNormal));
+    const float BreakerSpeed = BreakerVelocity.Size();
+    const float EffectiveImpactSpeed = FMath::Max(ClosingSpeed, BreakerSpeed);
+
+    if (EffectiveImpactSpeed <= 0.0f)
+    {
+        return;
+    }
+
+    // 4. Skalowanie masą niszczącego (np. 500kg głaz uderza mocniej niż 10kg stołek)
+    const float MassFactor = FMath::Clamp(BreakerMass / 50.0f, 0.5f, 3.5f);
+    const float ScaledImpactDamage = EffectiveImpactSpeed * MassFactor;
+
+    // 5. Aplikujemy obrażenia kinetyczne na cel oraz odrzut/recoil na uderzającego
+    if (VictimDamageable)
+    {
+        VictimDamageable->ApplyKineticImpact(ScaledImpactDamage, BreakerActor);
+    }
+    if (BreakerDamageable)
+    {
+        BreakerDamageable->ApplyKineticImpact(EffectiveImpactSpeed, VictimActor);
+    }
+
+    // 6. Odpowiedź pędu/odrzutu dla postaci (np. gracz lub potwory z KnockbackComponent)
+    if (UKnockbackComponent* TargetKnockback = VictimActor->FindComponentByClass<UKnockbackComponent>())
+    {
+        FVector KnockbackDir = (VictimActor->GetActorLocation() - BreakerActor->GetActorLocation()).GetSafeNormal();
+        if (KnockbackDir.IsNearlyZero())
+        {
+            KnockbackDir = -Hit.ImpactNormal;
+        }
+        KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.25f, 0.1f, 1.0f);
+        KnockbackDir.Normalize();
+        TargetKnockback->ApplyImpulseForce(KnockbackDir, ScaledImpactDamage, BreakerActor);
+    }
+
+    // 7. PUNCH-THROUGH:
+    // Jeśli cel uległ zniszczeniu, a uderzający obiekt przetrwał:
+    const bool bVictimDestroyed = VictimDamageable && VictimDamageable->IsDestroyed();
+    const bool bBreakerAlive = !BreakerDamageable || !BreakerDamageable->IsDestroyed();
+
+    if (bVictimDestroyed && bBreakerAlive)
+    {
+        // Wyłączamy kolizję zniszczonego celu natychmiast
+        if (VictimComp)
+        {
+            VictimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        }
+
+        // Kierunek penetracji przez przeszkodę:
+        // Wektor od środka niszczyciela w stronę celu (BreakerToVictim)
+        const FVector BreakerToVictim = VictimActor->GetActorLocation() - BreakerActor->GetActorLocation();
+        FVector PenetrationDir = -Hit.ImpactNormal;
+
+        // Upewniamy się, że wektor penetracji wskazuje w stronę przeszkody (w głąb), a nie w tył
+        if (FVector::DotProduct(PenetrationDir, BreakerToVictim) < 0.0f)
+        {
+            PenetrationDir = -PenetrationDir;
+        }
+
+        // Kluczowe zabezpieczenie przed podskakiwaniem w sufit lub nurkowaniem w podłogę:
+        // Wymuszamy Z = 0, aby obiekt leciał czysto poziomo przez wyrwę!
+        PenetrationDir.Z = 0.0f;
+        PenetrationDir.Normalize();
+
+        if (PenetrationDir.IsNearlyZero())
+        {
+            PenetrationDir = BreakerToVictim;
+            PenetrationDir.Z = 0.0f;
+            PenetrationDir.Normalize();
+        }
+
+        if (PenetrationDir.IsNearlyZero())
+        {
+            PenetrationDir = FVector::ForwardVector;
+        }
+
+        const float Retention = FMath::Clamp(PunchThroughRetention, 0.1f, 1.0f);
+        const FVector PunchVelocity = PenetrationDir * (EffectiveImpactSpeed * Retention);
+
+        if (ACharacter* Character = Cast<ACharacter>(BreakerActor))
+        {
+            Character->LaunchCharacter(PunchVelocity, true, true);
+
+            UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary] Punch-Through (Character): %s pierced %s with Velocity: %s"),
+                *Character->GetName(), *VictimActor->GetName(), *PunchVelocity.ToString());
+        }
+        else if (BreakerComp && BreakerComp->IsSimulatingPhysics())
+        {
+            BreakerComp->SetPhysicsLinearVelocity(PunchVelocity);
+            BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * 0.2f);
+            BreakerComp->WakeRigidBody();
+
+            UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary] Punch-Through (Physics Body): %s pierced %s with Velocity: %s"),
+                *BreakerActor->GetName(), *VictimActor->GetName(), *PunchVelocity.ToString());
+        }
+    }
 }
 
 bool UKineticForceLibrary::HasExplosionLineOfSight(

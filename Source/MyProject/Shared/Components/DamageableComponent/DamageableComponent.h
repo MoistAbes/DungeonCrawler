@@ -38,7 +38,7 @@ public:
     
     /** Aplikuje obrażenia kinetyczne na podstawie prędkości uderzenia (cm/s), uwzględniając próg i mnożnik (tylko na serwerze) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
-    void ApplyKineticImpact(float ImpactSpeed);
+    void ApplyKineticImpact(float ImpactSpeed, AActor* DamageCauser = nullptr);
 
     // --- Stan i Odporności ---
 

@@ -57,7 +57,7 @@ void AVolatileProp::OnDropped(AActor* Dropper, const FVector& LaunchVelocity)
     bDroppedSafely = !bHasThrowForce;
 }
 
-void AVolatileProp::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+void AVolatileProp::HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
                                      UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                      const FHitResult& Hit)
 {
@@ -89,7 +89,7 @@ void AVolatileProp::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor
         // Jeśli upadek był z bezpiecznej wysokości pod nogi (np. < 650 cm/s), amortyzujemy uderzenie i nie detonujemy
         if (EffectiveImpactSpeed <= MaxSafeDropSpeed)
         {
-            Super::HandleImpactDamage(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
+            Super::HandleComponentHit(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
             return;
         }
     }
@@ -118,7 +118,7 @@ void AVolatileProp::HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor
     }
 
     // 5. Standardowe lekkie uderzenia, turlanie i ocieranie
-    Super::HandleImpactDamage(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
+    Super::HandleComponentHit(HitComponent, OtherActor, OtherComp, NormalImpulse, Hit);
 }
 
 void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)

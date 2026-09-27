@@ -83,10 +83,11 @@ classDiagram
         #float CellSize
         #float SubsystemTickInterval
         +IsValidSurfaceTarget(Actor) bool
-        +PaintSurfaceFromHit(Hit, Radius, Status, Duration, Instigator) int32
-        +PaintSurface(Location, Normal, Radius, Status, Duration, Instigator) int32
-        +ApplyStatusToCell(Coord, Status, Duration, Instigator, Material, bCheckOverlappingZones) bool
-        +ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator) int32
+        +ApplyStatusFromHit(Hit, Radius, Status, Duration, Instigator, Tier) int32
+        +ApplyStatusToSurface(Location, Normal, Radius, Status, Duration, Instigator, Tier) int32
+        -ApplyStatusInArea(Location, Normal, Radius, Status, Duration, BurstOrigin, ProcessedCoords, Instigator, Tier) int32
+        +ApplyStatusToCell(Coord, Status, Duration, Instigator, Material, SurfaceActor, Tier) bool
+        +ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator, Tier) int32
         +ClearCellsInBounds(BoundingBox) int32
         +RegisterStatusZone(Zone)
         +UnregisterStatusZone(Zone)
@@ -182,6 +183,31 @@ Wszelkie zmiany stanu komórki (niezależnie czy wywołane wybuchem, pociskiem, 
 4. Dodaje lub odświeża statusy wynikowe (`Plan.StatusesToApply`).
 5. **Natychmiastowa ewaluacja stref (`bCheckOverlappingZones`):** Jeśli komórka znajduje się pod zarejestrowaną strefą wolumetryczną (np. świeży olej wylany pod chmurę prądu), funkcja natychmiast aplikuje żywioł strefy z flagą `bCheckOverlappingZones = false` (zabezpieczenie przed pętlą rekurencyjną).
 6. Rozgłasza delegat `OnSurfaceCellChanged` dla efektów wizualnych i dźwiękowych.
+
+### 3.4. Pipeline Aplikacji Statusów na Siatkę (PointImpact vs RadialBurst)
+
+Zarządzanie aplikacją statusów w siatce lochu jest ściśle rozdzielone na dedykowane metody w oparciu o geometrię zdarzenia i perspektywę Line-of-Sight (LoS):
+
+1. **`ApplyStatusFromHit` (Hit Resolver):**
+   - Publiczne API. Rozwiązuje uderzenia pociskami, rzutami i obiektami fizycznymi.
+   - Weryfikuje cel za pomocą `IsValidSurfaceTarget(HitActor)` (odrzuca postacie i dynamiczne rekwizyty posiadające własne komponenty statusów).
+   - Wyznacza normalną uderzenia i przekazuje wykonanie do `ApplyStatusToSurface`.
+
+2. **`ApplyStatusToSurface` (PointImpact — Pojedyncza Powierzchnia 2D):**
+   - Tworzy dysk statusu na jednej konkretnej ścianie, suficie lub posadzce (np. rozbicie flakonu).
+   - Wyznacza komórki w promieniu na płaszczyźnie stycznej (`TangentU`, `TangentV`).
+   - Weryfikuje LoS wzdłuż powierzchni za pomocą `SurfaceGridGeometryUtils::HasSurfaceLineOfSight`.
+   - Korzysta z `LineTraceMultiByChannel` (`ECC_Visibility`) na wysokości 10 cm nad płaszczyzną, wykrywając przeszkody poprzeczne (filary, prostopadłe ściany, skrzynie) bez ryzyka zablokowania na drobnych nierównościach podłoża.
+
+3. **`ApplyElementalBurst` & `ApplyStatusInArea` (RadialBurst — Eksplozja Przestrzenna 3D):**
+   - Wszechkierunkowy wybuch 3D (detonacja beczki, bomby lub początkowa projekcja strefy `AVolumetricStatusZone`).
+   - **Krok 1 (Ewaluacja Istniejących Komórek):** Odpytuje aktywne `ActiveCells` w promieniu sferycznym pod kątem bezpośredniej widoczności 3D (`HasDirectBurstLineOfSight`).
+   - **Krok 2 (18 Promieni Skanujących):** Wystrzeliwuje promienie w 18 kierunkach 3D (`GetBurstScanDirections`). Dla każdego trafionego fundamentu oblicza promień rozbryzgu i wywołuje `ApplyStatusInArea`.
+   - **Krok 3 (`ApplyStatusInArea`):** Iteruje po komórkach trafionego fragmentu. Wykonuje Drop-Off Test (`CheckSurfacePresenceAt`) oraz ścisłą weryfikację 3D LoS:
+     - `SurfaceGridGeometryUtils::HasDirectBurstLineOfSight` z użyciem `LineTraceMultiByChannel`.
+     - **Backface Culling (`Dot <= 0`):** Odrzuca powierzchnie odwrócone tyłem do fali wybuchu.
+     - **Weryfikacja Przeszkód 3D:** Sprawdza całą trasę promienia. Pomija płaskie muśnięcia tej samej płyty podłogowej (`PlaneDist < 8 cm`, `Dot > 0.7`), ale bezwzględnie blokuje wybuch przy napotkaniu ścian, filarów i rekwizytów.
+     - Przekazuje referencję `TSet<FSurfaceCellCoord>& ProcessedCoords`, zabezpieczając przed wielokrotnym nakładaniem statusu na tę samą komórkę w jednym wybuchu.
 
 ---
 

@@ -46,7 +46,7 @@ public:
 protected:
     virtual void HandleOnDestroyed(AActor* DestroyedActor) override;
 
-    virtual void HandleImpactDamage(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+    virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
                                    UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
                                    const FHitResult& Hit) override;
 

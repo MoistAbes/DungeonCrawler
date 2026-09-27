@@ -748,7 +748,7 @@ Environment/Zones/Shapes/
 
 
 
-Surface effects are handled by `UDungeonSurfaceSubsystem` (a `UWorldSubsystem`) as a sparse 3D surface cell grid (`TMap<FSurfaceCellCoord, FSurfaceCellData>`) with 6-face orientation awareness (`ESurfaceFaceDirection`). Active status zones (`AStatusZoneBase`) automatically register with the surface subsystem upon spawn, enabling continuous evaluation (`ProcessGridTick`) and instantaneous reactions when surfaces are painted under active volumetric zones (`ApplyStatusToCell`).
+Surface effects are handled by `UDungeonSurfaceSubsystem` (a `UWorldSubsystem`) as a sparse 3D surface cell grid (`TMap<FSurfaceCellCoord, FSurfaceCellData>`) with 6-face orientation awareness (`ESurfaceFaceDirection`). Active status zones (`AStatusZoneBase`) automatically register with the surface subsystem upon spawn, enabling continuous evaluation (`ProcessGridTick`) and instantaneous reactions when status is applied to surfaces under active volumetric zones (`ApplyStatusToCell`).
 
 The system uses a clean 3-tier architecture:
 - **`UDungeonSurfaceSubsystem` (Storage & Tick Orchestrator):** Manages `ActiveCells`, periodic tick (`ProcessGridTick`), structural damage aggregation (`ProcessSurfaceStructuralDamage`), and delegates spatial geometry to `SurfaceGridGeometryUtils` and chemical rules to `UElementalReactionRules`.
@@ -1478,9 +1478,23 @@ Generic gameplay functionality such as:
 
 \* carrying,
 
+\* kinetic collisions & punch-through,
+
 
 
 should use shared components/interfaces where appropriate instead of being independently reimplemented by each dungeon actor.
+
+### Collision Normalization & Kinetic Impacts
+
+All destructible structures (`ADungeonStructureBase`) and physical interactive props (`AInteractivePropBase`, `AVolatileProp`) normalize their rigid body collision handling to a unified signature:
+
+```cpp
+virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
+                               UPrimitiveComponent* OtherComp, FVector NormalImpulse, 
+                               const FHitResult& Hit);
+```
+
+Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`. This eliminates redundant per-actor collision math, avoids Chaos solver velocity spikes, and ensures flat forward penetration (`PenetrationDir.Z = 0.0f`).
 
 
 
@@ -1696,7 +1710,7 @@ The project contains reusable Unreal helper libraries, including:
 
 
 
-\* `UKineticForceLibrary`
+\* `UKineticForceLibrary` — reusable kinetic force, explosion, and unified impact/punch-through operations (`HandleKineticImpactAndPunchThrough`). Automatically distinguishes breaker vs victim by velocity, applies reciprocal kinetic damage, and calculates horizontal punch-through through destroyed barriers.
 
 \* `UStatusZoneLibrary`
 

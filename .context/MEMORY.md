@@ -78,7 +78,7 @@ The following systems already exist and should be reused or extended when applic
 
 \* `AStatusZoneBase` and derived status-zone actors — environmental status zones with automatic `UDungeonSurfaceSubsystem` registration and point geometry evaluation.
 
-\* `UKineticForceLibrary` — shared kinetic/physics force operations.
+\* `UKineticForceLibrary` — shared kinetic/physics force operations and centralized kinetic impact/punch-through (`HandleKineticImpactAndPunchThrough` with breaker/victim resolution and flat horizontal penetration).
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 

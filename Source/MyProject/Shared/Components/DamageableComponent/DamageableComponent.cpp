@@ -100,7 +100,7 @@ void UDamageableComponent::SetResistanceModifier(EDamageType DamageType, float M
     ResistanceModifiers.FindOrAdd(DamageType) = Modifier;
 }
 
-void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
+void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed, AActor* DamageCauser)
 {
     REQUIRE_AUTHORITY();
 
@@ -128,7 +128,7 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed)
         UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticService]%s %s registered impact at Speed: %.1f cm/s | Damage: %.1f"),
             *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), ImpactSpeed, CalculatedDamage);
 
-        ApplyDamage(CalculatedDamage, EDamageType::Kinetic);
+        ApplyDamage(CalculatedDamage, EDamageType::Kinetic, DamageCauser);
     }
 }
 
@@ -165,7 +165,7 @@ void UDamageableComponent::HandleCharacterLanded(const FHitResult& Hit)
             const float FallSpeed = FMath::Abs(CMC->GetLastUpdateVelocity().Z);
             if (FallSpeed > 0.0f)
             {
-                ApplyKineticImpact(FallSpeed);
+                ApplyKineticImpact(FallSpeed, Character);
             }
         }
     }
@@ -197,7 +197,7 @@ void UDamageableComponent::HandleCharacterHit(
             // jest autorytatywnie obsługiwane przez LandedDelegate.
             if (ImpactSpeed > 0.0f && Hit.ImpactNormal.Z <= 0.7f)
             {
-                ApplyKineticImpact(ImpactSpeed);
+                ApplyKineticImpact(ImpactSpeed, OtherActor);
             }
         }
     }
