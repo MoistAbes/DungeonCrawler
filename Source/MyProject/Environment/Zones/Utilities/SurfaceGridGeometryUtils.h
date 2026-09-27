@@ -51,6 +51,15 @@ namespace SurfaceGridGeometryUtils
 		const FVector& SurfaceNormal,
 		const FCollisionQueryParams& Params);
 
+	/** Sprawdza, czy punkt na powierzchni ma bezpośrednią, nieprzerwaną widoczność 3D z punktu wybuchu (LoS dla eksplozji) */
+	MYPROJECT_API bool HasDirectBurstLineOfSight(
+		const UWorld* World,
+		const FVector& BurstOrigin,
+		const FVector& TargetSurfacePoint,
+		const FVector& SurfaceNormal,
+		const AActor* TargetSurfaceActor,
+		const FCollisionQueryParams& Params);
+
 	/** Wyznacza wektory styczne płaszczyzny dla zadanego kierunku ściany lub podłogi */
 	MYPROJECT_API void GetFaceTangents(ESurfaceFaceDirection Face, FVector& OutTangentU, FVector& OutTangentV);
 

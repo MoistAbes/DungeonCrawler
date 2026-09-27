@@ -125,7 +125,8 @@ public:
 		float Duration,
 		AActor* Instigator = nullptr,
 		TSet<FSurfaceCellCoord>* ProcessedCoords = nullptr,
-		uint8 Tier = 0);
+		uint8 Tier = 0,
+		const FVector* BurstOrigin = nullptr);
 
 	/**
 	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.

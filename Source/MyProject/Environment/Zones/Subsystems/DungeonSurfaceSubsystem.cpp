@@ -312,7 +312,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	AActor* Instigator,
 	uint8 Tier)
 {
-	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr, Tier);
+	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr, Tier, nullptr);
 }
 
 int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
@@ -323,7 +323,8 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 	float Duration,
 	AActor* Instigator,
 	TSet<FSurfaceCellCoord>* ProcessedCoords,
-	uint8 Tier)
+	uint8 Tier,
+	const FVector* BurstOrigin)
 {
 	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
 	{
@@ -344,6 +345,10 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 
 	int32 AffectedCount = 0;
 	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfacePaintValidation), false, Instigator);
+	if (Instigator)
+	{
+		TraceParams.AddIgnoredActor(Instigator);
+	}
 
 	for (int32 du = -StepRadius; du <= StepRadius; ++du)
 	{
@@ -357,17 +362,30 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 
 			const FVector SamplePoint = HitLocation + Offset;
 
-			// 1. Line of Sight (LoS): Sprawdzamy, czy między punktem uderzenia a próbką nie ma przeszkody (filar, narożnik)
-			if (!Offset.IsNearlyZero() && !SurfaceGridGeometryUtils::HasSurfaceLineOfSight(GetWorld(), HitLocation, SamplePoint, Normal, TraceParams))
-			{
-				continue;
-			}
-
-			// 2. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura (brak wiszenia w powietrzu poza filarem)
+			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura (brak wiszenia w powietrzu poza filarem)
 			FHitResult SurfaceHit;
 			if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(GetWorld(), SamplePoint, Normal, SurfaceHit, TraceParams))
 			{
 				continue;
+			}
+
+			// 2. Line of Sight (LoS):
+			// Jeśli wybuch pochodzi z przestrzennego źródła 3D (BurstOrigin, np. bomba):
+			// weryfikujemy czy fala wybuchu ma bezpośrednią linię wzroku z BurstOrigin do rzeczywistego punktu powierzchni!
+			if (BurstOrigin)
+			{
+				if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(GetWorld(), *BurstOrigin, SurfaceHit.ImpactPoint, Normal, SurfaceHit.GetActor(), TraceParams))
+				{
+					continue;
+				}
+			}
+			else if (!Offset.IsNearlyZero())
+			{
+				// Dla lokalnych uderzeń punktowych (np. rozbicie flakonu na ścianie) sprawdzamy LoS po powierzchni od punktu uderzenia
+				if (!SurfaceGridGeometryUtils::HasSurfaceLineOfSight(GetWorld(), HitLocation, SamplePoint, Normal, TraceParams))
+				{
+					continue;
+				}
 			}
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
@@ -578,28 +596,25 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 
 	// 2. Bezpośrednia ewaluacja istniejących aktywnych komórek w sferze wybuchu z Line-of-Sight
 	TArray<FSurfaceCellCoord> CellsInRadius;
+	FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(BurstCellLoS), false, Instigator);
+	if (Instigator)
+	{
+		LoSParams.AddIgnoredActor(Instigator);
+	}
+
 	for (const auto& Pair : ActiveCells)
 	{
 		const FSurfaceCellCoord& Coord = Pair.Key;
 		const FVector CellWorldPos = Coord.ToWorldLocation(SafeCellSize);
 		if (FVector::DistSquared(Origin, CellWorldPos) <= RadiusSq)
 		{
-			// Line of Sight: czy fala wybuchu widzi tę komórkę bez przeszkód (np. filara lub narożnika ściany)?
-			const FVector CellSurfacePos = CellWorldPos + SurfaceGridUtils::FaceDirectionToNormal(Coord.Face) * (SafeCellSize * 0.45f);
-			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(BurstCellLoS), false, Instigator);
-			FHitResult LoSHit;
-			if (GetWorld()->LineTraceSingleByChannel(LoSHit, Origin, CellSurfacePos, ECC_WorldStatic, LoSParams))
+			const FVector CellNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
+			const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * 0.45f);
+
+			// Ścisły LoS 3D: czy fala wybuchu widzi tę komórkę bez przeszkód (filar, narożnik ściany, rekwizyt)
+			if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(GetWorld(), Origin, CellSurfacePos, CellNormal, Pair.Value.SurfaceActor.Get(), LoSParams))
 			{
-				if (LoSHit.bBlockingHit && LoSHit.Distance < FVector::Dist(Origin, CellSurfacePos) - 15.0f)
-				{
-					// Sprawdzamy, czy uderzenie nie nastąpiło w samą płaszczyznę komórki (np. nierówności/pęknięcia podłogi)
-					const bool bIsParallelSurface = FVector::DotProduct(LoSHit.ImpactNormal, SurfaceGridUtils::FaceDirectionToNormal(Coord.Face)) > 0.6f;
-					if (!bIsParallelSurface)
-					{
-						// Przeszkoda poprzeczna (ściana, filar) zasłania tę komórkę przed falą wybuchu!
-						continue;
-					}
-				}
+				continue;
 			}
 
 			CellsInRadius.Add(Coord);
@@ -653,7 +668,8 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 					Duration,
 					Instigator,
 					&ProcessedCoords,
-					Tier);
+					Tier,
+					&Origin);
 			}
 		}
 	}

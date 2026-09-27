@@ -124,12 +124,89 @@ namespace SurfaceGridGeometryUtils
 		const FVector LoSEnd = TargetLocation + SurfaceNormal * 10.0f;
 
 		FHitResult LoSHit;
-		if (World->LineTraceSingleByChannel(LoSHit, LoSStart, LoSEnd, ECC_WorldStatic, Params))
+		if (World->LineTraceSingleByChannel(LoSHit, LoSStart, LoSEnd, ECC_Visibility, Params))
 		{
-			// Wykrywamy przeszkody poprzeczne/pionowe do powierzchni (ściany, kolumny)
+			// Wykrywamy przeszkody poprzeczne/pionowe do powierzchni (ściany, kolumny, skrzynie, rekwizyty)
 			const bool bIsObstacle = FMath::Abs(FVector::DotProduct(LoSHit.ImpactNormal, SurfaceNormal)) < 0.6f;
-			if (bIsObstacle && LoSHit.Distance < FVector::Dist(LoSStart, LoSEnd) - 10.0f)
+			if (bIsObstacle && LoSHit.Distance < FVector::Dist(LoSStart, LoSEnd) - 2.0f)
 			{
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	bool HasDirectBurstLineOfSight(
+		const UWorld* World,
+		const FVector& BurstOrigin,
+		const FVector& TargetSurfacePoint,
+		const FVector& SurfaceNormal,
+		const AActor* TargetSurfaceActor,
+		const FCollisionQueryParams& Params)
+	{
+		if (!World)
+		{
+			return false;
+		}
+
+		const FVector ToOrigin = BurstOrigin - TargetSurfacePoint;
+		const float DistSq = ToOrigin.SizeSquared();
+		if (DistSq <= 1.0f)
+		{
+			return true;
+		}
+
+		const float Dist = FMath::Sqrt(DistSq);
+		const FVector DirToOrigin = ToOrigin / Dist;
+
+		// 1. Sprawdzenie orientacji normalnej (Backface Culling):
+		// Powierzchnia, której normalna jest odwrócona od punktu wybuchu (np. tył ściany, tył filara),
+		// fizycznie nie może otrzymać bezpośredniego impulsu wybuchu.
+		if (FVector::DotProduct(SurfaceNormal, DirToOrigin) < -0.05f)
+		{
+			return false;
+		}
+
+		// 2. Promień testowy LoS:
+		// Cel odsuwamy o 4 cm wzdłuż normalnej w przestrzeń lochu,
+		// aby promień nie uderzył w mikronierówności samej powierzchni docelowej.
+		const FVector LoSTarget = TargetSurfacePoint + SurfaceNormal * 4.0f;
+
+		// Jeśli wybuch nastąpił tuż przy podłożu/ścianie, start odsuwamy minimalnie w stronę wolnej przestrzeni
+		const FVector LoSStart = BurstOrigin + SurfaceNormal * 2.0f;
+
+		FHitResult Hit;
+		if (World->LineTraceSingleByChannel(Hit, LoSStart, LoSTarget, ECC_Visibility, Params))
+		{
+			if (Hit.bBlockingHit)
+			{
+				// A. Jeśli promień uderzył w samą powierzchnię docelową tuż przy celu (tolerancja na styk geometrii)
+				if (TargetSurfaceActor && Hit.GetActor() == TargetSurfaceActor)
+				{
+					if (Hit.Distance >= Dist - 15.0f)
+					{
+						return true;
+					}
+
+					// Jeśli uderzył w ten sam aktor wcześniej, sprawdzamy czy to nie przeszkoda poprzeczna
+					const bool bIsParallel = FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal) > 0.6f;
+					if (bIsParallel)
+					{
+						return true;
+					}
+				}
+
+				// B. Obsługa sąsiadujących, współpłaszczyznowych klocków tej samej podłogi/ściany (np. moduły 300x300 cm)
+				// Jeśli promień drasnął styk innej płyty podłogowej, ale jej normalna jest identyczna i leży w tej samej płaszczyźnie
+				const bool bIsParallelNormal = FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal) > 0.7f;
+				const float PlaneDist = FMath::Abs(FVector::DotProduct(Hit.ImpactPoint - TargetSurfacePoint, SurfaceNormal));
+				if (bIsParallelNormal && PlaneDist < 8.0f && Hit.Distance >= Dist - 25.0f)
+				{
+					return true;
+				}
+
+				// Promień natrafił na rzeczywistą przeszkodę (filar, ścianę poprzeczną, barykadę, skrzynię, rekwizyt)
 				return false;
 			}
 		}
