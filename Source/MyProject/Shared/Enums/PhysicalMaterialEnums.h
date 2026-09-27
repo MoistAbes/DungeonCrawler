@@ -107,6 +107,10 @@ namespace PhysicalMaterialUtils
 			{
 				return 1.0f; // 100% odporności na ogień i prąd (kamień nie płonie i nie niszczy się od prądu)
 			}
+			if (DamageType == EDamageType::Kinetic)
+            {
+            	return 0.75f; // 75% redukcji obrażeń kinetycznych (odporny na stłuczenie)
+            }
 			return 0.0f;
 
 		case EPhysicalMaterialType::Metal:

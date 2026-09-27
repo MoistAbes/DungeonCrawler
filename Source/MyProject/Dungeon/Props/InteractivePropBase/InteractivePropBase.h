@@ -48,6 +48,13 @@ public:
     UFUNCTION(BlueprintPure, Category = "Custom|Components")
     UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
 
+    /** Zwraca ostatnią zarejestrowaną prędkość lotu (sprzed kontaktu z przeszkodą) */
+    UFUNCTION(BlueprintPure, Category = "Custom|Kinetic")
+    FVector GetLastFlightVelocity() const { return LastFlightVelocity; }
+
+    /** Ustawia ostatnią prędkość lotu (np. po przebiciu przeszkody) */
+    void SetLastFlightVelocity(const FVector& NewVel) { LastFlightVelocity = NewVel; }
+
     // --- IInteractableInterface ---
     virtual void Interact(AActor* Interactor) override;
     virtual bool CanInteract(const AActor* Interactor) const override;
@@ -107,6 +114,10 @@ protected:
     /** Mnożnik siły odrzutu przekazywanego uderzonemu celowi (skalowany dodatkowo masą propa) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.1"))
     float KnockbackStrengthMultiplier = 1.0f;
+
+    /** Ostatnia zarejestrowana prędkość lotu obiektu w ruchu (cm/s), niezaburzona przez solver kontaktu Chaos */
+    UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Custom|Kinetic")
+    FVector LastFlightVelocity = FVector::ZeroVector;
 
     UFUNCTION()
     virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 

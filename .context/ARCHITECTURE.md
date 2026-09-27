@@ -1494,7 +1494,13 @@ virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* Other
                                const FHitResult& Hit);
 ```
 
-Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`. This preserves the breaker's natural velocity trajectory (falling down through breakable floors or moving forward through walls) scaled by `PunchThroughRetention`, avoiding artificial velocity spikes or directional distortion. Player air control is completely disabled (`AirControl = 0.0f`) to ensure full physical inertia during jumps, falls, and kinetic launches.
+Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`:
+* **Zero-Overhead Pre-Collision Caching (No Tick)**: `AInteractivePropBase` maintains `PrimaryActorTick.bCanEverTick = false` (zero tick overhead for dormant dungeon props). Pre-collision flight velocity is tracked event-driven: seeded upon throw (`OnDropped`), queried via live physics velocity (`GetPhysicsLinearVelocity()`), updated on punch-through (`SetLastFlightVelocity`), and reset when coming to rest or grabbed. For characters, `CMC->GetLastUpdateVelocity()` provides the uncorrupted flight vector during floor breaks.
+* **Dynamic Momentum Retention**: Punch-through retention is dynamically computed from the ratio of breaker momentum ($P = \text{Mass} \times \text{Speed}$) to obstacle toughness ($T = \text{Durability} \times 200$), allowing massive boulders to blast through glass almost unhindered ($\sim 98\%$), while lighter objects or heavier barricades impose proportional drag ($[0.20, 0.98]$).
+* **Pure Trajectory Preservation**: The punch-through velocity is directly $\vec{V}_{\text{incoming}} \times \text{Retention}$. It avoids snapping or decomposing along mesh contact normals (`-Hit.ImpactNormal`), guaranteeing that oblique throws, side angles, and multi-wall penetration cascades maintain a smooth, natural flight vector without artificial jerks.
+* **Cascade Continuity**: `AInteractivePropBase::SetLastFlightVelocity(PunchVelocity)` immediately updates the prop's cached vector upon piercing, allowing consecutive walls in rapid succession to decay momentum smoothly.
+* **Full Physical Inertia**: Player air control is completely disabled (`AirControl = 0.0f` and early exit in movement input during falls) to ensure full physical inertia during jumps, falls, and kinetic launches.
+* **Structured Diagnostics**: Rich logging on `LogDungeonPhysics` traces `[KineticImpact]` (mass, speeds, impact normal, scaled damage) and `[PunchThrough]` (pre-impact velocity, retention percentage, exit velocity).
 
 
 

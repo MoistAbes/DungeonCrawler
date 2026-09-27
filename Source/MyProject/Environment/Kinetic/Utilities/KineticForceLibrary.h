@@ -40,6 +40,7 @@ public:
         AActor* TargetActor,
         UPrimitiveComponent* TargetComp,
         const FHitResult& Hit,
+        const FVector& NormalImpulse = FVector::ZeroVector,
         float PunchThroughRetention = 0.85f);
 
     /**

@@ -89,6 +89,7 @@ void ADungeonStructureBase::HandleComponentHit(
 		this,
 		StructureMesh,
 		Hit,
+		NormalImpulse,
 		PunchThroughVelocityRetention);
 }
 

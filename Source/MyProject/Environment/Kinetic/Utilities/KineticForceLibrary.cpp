@@ -11,11 +11,28 @@
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Networking/NetworkFunctionLibrary.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
 
 namespace KineticHelpers
 {
     static FVector GetEntityVelocity(const AActor* Actor, const UPrimitiveComponent* Comp)
     {
+        if (const AInteractivePropBase* Prop = Cast<AInteractivePropBase>(Actor))
+        {
+            const FVector FlightVel = Prop->GetLastFlightVelocity();
+            const FVector PhysVel = (Comp && Comp->IsSimulatingPhysics()) ? Comp->GetPhysicsLinearVelocity() : FVector::ZeroVector;
+            // Jeśli obiekt posiada zarejestrowaną prędkość lotu sprzed zderzenia i jest ona większa od bieżącej, używamy jej
+            if (FlightVel.SizeSquared() > PhysVel.SizeSquared() && !FlightVel.IsNearlyZero())
+            {
+                return FlightVel;
+            }
+            if (!PhysVel.IsNearlyZero())
+            {
+                return PhysVel;
+            }
+            return FlightVel;
+        }
         if (Comp && Comp->IsSimulatingPhysics())
         {
             return Comp->GetPhysicsLinearVelocity();
@@ -24,7 +41,9 @@ namespace KineticHelpers
         {
             if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
             {
-                return CMC->GetLastUpdateVelocity();
+                const FVector LastUpdateVel = CMC->GetLastUpdateVelocity();
+                const FVector CharVel = Character->GetVelocity();
+                return (LastUpdateVel.SizeSquared() > CharVel.SizeSquared()) ? LastUpdateVel : CharVel;
             }
             return Character->GetVelocity();
         }
@@ -112,6 +131,7 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
     AActor* TargetActor,
     UPrimitiveComponent* TargetComp,
     const FHitResult& Hit,
+    const FVector& NormalImpulse,
     float PunchThroughRetention)
 {
     if (!InstigatorActor || !TargetActor || InstigatorActor == TargetActor)
@@ -179,6 +199,19 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
     const float MassFactor = FMath::Clamp(BreakerMass / 50.0f, 0.5f, 3.5f);
     const float ScaledImpactDamage = EffectiveImpactSpeed * MassFactor;
 
+    UE_LOG(LogDungeonPhysics, Log, TEXT("[KineticImpact]%s Breaker: %s (Mass: %.1f kg, Speed: %.1f cm/s, Vel: %s) -> Victim: %s (HP: %.1f/%.1f) | Normal: %s | ClosingSpeed: %.1f cm/s | ScaledDamage: %.1f"),
+        *NetUtils::GetNetRolePrefix(BreakerActor),
+        *BreakerActor->GetName(),
+        BreakerMass,
+        EffectiveImpactSpeed,
+        *BreakerVelocity.ToString(),
+        *VictimActor->GetName(),
+        VictimDamageable ? VictimDamageable->GetCurrentDurability() : 0.0f,
+        VictimDamageable ? VictimDamageable->GetMaxDurability() : 0.0f,
+        *Hit.ImpactNormal.ToString(),
+        ClosingSpeed,
+        ScaledImpactDamage);
+
     // 5. Aplikujemy obrażenia kinetyczne na cel oraz odrzut/recoil na uderzającego
     if (VictimDamageable)
     {
@@ -214,56 +247,93 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
         {
             VictimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
+        VictimActor->SetActorEnableCollision(false);
 
-        const float Retention = FMath::Clamp(PunchThroughRetention, 0.1f, 1.0f);
-        FVector PunchVelocity = FVector::ZeroVector;
+        // Dynamiczne wyliczenie zachowania pędu (Dynamic Punch-Through Retention)
+        // Bazuje na relacji pędu niszczyciela (Masa x Prędkość) do wytrzymałości przeszkody (Toughness)
+        float EffectiveRetention = PunchThroughRetention;
 
-        // Kierunek penetracji przez przeszkodę:
-        FVector PenetrationDir = -Hit.ImpactNormal;
-        const FVector BreakerToVictim = VictimActor->GetActorLocation() - BreakerActor->GetActorLocation();
-        if (FVector::DotProduct(PenetrationDir, BreakerToVictim) < 0.0f)
+        const float BreakerMomentum = BreakerMass * EffectiveImpactSpeed;
+        if (BreakerMomentum > 0.0f)
         {
-            PenetrationDir = -PenetrationDir;
-        }
-        PenetrationDir.Normalize();
-
-        // 1. Jeśli niszczyciel poruszał się w stronę przeszkody (naturalny wektor lotu/ruchu):
-        // zachowujemy jego naturalny wektor prędkości ze współczynnikiem zachowania pędu (Retention)
-        const float ApproachDot = FVector::DotProduct(BreakerVelocity, PenetrationDir);
-        if (ApproachDot > 50.0f)
-        {
-            PunchVelocity = BreakerVelocity * Retention;
-        }
-        else
-        {
-            // 2. Jeśli solver Chaosu zdążył już odbić bryłę fizyczną w tył lub prędkość była zerowa:
-            // wyprowadzamy wektor w głąb przeszkody na bazie normalnej trafienia.
-            // Dla ścian pionowych (|PenetrationDir.Z| < 0.2f) zerujemy Z, by uniknąć podbijania w sufit.
-            if (FMath::Abs(PenetrationDir.Z) < 0.2f)
+            float ObstacleToughness = 40.0f;
+            if (VictimDamageable)
             {
-                PenetrationDir.Z = 0.0f;
-                PenetrationDir.Normalize();
+                ObstacleToughness = VictimDamageable->GetMaxDurability();
+            }
+            else if (VictimComp)
+            {
+                ObstacleToughness = VictimComp->GetMass();
             }
 
-            const float Speed = BreakerVelocity.Size() > 50.0f ? BreakerVelocity.Size() : EffectiveImpactSpeed;
-            PunchVelocity = PenetrationDir * (Speed * Retention);
+            // Przelicznik: Toughness na zapotrzebowanie pędu
+            const float ResistanceCost = ObstacleToughness * 200.0f;
+            const float VelocityLossRatio = ResistanceCost / BreakerMomentum;
+
+            // Naturalny współczynnik zachowania pędu w granicach [0.20, 0.98]
+            const float CalculatedRetention = FMath::Clamp(1.0f - VelocityLossRatio, 0.20f, 0.98f);
+
+            // Jeśli wywołujący przekazał customowy mnożnik różny od domyślnego 0.85f (np. ze struktury),
+            // skalujemy wynik
+            if (FMath::IsNearlyEqual(PunchThroughRetention, 0.85f, 0.01f))
+            {
+                EffectiveRetention = CalculatedRetention;
+            }
+            else
+            {
+                EffectiveRetention = FMath::Clamp(CalculatedRetention * (PunchThroughRetention / 0.85f), 0.15f, 0.98f);
+            }
+        }
+
+        const float Retention = FMath::Clamp(EffectiveRetention, 0.1f, 1.0f);
+
+        // Punch-Through: obiekt zachowuje swoją prawdziwą trajektorię lotu sprzed kontaktu
+        // bez sztucznego rzutowania na normalną ściany (co zaburzało rzuty pod kątem i kaskady ścian)
+        FVector PunchVelocity = BreakerVelocity * Retention;
+
+        // Awaryjny fallback na wypadek zerowej prędkości wejściowej
+        if (PunchVelocity.IsNearlyZero())
+        {
+            FVector PenetrationDir = (VictimActor->GetActorLocation() - BreakerActor->GetActorLocation()).GetSafeNormal();
+            if (PenetrationDir.IsNearlyZero())
+            {
+                PenetrationDir = -Hit.ImpactNormal;
+            }
+            PunchVelocity = PenetrationDir * (EffectiveImpactSpeed * Retention);
         }
 
         if (ACharacter* Character = Cast<ACharacter>(BreakerActor))
         {
             Character->LaunchCharacter(PunchVelocity, true, true);
-
-            UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary] Punch-Through (Character): %s pierced %s with Velocity: %s"),
-                *Character->GetName(), *VictimActor->GetName(), *PunchVelocity.ToString());
         }
         else if (BreakerComp && BreakerComp->IsSimulatingPhysics())
         {
             BreakerComp->SetPhysicsLinearVelocity(PunchVelocity);
-            BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * 0.2f);
+            BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * 0.5f);
             BreakerComp->WakeRigidBody();
 
-            UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary] Punch-Through (Physics Body): %s pierced %s with Velocity: %s"),
-                *BreakerActor->GetName(), *VictimActor->GetName(), *PunchVelocity.ToString());
+            if (AInteractivePropBase* Prop = Cast<AInteractivePropBase>(BreakerActor))
+            {
+                Prop->SetLastFlightVelocity(PunchVelocity);
+            }
+        }
+
+        UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary]%s [PunchThrough] %s shattered %s! | PreImpactVel: %s (Speed: %.1f) | Retention: %.1f%% | PunchVel: %s (Speed: %.1f)"),
+            *NetUtils::GetNetRolePrefix(BreakerActor),
+            *BreakerActor->GetName(),
+            *VictimActor->GetName(),
+            *BreakerVelocity.ToString(),
+            BreakerVelocity.Size(),
+            Retention * 100.0f,
+            *PunchVelocity.ToString(),
+            PunchVelocity.Size());
+    }
+    else
+    {
+        // Jeśli przeszkoda nie uległa zniszczeniu (odbicie lub wyhamowanie), aktualizujemy zarejestrowaną prędkość
+        if (AInteractivePropBase* Prop = Cast<AInteractivePropBase>(BreakerActor))
+        {
+            Prop->SetLastFlightVelocity(BreakerComp && BreakerComp->IsSimulatingPhysics() ? BreakerComp->GetPhysicsLinearVelocity() : FVector::ZeroVector);
         }
     }
 }

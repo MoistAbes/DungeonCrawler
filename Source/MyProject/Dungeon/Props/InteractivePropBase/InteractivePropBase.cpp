@@ -95,6 +95,7 @@ void AInteractivePropBase::OnGrabbed(AActor* Grabber)
 
     CarryingActor = Grabber;
     RepLaunchVelocity = FVector_NetQuantize::ZeroVector;
+    LastFlightVelocity = FVector::ZeroVector;
     NetUtils::AttachCarriedProp(this, MeshComponent, Grabber);
 }
 
@@ -104,6 +105,7 @@ void AInteractivePropBase::OnDropped(AActor* Dropper, const FVector& LaunchVeloc
 
     CarryingActor = nullptr;
     RepLaunchVelocity = LaunchVelocity;
+    LastFlightVelocity = LaunchVelocity;
 
     NetUtils::DetachCarriedProp(this, MeshComponent, Dropper, LaunchVelocity);
 }
@@ -157,6 +159,7 @@ void AInteractivePropBase::HandleComponentHit(UPrimitiveComponent* HitComponent,
         OtherActor,
         OtherComp,
         Hit,
+        NormalImpulse,
         0.85f);
 }
 
