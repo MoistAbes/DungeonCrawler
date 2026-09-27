@@ -1494,13 +1494,30 @@ virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* Other
                                const FHitResult& Hit);
 ```
 
-Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`:
-* **Zero-Overhead Pre-Collision Caching (No Tick)**: `AInteractivePropBase` maintains `PrimaryActorTick.bCanEverTick = false` (zero tick overhead for dormant dungeon props). Pre-collision flight velocity is tracked event-driven: seeded upon throw (`OnDropped`), queried via live physics velocity (`GetPhysicsLinearVelocity()`), updated on punch-through (`SetLastFlightVelocity`), and reset when coming to rest or grabbed. For characters, `CMC->GetLastUpdateVelocity()` provides the uncorrupted flight vector during floor breaks.
-* **Dynamic Momentum Retention**: Punch-through retention is dynamically computed from the ratio of breaker momentum ($P = \text{Mass} \times \text{Speed}$) to obstacle toughness ($T = \text{Durability} \times 200$), allowing massive boulders to blast through glass almost unhindered ($\sim 98\%$), while lighter objects or heavier barricades impose proportional drag ($[0.20, 0.98]$).
-* **Pure Trajectory Preservation**: The punch-through velocity is directly $\vec{V}_{\text{incoming}} \times \text{Retention}$. It avoids snapping or decomposing along mesh contact normals (`-Hit.ImpactNormal`), guaranteeing that oblique throws, side angles, and multi-wall penetration cascades maintain a smooth, natural flight vector without artificial jerks.
-* **Cascade Continuity**: `AInteractivePropBase::SetLastFlightVelocity(PunchVelocity)` immediately updates the prop's cached vector upon piercing, allowing consecutive walls in rapid succession to decay momentum smoothly.
+Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary`:
+* **Proactive Pre-Impact Sweep (`PerformPreImpactSweep`)**:
+  * Runs during `TG_PrePhysics` immediately before Chaos steps rigid body physics.
+  * Projects a dynamic forward sphere trace proportional to the object's per-frame displacement ($\text{Dist} = \text{Clamp}(\text{Speed} \times \Delta t \times 1.5, 20\text{ cm}, 80\text{ cm})$).
+  * Queries `ECC_WorldStatic` (walls, floors, architectural foundations) and `ECC_PhysicsBody` / `ECC_WorldDynamic` (other props, barrels, crates, urns).
+  * Evaluates kinetic impact potential: $\text{ScaledDamage} = \text{ClosingSpeed} \times \text{MassFactor}$.
+  * If the target is destructible and suffers lethal damage:
+    * The obstacle is destroyed and its collision immediately disabled (`NoCollision`) **before** Chaos contact constraints can execute.
+    * Eliminates hard-body restitution bounce, angular contact friction spin, and bunny-hops on shattered barriers.
+    * If the incoming projectile itself is fragile (e.g. ceramic urn with low durability), both objects shatter simultaneously at the point of contact.
+    * If the projectile survives, momentum retention ($\vec{V} \times \text{Retention}$) is applied and the projectile continues smoothly through the breach.
+* **Zero-Overhead Event-Driven Wake/Sleep (On-Demand Flight Tick)**:
+  * `AInteractivePropBase` sets `PrimaryActorTick.bCanEverTick = true`, `bStartWithTickEnabled = false`, and `TickGroup = TG_PrePhysics`.
+  * Dormant props resting on the dungeon floor do **not** tick (0% CPU cost).
+  * Movement activation is fully global: Chaos `OnComponentWake` turns on the tick whenever a prop is thrown, pushed, rolled down an incline, or accelerated by an explosion.
+  * When velocity drops below threshold ($< 30\text{ cm/s}$) or Chaos `OnComponentSleep` fires, the tick disables automatically.
+* **Co-op Multiplayer Synchronization**:
+  * Sweep execution, damage calculation, and destruction authority are strictly Server-Authoritative (`REQUIRE_AUTHORITY()`).
+  * On clients, `ADungeonStructureBase::HandleOnDestroyed` immediately disables mesh collision and hides visibility upon durability reaching zero (via `OnRep_CurrentDurability`), preventing local collision desync or client-side ghost barriers.
+* **Separation of Impact Damage and Punch-Through Momentum**:
+  * Collision damage (`ScaledImpactDamage`) strictly scales with `ClosingSpeed` (the normal velocity component of the collision), preventing astronomical false damage when sliding or skimming horizontally across floor foundations or walls.
+  * Obstacle piercing momentum (`BreakerMomentum = Mass * BreakerSpeed`) uses full forward projectile velocity, ensuring massive boulders or barrels penetrate brittle barriers smoothly regardless of impact angle.
 * **Full Physical Inertia**: Player air control is completely disabled (`AirControl = 0.0f` and early exit in movement input during falls) to ensure full physical inertia during jumps, falls, and kinetic launches.
-* **Structured Diagnostics**: Rich logging on `LogDungeonPhysics` traces `[KineticImpact]` (mass, speeds, impact normal, scaled damage) and `[PunchThrough]` (pre-impact velocity, retention percentage, exit velocity).
+* **Structured Diagnostics**: Rich logging on `LogDungeonPhysics` traces `[PreImpactSweep]` (pre-impact velocity, retention percentage, exit velocity) and `[KineticImpact]` (mass, speeds, impact normal, scaled damage).
 
 
 

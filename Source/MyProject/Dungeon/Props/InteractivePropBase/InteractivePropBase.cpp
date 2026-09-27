@@ -11,7 +11,11 @@
 
 AInteractivePropBase::AInteractivePropBase()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    // Domyślnie Tick jest wyłączony (0% CPU dla leżących propów w lochu).
+    // Włączany jest wyłącznie On-Demand (sturlanie, wybuch, rzut) w fazie TG_PrePhysics.
+    PrimaryActorTick.bCanEverTick = true;
+    PrimaryActorTick.bStartWithTickEnabled = false;
+    PrimaryActorTick.TickGroup = TG_PrePhysics;
 
     // 1. Centralna konfiguracja replikacji sieciowej i optymalizacji pasma
     NetUtils::SetupQuantizedPhysicsReplication(this);
@@ -55,6 +59,8 @@ void AInteractivePropBase::PostInitializeComponents()
     if (MeshComponent)
     {
         MeshComponent->OnComponentHit.AddDynamic(this, &AInteractivePropBase::HandleComponentHit);
+        MeshComponent->OnComponentWake.AddDynamic(this, &AInteractivePropBase::HandleComponentWake);
+        MeshComponent->OnComponentSleep.AddDynamic(this, &AInteractivePropBase::HandleComponentSleep);
     }
 
     if (DamageableComponent)
@@ -93,9 +99,9 @@ void AInteractivePropBase::OnGrabbed(AActor* Grabber)
 {
     REQUIRE_AUTHORITY();
 
+    SetActorTickEnabled(false);
     CarryingActor = Grabber;
     RepLaunchVelocity = FVector_NetQuantize::ZeroVector;
-    LastFlightVelocity = FVector::ZeroVector;
     NetUtils::AttachCarriedProp(this, MeshComponent, Grabber);
 }
 
@@ -105,9 +111,14 @@ void AInteractivePropBase::OnDropped(AActor* Dropper, const FVector& LaunchVeloc
 
     CarryingActor = nullptr;
     RepLaunchVelocity = LaunchVelocity;
-    LastFlightVelocity = LaunchVelocity;
 
     NetUtils::DetachCarriedProp(this, MeshComponent, Dropper, LaunchVelocity);
+
+    // Aktywujemy Tick na czas lotu rzuconego lub upuszczonego z pędem obiektu
+    if (!LaunchVelocity.IsNearlyZero(50.0f))
+    {
+        SetActorTickEnabled(true);
+    }
 }
 
 void AInteractivePropBase::OnRep_CarryingActor()
@@ -172,3 +183,49 @@ void AInteractivePropBase::HandleOnDestroyed(AActor* DestroyedActor)
 
     Destroy();
 }
+
+void AInteractivePropBase::HandleComponentWake(UPrimitiveComponent* WakingComponent, FName BoneName)
+{
+    // Budzimy Tick TYLKO na serwerze, gdy bryła zostaje wprawiona w ruch (sturlanie, wybuch, rzut, knockback)
+    if (NetUtils::HasAuthority(this))
+    {
+        SetActorTickEnabled(true);
+    }
+}
+
+void AInteractivePropBase::HandleComponentSleep(UPrimitiveComponent* SleepingComponent, FName BoneName)
+{
+    // Wyłączamy Tick (0% CPU), gdy bryła wyhamuje i zaśnie na posadzce
+    if (NetUtils::HasAuthority(this))
+    {
+        SetActorTickEnabled(false);
+    }
+}
+
+void AInteractivePropBase::Tick(float DeltaTime)
+{
+    Super::Tick(DeltaTime);
+
+    REQUIRE_AUTHORITY();
+
+    if (!MeshComponent || !MeshComponent->IsSimulatingPhysics() || CarryingActor != nullptr)
+    {
+        SetActorTickEnabled(false);
+        return;
+    }
+
+    const FVector Velocity = MeshComponent->GetPhysicsLinearVelocity();
+    const float SpeedSq = Velocity.SizeSquared();
+
+    // Jeśli prop porusza się z prędkością zdolną do zadania obrażeń kinetycznych (> 80 cm/s)
+    if (SpeedSq >= 6400.0f)
+    {
+        UKineticForceLibrary::PerformPreImpactSweep(this, MeshComponent, DeltaTime, 80.0f);
+    }
+    else if (SpeedSq < 900.0f) // Poniżej 30 cm/s
+    {
+        // Obiekt prawie się zatrzymał -> wyłączamy tick, by nie marnować zasobów CPU
+        SetActorTickEnabled(false);
+    }
+}
+

@@ -119,4 +119,18 @@ public:
         UPrimitiveComponent* Comp,
         float MaxMassThreshold,
         float VelocityStopThreshold);
+
+    /**
+     * Wykonuje proaktywne geometryczne sprawdzenie przestrzeni przed poruszającą się bryłą fizyczną (Pre-Impact Sweep).
+     * Wykrywa zniszczalne ściany lochu (ADungeonStructureBase) lub inne podatne propy (AInteractivePropBase),
+     * niszczy je i usuwa ich kolizję ZANIM solver Chaosu wygeneruje twarde zderzenie bryły sztywnej.
+     * Zapewnia czysty przelot (Punch-Through) przy rzucie, sturlaniu, odrzucie knockbackiem czy wybuchu.
+     * @return true, jeśli wykryto przeszkodę i wykonano akcję zniszczenia/punch-through.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic")
+    static bool PerformPreImpactSweep(
+        AActor* BreakerActor,
+        UPrimitiveComponent* BreakerComp,
+        float DeltaTime,
+        float SpeedThreshold = 80.0f);
 };

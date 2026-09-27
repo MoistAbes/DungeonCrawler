@@ -40,6 +40,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Custom|Kinetic")
     void ApplyKineticImpact(float ImpactSpeed, AActor* DamageCauser = nullptr);
 
+    /** Oblicza potencjalne obrażenia kinetyczne dla zadanej prędkości zderzenia z uwzględnieniem progu i odporności */
+    UFUNCTION(BlueprintPure, Category = "Custom|Kinetic")
+    float CalculatePotentialKineticDamage(float ImpactSpeed) const;
+
     // --- Stan i Odporności ---
 
     /** Zwraca aktualny stan punktów wytrzymałości/życia */

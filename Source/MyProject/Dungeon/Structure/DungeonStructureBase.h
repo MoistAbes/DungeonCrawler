@@ -39,6 +39,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
+	/** Zwraca współczynnik zachowania pędu przy przebiciu zniszczonej ściany */
+	UFUNCTION(BlueprintPure, Category = "Custom|Structure")
+	float GetPunchThroughRetention() const { return PunchThroughVelocityRetention; }
+
 protected:
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;

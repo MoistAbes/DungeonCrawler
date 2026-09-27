@@ -95,7 +95,12 @@ void ADungeonStructureBase::HandleComponentHit(
 
 void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 {
-	REQUIRE_AUTHORITY();
+	// 1. Natychmiastowe usunięcie kolizji bryły i ukrycie siatki (ZARÓWNO Serwer, jak i Klient)
+	if (StructureMesh)
+	{
+		StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		StructureMesh->SetVisibility(false);
+	}
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -103,24 +108,19 @@ void ADungeonStructureBase::HandleOnDestroyed(AActor* DestroyedActor)
 		return;
 	}
 
-	UE_LOG(LogDungeonPhysics, Warning, TEXT("[DungeonStructure]%s %s has collapsed and been destroyed!"),
-		*NetUtils::GetNetRolePrefix(this), *GetName());
-
-	// 0. Czyszczenie komórek powierzchniowych w zniszczonym obszarze fundamentu
-	ClearSurfaceGrid(World);
-
-	// 1. Zabezpieczenie: natychmiastowe usunięcie kolizji bryły i widoczności
-	StructureMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	StructureMesh->SetVisibility(false);
-
-	// 2. Bezpieczne niszczenie podpiętych aktorów (np. stref powierzchniowych)
-	DestroyAttachedActors();
-
-	// 3. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
+	// 2. Spawnowanie opcjonalnego gruzu / efektu cząsteczkowego
 	SpawnDebris(World);
 
-	// 4. Po krótkiej chwili na dokończenie replikacji niszczymy aktora
-	SetLifeSpan(0.1f);
+	// 3. Logika autorytatywna (czyszczenie siatki powierzchni, destrukcja podpiętych aktorów, cykl życia)
+	if (NetUtils::HasAuthority(this))
+	{
+		UE_LOG(LogDungeonPhysics, Warning, TEXT("[DungeonStructure]%s %s has collapsed and been destroyed!"),
+			*NetUtils::GetNetRolePrefix(this), *GetName());
+
+		ClearSurfaceGrid(World);
+		DestroyAttachedActors();
+		SetLifeSpan(0.1f);
+	}
 }
 
 void ADungeonStructureBase::ClearSurfaceGrid(UWorld* World)

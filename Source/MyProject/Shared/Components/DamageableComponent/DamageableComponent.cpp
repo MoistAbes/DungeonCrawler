@@ -132,6 +132,25 @@ void UDamageableComponent::ApplyKineticImpact(float ImpactSpeed, AActor* DamageC
     }
 }
 
+float UDamageableComponent::CalculatePotentialKineticDamage(float ImpactSpeed) const
+{
+    if (bIsInvulnerable || IsDestroyed() || ImpactSpeed <= ImpactSpeedThreshold)
+    {
+        return 0.0f;
+    }
+
+    const float ExcessSpeed = ImpactSpeed - ImpactSpeedThreshold;
+    const float CalculatedDamage = ExcessSpeed * ImpactDamageMultiplier;
+    if (CalculatedDamage < 1.0f)
+    {
+        return 0.0f;
+    }
+
+    const float TotalResist = GetTotalResistance(EDamageType::Kinetic);
+    const float FinalDamage = CalculatedDamage * (1.0f - FMath::Clamp(TotalResist, -1.0f, 1.0f));
+    return FMath::Max(0.0f, FinalDamage);
+}
+
 void UDamageableComponent::OnRep_CurrentDurability(float OldDurability)
 {
     // Klient odbiera zaktualizowaną wartość z serwera i propaguje zdarzenia do UI
