@@ -67,7 +67,7 @@ APlayerCharacter::APlayerCharacter()
         MoveComp->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
 
         MoveComp->JumpZVelocity = 600.0f;
-        MoveComp->AirControl    = 0.2f;
+        MoveComp->AirControl    = 0.0f;
 
         MoveComp->MaxWalkSpeed = 600.0f;
 
@@ -174,6 +174,12 @@ APlayerCharacter::GetMaterialType_Implementation() const
 void APlayerCharacter::BeginPlay()
 {
     Super::BeginPlay();
+
+    // W locie (skok, upadek, odrzut) postać gracza jest w pełni bezwładna
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->AirControl = 0.0f;
+    }
 
     if (const APlayerController* PC =
         Cast<APlayerController>(GetController()))
@@ -336,6 +342,15 @@ void APlayerCharacter::Move(
     if (Controller == nullptr)
     {
         return;
+    }
+
+    // W locie (skok, upadek, odrzut kinetyczny) postać jest w pełni bezwładna
+    if (const UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        if (MoveComp->IsFalling())
+        {
+            return;
+        }
     }
 
     const FRotator Rotation =

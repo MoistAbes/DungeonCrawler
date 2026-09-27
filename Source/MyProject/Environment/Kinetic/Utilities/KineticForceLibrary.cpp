@@ -215,36 +215,39 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
             VictimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
         }
 
-        // Kierunek penetracji przez przeszkodę:
-        // Wektor od środka niszczyciela w stronę celu (BreakerToVictim)
-        const FVector BreakerToVictim = VictimActor->GetActorLocation() - BreakerActor->GetActorLocation();
-        FVector PenetrationDir = -Hit.ImpactNormal;
+        const float Retention = FMath::Clamp(PunchThroughRetention, 0.1f, 1.0f);
+        FVector PunchVelocity = FVector::ZeroVector;
 
-        // Upewniamy się, że wektor penetracji wskazuje w stronę przeszkody (w głąb), a nie w tył
+        // Kierunek penetracji przez przeszkodę:
+        FVector PenetrationDir = -Hit.ImpactNormal;
+        const FVector BreakerToVictim = VictimActor->GetActorLocation() - BreakerActor->GetActorLocation();
         if (FVector::DotProduct(PenetrationDir, BreakerToVictim) < 0.0f)
         {
             PenetrationDir = -PenetrationDir;
         }
-
-        // Kluczowe zabezpieczenie przed podskakiwaniem w sufit lub nurkowaniem w podłogę:
-        // Wymuszamy Z = 0, aby obiekt leciał czysto poziomo przez wyrwę!
-        PenetrationDir.Z = 0.0f;
         PenetrationDir.Normalize();
 
-        if (PenetrationDir.IsNearlyZero())
+        // 1. Jeśli niszczyciel poruszał się w stronę przeszkody (naturalny wektor lotu/ruchu):
+        // zachowujemy jego naturalny wektor prędkości ze współczynnikiem zachowania pędu (Retention)
+        const float ApproachDot = FVector::DotProduct(BreakerVelocity, PenetrationDir);
+        if (ApproachDot > 50.0f)
         {
-            PenetrationDir = BreakerToVictim;
-            PenetrationDir.Z = 0.0f;
-            PenetrationDir.Normalize();
+            PunchVelocity = BreakerVelocity * Retention;
         }
-
-        if (PenetrationDir.IsNearlyZero())
+        else
         {
-            PenetrationDir = FVector::ForwardVector;
-        }
+            // 2. Jeśli solver Chaosu zdążył już odbić bryłę fizyczną w tył lub prędkość była zerowa:
+            // wyprowadzamy wektor w głąb przeszkody na bazie normalnej trafienia.
+            // Dla ścian pionowych (|PenetrationDir.Z| < 0.2f) zerujemy Z, by uniknąć podbijania w sufit.
+            if (FMath::Abs(PenetrationDir.Z) < 0.2f)
+            {
+                PenetrationDir.Z = 0.0f;
+                PenetrationDir.Normalize();
+            }
 
-        const float Retention = FMath::Clamp(PunchThroughRetention, 0.1f, 1.0f);
-        const FVector PunchVelocity = PenetrationDir * (EffectiveImpactSpeed * Retention);
+            const float Speed = BreakerVelocity.Size() > 50.0f ? BreakerVelocity.Size() : EffectiveImpactSpeed;
+            PunchVelocity = PenetrationDir * (Speed * Retention);
+        }
 
         if (ACharacter* Character = Cast<ACharacter>(BreakerActor))
         {

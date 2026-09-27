@@ -1494,7 +1494,7 @@ virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* Other
                                const FHitResult& Hit);
 ```
 
-Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`. This eliminates redundant per-actor collision math, avoids Chaos solver velocity spikes, and ensures flat forward penetration (`PenetrationDir.Z = 0.0f`).
+Both structures and props delegate impact resolution, reciprocal damage, and destruction punch-through directly to `UKineticForceLibrary::HandleKineticImpactAndPunchThrough(...)`. This preserves the breaker's natural velocity trajectory (falling down through breakable floors or moving forward through walls) scaled by `PunchThroughRetention`, avoiding artificial velocity spikes or directional distortion. Player air control is completely disabled (`AirControl = 0.0f`) to ensure full physical inertia during jumps, falls, and kinetic launches.
 
 
 
