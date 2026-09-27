@@ -115,7 +115,7 @@ void AInteractivePropBase::OnDropped(AActor* Dropper, const FVector& LaunchVeloc
     NetUtils::DetachCarriedProp(this, MeshComponent, Dropper, LaunchVelocity);
 
     // Aktywujemy Tick na czas lotu rzuconego lub upuszczonego z pędem obiektu
-    if (!LaunchVelocity.IsNearlyZero(50.0f))
+    if (!LaunchVelocity.IsNearlyZero(KineticConfig::RestSpeedThreshold))
     {
         SetActorTickEnabled(true);
     }
@@ -170,8 +170,7 @@ void AInteractivePropBase::HandleComponentHit(UPrimitiveComponent* HitComponent,
         OtherActor,
         OtherComp,
         Hit,
-        NormalImpulse,
-        0.85f);
+        NormalImpulse);
 }
 
 void AInteractivePropBase::HandleOnDestroyed(AActor* DestroyedActor)
@@ -217,12 +216,15 @@ void AInteractivePropBase::Tick(float DeltaTime)
     const FVector Velocity = MeshComponent->GetPhysicsLinearVelocity();
     const float SpeedSq = Velocity.SizeSquared();
 
-    // Jeśli prop porusza się z prędkością zdolną do zadania obrażeń kinetycznych (> 80 cm/s)
-    if (SpeedSq >= 6400.0f)
+    constexpr float MinSweepSpeedSq = KineticConfig::MinFlightSpeedForSweep * KineticConfig::MinFlightSpeedForSweep;
+    constexpr float RestSpeedSq = KineticConfig::RestSpeedThreshold * KineticConfig::RestSpeedThreshold;
+
+    // Jeśli prop porusza się z prędkością zdolną do zadania obrażeń kinetycznych
+    if (SpeedSq >= MinSweepSpeedSq)
     {
-        UKineticForceLibrary::PerformPreImpactSweep(this, MeshComponent, DeltaTime, 80.0f);
+        UKineticForceLibrary::PerformPreImpactSweep(this, MeshComponent, DeltaTime, KineticConfig::MinFlightSpeedForSweep);
     }
-    else if (SpeedSq < 900.0f) // Poniżej 30 cm/s
+    else if (SpeedSq < RestSpeedSq)
     {
         // Obiekt prawie się zatrzymał -> wyłączamy tick, by nie marnować zasobów CPU
         SetActorTickEnabled(false);

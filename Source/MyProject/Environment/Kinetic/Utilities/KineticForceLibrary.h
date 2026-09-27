@@ -8,6 +8,50 @@ class UDamageType;
 class UPrimitiveComponent;
 
 /**
+ * Konfiguracja parametrów fizyki kinetycznej, zderzeń i mechaniki Punch-Through.
+ * Zastępuje sztywne wartości (Magic Numbers) w całym ekosystemie zderzeń.
+ */
+namespace KineticConfig
+{
+    /** Waga referencyjna obiektu (kg) odpowiadająca mnożnikowi siły 1.0x */
+    constexpr float ReferenceMass = 50.0f;
+
+    /** Minimalny mnożnik skalowania siły uderzenia masą (ochrona przed 0 dmg z małych obiektów) */
+    constexpr float MinMassFactor = 0.5f;
+
+    /** Maksymalny mnożnik skalowania siły uderzenia masą (ochrona przed niszczeniem świata wagonami) */
+    constexpr float MaxMassFactor = 3.5f;
+
+    /** Koszt pędu (kg*cm/s) potrzebny do rozbicia 1 punktu wytrzymałości (Toughness) przeszkody */
+    constexpr float ResistanceCostMultiplier = 200.0f;
+
+    /** Minimalna retencja prędkości przy przebiciu (nawet najcięższe przebicie zostawia 15% prędkości) */
+    constexpr float MinPunchRetention = 0.15f;
+
+    /** Maksymalna retencja prędkości przy przebiciu (nawet taran traci przynajmniej 2% prędkości) */
+    constexpr float MaxPunchRetention = 0.98f;
+
+    /** Minimalna prędkość lotu/toczenia propa (cm/s), by aktywować Pre-Impact Sweep */
+    constexpr float MinFlightSpeedForSweep = 80.0f;
+
+    /** Prędkość wygaszania (cm/s), poniżej której Tick propa zostaje uśpiony (0% CPU) */
+    constexpr float RestSpeedThreshold = 30.0f;
+
+    /** Współczynnik tłumienia wirowania po przebiciu ściany (gasi 70% prędkości kątowej) */
+    constexpr float PunchAngularDamping = 0.3f;
+
+    /** Dystans minimalny i maksymalny sweepa wyprzedzającego (cm) */
+    constexpr float PreImpactSweepMinDist = 20.0f;
+    constexpr float PreImpactSweepMaxDist = 80.0f;
+    constexpr float PreImpactSweepTimeMultiplier = 1.5f;
+
+    /** Promień sfery sweepu względem obrysu bryły */
+    constexpr float PreImpactRadiusRatio = 0.75f;
+    constexpr float PreImpactRadiusMin = 15.0f;
+    constexpr float PreImpactRadiusMax = 60.0f;
+}
+
+/**
  * Biblioteka funkcji pomocniczych do aplikowania sił kinetycznych, wybuchów i odrzutów środowiskowych.
  */
 UCLASS()
@@ -16,6 +60,17 @@ class MYPROJECT_API UKineticForceLibrary : public UBlueprintFunctionLibrary
     GENERATED_BODY()
 
 public:
+    /** Oblicza współczynnik skalowania obrażeń masą w oparciu o KineticConfig */
+    UFUNCTION(BlueprintPure, Category = "Environment|Kinetic")
+    static float CalculateMassFactor(float Mass);
+
+    /** Dynamiczne wyliczenie zachowania pędu (Retention) na bazie relacji Pędu do Wytrzymałości przeszkody */
+    UFUNCTION(BlueprintPure, Category = "Environment|Kinetic")
+    static float CalculatePunchThroughRetention(float BreakerMass, float BreakerSpeed, float ObstacleToughness, float BaseRetention = 0.85f);
+
+    /** Pobiera efektywną masę encji (uwzględnia CharacterMovementComponent dla postaci lub PrimitiveComponent dla propa) */
+    UFUNCTION(BlueprintPure, Category = "Environment|Kinetic")
+    static float GetEntityMass(const AActor* Actor, const UPrimitiveComponent* Comp);
     /**
      * Oblicza prędkość uderzenia prostopadłego (Closing Speed) pomiędzy dwoma obiektami przy zderzeniu.
      * Uwzględnia fizykę Chaos, ruch postaci (CharacterMovementComponent) oraz geometrię normalnej zderzenia.

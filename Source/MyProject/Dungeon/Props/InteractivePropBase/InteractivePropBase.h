@@ -96,20 +96,6 @@ protected:
     UFUNCTION()
     virtual void OnRep_CarryingActor();
 
-    // --- Konfiguracja kinetyczna uderzeń (Kinetic Impact Transfer) ---
-
-    /** Czy ten prop przekazuje odrzut (Knockback) i obrażenia uderzanym postaciom, gdy leci z dużą prędkością */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic")
-    bool bTransferKineticKnockback = true;
-
-    /** Minimalna prędkość lotu propa w stronę celu (cm/s), aby wywołać odrzut postaci. Zapobiega odrzutom przy zwykłym ocieraniu */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "50.0"))
-    float MinImpactSpeedForKnockback = 300.0f;
-
-    /** Mnożnik siły odrzutu przekazywanego uderzonemu celowi (skalowany dodatkowo masą propa) */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Kinetic", meta = (ClampMin = "0.1"))
-    float KnockbackStrengthMultiplier = 1.0f;
-
     UFUNCTION()
     virtual void HandleComponentHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, 
                                    UPrimitiveComponent* OtherComp, FVector NormalImpulse, 

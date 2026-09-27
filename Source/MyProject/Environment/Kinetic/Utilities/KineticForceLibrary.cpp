@@ -94,6 +94,54 @@ namespace KineticHelpers
 
 #include "MyProject/Logging/DungeonLogCategories.h"
 
+float UKineticForceLibrary::CalculateMassFactor(float Mass)
+{
+    return FMath::Clamp(Mass / KineticConfig::ReferenceMass, KineticConfig::MinMassFactor, KineticConfig::MaxMassFactor);
+}
+
+float UKineticForceLibrary::GetEntityMass(const AActor* Actor, const UPrimitiveComponent* Comp)
+{
+    if (const ACharacter* Character = Cast<ACharacter>(Actor))
+    {
+        if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+        {
+            return CMC->Mass > 0.0f ? CMC->Mass : 80.0f;
+        }
+    }
+    if (Comp)
+    {
+        return FMath::Max(1.0f, Comp->GetMass());
+    }
+    return 1.0f;
+}
+
+float UKineticForceLibrary::CalculatePunchThroughRetention(
+    float BreakerMass, 
+    float BreakerSpeed, 
+    float ObstacleToughness, 
+    float BaseRetention)
+{
+    const float BreakerMomentum = BreakerMass * BreakerSpeed;
+    if (BreakerMomentum <= 0.0f)
+    {
+        return KineticConfig::MinPunchRetention;
+    }
+
+    const float ResistanceCost = FMath::Max(1.0f, ObstacleToughness) * KineticConfig::ResistanceCostMultiplier;
+    const float VelocityLossRatio = ResistanceCost / BreakerMomentum;
+
+    // Dynamiczna retencja: [MinPunchRetention, MaxPunchRetention]
+    const float DynamicRetention = FMath::Clamp(1.0f - VelocityLossRatio, KineticConfig::MinPunchRetention, KineticConfig::MaxPunchRetention);
+
+    // Jeśli przekazano specyficzny BaseRetention (różny od domyślnego 0.85f), skalujemy relatywnie
+    if (!FMath::IsNearlyEqual(BaseRetention, 0.85f, 0.01f))
+    {
+        return FMath::Clamp(DynamicRetention * (BaseRetention / 0.85f), KineticConfig::MinPunchRetention, KineticConfig::MaxPunchRetention);
+    }
+
+    return DynamicRetention;
+}
+
 float UKineticForceLibrary::CalculateImpactSpeed(
     const UPrimitiveComponent* SelfComp,
     const AActor* OtherActor,
@@ -157,18 +205,7 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
     const FVector VictimVelocity = KineticHelpers::GetEntityVelocity(VictimActor, VictimComp);
 
     // Masy obu ciał
-    float BreakerMass = 80.0f;
-    if (const ACharacter* Character = Cast<ACharacter>(BreakerActor))
-    {
-        if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
-        {
-            BreakerMass = CMC->Mass > 0.0f ? CMC->Mass : 80.0f;
-        }
-    }
-    else if (BreakerComp)
-    {
-        BreakerMass = FMath::Max(1.0f, BreakerComp->GetMass());
-    }
+    const float BreakerMass = GetEntityMass(BreakerActor, BreakerComp);
 
     // 3. Prędkość uderzenia
     const FVector RelativeVelocity = BreakerVelocity - VictimVelocity;
@@ -180,10 +217,8 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
         return;
     }
 
-    // 4. Skalowanie masą niszczącego (np. 500kg głaz uderza mocniej niż 10kg stołek)
-    // Obrażenia zależą od prędkości prostopadłej uderzenia (ClosingSpeed), co chroni przed
-    // fałszywym niszczeniem posadzki/ścian przy zwykłym poziomym ślizganiu lub ocieraniu.
-    const float MassFactor = FMath::Clamp(BreakerMass / 50.0f, 0.5f, 3.5f);
+    // 4. Skalowanie masą niszczącego (proporcjonalnie do pędu)
+    const float MassFactor = CalculateMassFactor(BreakerMass);
     const float ScaledImpactDamage = ClosingSpeed * MassFactor;
 
     UE_LOG(LogDungeonPhysics, Log, TEXT("[KineticImpact]%s Breaker: %s (Mass: %.1f kg, Speed: %.1f cm/s, Vel: %s) -> Victim: %s (HP: %.1f/%.1f) | Normal: %s | ClosingSpeed: %.1f cm/s | ScaledDamage: %.1f"),
@@ -237,42 +272,23 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
         VictimActor->SetActorEnableCollision(false);
 
         // Dynamiczne wyliczenie zachowania pędu (Dynamic Punch-Through Retention)
-        // Bazuje na relacji pędu niszczyciela (Masa x Prędkość) do wytrzymałości przeszkody (Toughness)
-        float EffectiveRetention = PunchThroughRetention;
-
-        const float BreakerMomentum = BreakerMass * BreakerSpeed;
-        if (BreakerMomentum > 0.0f)
+        float ObstacleToughness = 40.0f;
+        float BaseRetention = PunchThroughRetention;
+        if (const ADungeonStructureBase* Struct = Cast<ADungeonStructureBase>(VictimActor))
         {
-            float ObstacleToughness = 40.0f;
-            if (VictimDamageable)
-            {
-                ObstacleToughness = VictimDamageable->GetMaxDurability();
-            }
-            else if (VictimComp)
-            {
-                ObstacleToughness = VictimComp->GetMass();
-            }
-
-            // Przelicznik: Toughness na zapotrzebowanie pędu
-            const float ResistanceCost = ObstacleToughness * 200.0f;
-            const float VelocityLossRatio = ResistanceCost / BreakerMomentum;
-
-            // Naturalny współczynnik zachowania pędu w granicach [0.20, 0.98]
-            const float CalculatedRetention = FMath::Clamp(1.0f - VelocityLossRatio, 0.20f, 0.98f);
-
-            // Jeśli wywołujący przekazał customowy mnożnik różny od domyślnego 0.85f (np. ze struktury),
-            // skalujemy wynik
-            if (FMath::IsNearlyEqual(PunchThroughRetention, 0.85f, 0.01f))
-            {
-                EffectiveRetention = CalculatedRetention;
-            }
-            else
-            {
-                EffectiveRetention = FMath::Clamp(CalculatedRetention * (PunchThroughRetention / 0.85f), 0.15f, 0.98f);
-            }
+            ObstacleToughness = VictimDamageable ? VictimDamageable->GetMaxDurability() : 40.0f;
+            BaseRetention = Struct->GetPunchThroughRetention();
+        }
+        else if (VictimDamageable)
+        {
+            ObstacleToughness = VictimDamageable->GetMaxDurability();
+        }
+        else if (VictimComp)
+        {
+            ObstacleToughness = VictimComp->GetMass();
         }
 
-        const float Retention = FMath::Clamp(EffectiveRetention, 0.1f, 1.0f);
+        const float Retention = CalculatePunchThroughRetention(BreakerMass, BreakerSpeed, ObstacleToughness, BaseRetention);
 
         // 1. Kierunek penetracji w głąb przeszkody (wskazuje od niszczyciela w stronę celu)
         FVector PenetrationDir = -Hit.ImpactNormal;
@@ -330,7 +346,7 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
         else if (BreakerComp && BreakerComp->IsSimulatingPhysics())
         {
             BreakerComp->SetPhysicsLinearVelocity(PunchVelocity);
-            BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * 0.5f);
+            BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * KineticConfig::PunchAngularDamping);
             BreakerComp->WakeRigidBody();
         }
 
@@ -781,9 +797,9 @@ bool UKineticForceLibrary::PerformPreImpactSweep(
     }
 
     const FVector ForwardDir = Velocity / Speed;
-    const float BreakerRadius = FMath::Clamp(BreakerComp->Bounds.SphereRadius * 0.75f, 15.0f, 60.0f);
+    const float BreakerRadius = FMath::Clamp(BreakerComp->Bounds.SphereRadius * KineticConfig::PreImpactRadiusRatio, KineticConfig::PreImpactRadiusMin, KineticConfig::PreImpactRadiusMax);
     // Dynamiczny dystans wyprzedzający: droga pokonywana w bieżącej klatce + margines
-    const float SweepDist = FMath::Clamp(Speed * DeltaTime * 1.5f, 20.0f, 80.0f);
+    const float SweepDist = FMath::Clamp(Speed * DeltaTime * KineticConfig::PreImpactSweepTimeMultiplier, KineticConfig::PreImpactSweepMinDist, KineticConfig::PreImpactSweepMaxDist);
 
     const FVector Start = BreakerComp->GetComponentLocation();
     const FVector End = Start + (ForwardDir * SweepDist);
@@ -839,8 +855,8 @@ bool UKineticForceLibrary::PerformPreImpactSweep(
     }
 
     // 2. Skalowanie masą niszczyciela (proporcjonalnie do pędu)
-    const float BreakerMass = FMath::Max(1.0f, BreakerComp->GetMass());
-    const float MassFactor = FMath::Clamp(BreakerMass / 50.0f, 0.5f, 3.5f);
+    const float BreakerMass = GetEntityMass(BreakerActor, BreakerComp);
+    const float MassFactor = CalculateMassFactor(BreakerMass);
     const float ScaledImpactSpeed = ClosingSpeed * MassFactor;
 
     // 3. Precyzyjne obliczenie obrażeń z uwzględnieniem progu prędkości i odporności celu
@@ -901,25 +917,25 @@ bool UKineticForceLibrary::PerformPreImpactSweep(
         VictimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
 
-    // Obliczamy współczynnik zachowania pędu
-    float Retention = 0.85f;
+    // Obliczamy współczynnik zachowania pędu (Dynamic Punch-Through Retention)
+    float ObstacleToughness = 40.0f;
+    float BaseRetention = 0.85f;
     if (const ADungeonStructureBase* Struct = Cast<ADungeonStructureBase>(VictimActor))
     {
-        Retention = Struct->GetPunchThroughRetention();
+        ObstacleToughness = VictimDamageable ? VictimDamageable->GetMaxDurability() : 40.0f;
+        BaseRetention = Struct->GetPunchThroughRetention();
     }
-    else
+    else if (VictimComp)
     {
-        const float VictimMass = VictimComp ? VictimComp->GetMass() : 20.0f;
-        const float MomentumRatio = (BreakerMass * Speed) / FMath::Max(1.0f, VictimMass * 50.0f);
-        Retention = FMath::Clamp(1.0f - (1.0f / (1.0f + MomentumRatio)), 0.6f, 0.95f);
+        ObstacleToughness = VictimDamageable ? VictimDamageable->GetMaxDurability() : VictimComp->GetMass();
     }
 
-    const float FinalRetention = FMath::Clamp(Retention, 0.1f, 1.0f);
+    const float FinalRetention = CalculatePunchThroughRetention(BreakerMass, Speed, ObstacleToughness, BaseRetention);
     const FVector PunchVelocity = Velocity * FinalRetention;
 
     // Przenosimy czystą prędkość i tłumimy niepożądane wirowanie
     BreakerComp->SetPhysicsLinearVelocity(PunchVelocity);
-    BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * 0.3f);
+    BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * KineticConfig::PunchAngularDamping);
     BreakerComp->WakeRigidBody();
 
     UE_LOG(LogDungeonPhysics, Warning, TEXT("[PreImpactSweep]%s %s pierced %s! | PreImpactVel: %s (Speed: %.1f) | Retention: %.1f%% | PunchVel: %s (Speed: %.1f)"),

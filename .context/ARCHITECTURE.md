@@ -1516,28 +1516,27 @@ Both structures and props delegate impact resolution, reciprocal damage, and des
 * **Separation of Impact Damage and Punch-Through Momentum**:
   * Collision damage (`ScaledImpactDamage`) strictly scales with `ClosingSpeed` (the normal velocity component of the collision), preventing astronomical false damage when sliding or skimming horizontally across floor foundations or walls.
   * Obstacle piercing momentum (`BreakerMomentum = Mass * BreakerSpeed`) uses full forward projectile velocity, ensuring massive boulders or barrels penetrate brittle barriers smoothly regardless of impact angle.
+* **Dynamic Momentum Retention (`CalculatePunchThroughRetention`)**:
+  * Retention is calculated dynamically based on physical momentum vs obstacle toughness:
+    $$P = \text{Mass} \times \text{Speed}$$
+    $$\text{ResistanceCost} = \text{Toughness} \times \text{ResistanceCostMultiplier}$$
+    $$\text{VelocityLossRatio} = \text{ResistanceCost} / P$$
+    $$\text{Retention} = \text{Clamp}(1.0 - \text{VelocityLossRatio}, \text{MinPunchRetention}, \text{MaxPunchRetention})$$
+  * A 177 kg boulder loses only ~2% speed on glass (taran), a 35 kg barrel loses ~19%, and a light 7 kg object loses ~85% (drops right behind the barrier).
+* **Kinetic Configuration (`KineticConfig`)**:
+  * Centralized namespace in [`KineticForceLibrary.h`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h) governing reference mass (`50.0f`), mass scaling limits (`[0.5f, 3.5f]`), resistance cost multiplier (`200.0f`), retention limits (`[0.15f, 0.98f]`), angular damping (`0.3f`), sweep distances (`20.0f` to `80.0f`), and flight/sleep thresholds (`80.0f` / `30.0f` cm/s).
 * **Full Physical Inertia**: Player air control is completely disabled (`AirControl = 0.0f` and early exit in movement input during falls) to ensure full physical inertia during jumps, falls, and kinetic launches.
 * **Structured Diagnostics**: Rich logging on `LogDungeonPhysics` traces `[PreImpactSweep]` (pre-impact velocity, retention percentage, exit velocity) and `[KineticImpact]` (mass, speeds, impact normal, scaled damage).
 
+---
 
+# 14. Data and Configuration
 
-\---
+The project contains shared configuration structures and namespaces such as:
 
-
-
-\# 14. Data and Configuration
-
-
-
-The project contains shared configuration structures such as:
-
-
-
-\* `FCarrySocketConfig`
-
-\* `FZoneEffectConfig`
-
-
+* `KineticConfig` (Physics impact scaling, dynamic retention, pre-impact sweep geometry, and velocity thresholds)
+* `FCarrySocketConfig`
+* `FZoneEffectConfig`
 
 Configuration should be separated from hard-coded gameplay behavior when the same behavior needs meaningful tuning or reuse.
 
