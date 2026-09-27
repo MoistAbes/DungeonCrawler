@@ -64,14 +64,14 @@ public:
 
 	/**
 	 * Rozwiązuje uderzenie żywiołem w świecie (Hit Resolver):
-	 * - Trafienie w postać/rekwizyt: nakłada status na cel i szuka podłogi pod jego stopami (FloorTrace), malując podłoże.
+	 * - Trafienie w postać/rekwizyt: nakłada status na cel i szuka podłogi pod jego stopami (FloorTrace), nakładając status na podłoże.
 	 * - Trafienie w strefę przestrzenną (np. chmurę): przekazuje trafienie żywiołowe strefie.
-	 * - Trafienie w ścianę/podłogę: weryfikuje podłoże i wywołuje PaintSurface.
+	 * - Trafienie w ścianę/podłogę: weryfikuje podłoże i wywołuje ApplyStatusToSurface.
 	 * 
-	 * @return Liczba pomalowanych komórek powierzchniowych.
+	 * @return Liczba zmodyfikowanych komórek powierzchniowych.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
-	int32 PaintSurfaceFromHit(
+	int32 ApplyStatusFromHit(
 		const FHitResult& HitResult,
 		float Radius,
 		EStatusEffectType Status,
@@ -80,14 +80,15 @@ public:
 		uint8 Tier = 0);
 
 	/**
-	 * Maluje strefę żywiołu na powierzchniach wokół punktu uderzenia.
-	 * Wyznacza komórki w promieniu Radius, uwzględnia orientację ściany/podłogi
-	 * i przeprowadza ewaluację reakcji chemicznych z istniejącymi na nich statusami.
+	 * Nakłada status na komórki pojedynczej powierzchni wokół punktu uderzenia.
+	 * Wyznacza komórki w promieniu Radius, uwzględnia orientację ściany/podłogi,
+	 * sprawdza Line of Sight po powierzchni i przeprowadza ewaluację reakcji chemicznych.
+	 * Używane przez PointImpact (np. rozbicie flakonu na ścianie).
 	 * 
-	 * @return Liczba pomalowanych lub zaktualizowanych komórek.
+	 * @return Liczba zmodyfikowanych lub zaktualizowanych komórek.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
-	int32 PaintSurface(
+	int32 ApplyStatusToSurface(
 		const FVector& HitLocation,
 		const FVector& HitNormal,
 		float Radius,
@@ -114,19 +115,21 @@ public:
 		uint8 Tier = 0);
 
 	/**
-	 * Wewnętrzna wersja metody PaintSurface z możliwością przekazania zbioru przetworzonych koordynatów
-	 * w ramach jednego złożonego zdarzenia (np. wybuchu 3D) dla uniknięcia wielokrotnego przetwarzania kafelka.
+	 * Nakłada status na komórki w obszarze 3D wokół źródła wybuchu (RadialBurst).
+	 * Sprawdza Line of Sight z BurstOrigin do każdej komórki, obsługuje wiele powierzchni jednocześnie.
+	 * Używa ProcessedCoords do uniknięcia wielokrotnego przetwarzania tej samej komórki
+	 * w ramach jednego złożonego zdarzenia (np. wybuchu wielopromieniowego).
 	 */
-	int32 PaintSurfaceInternal(
+	int32 ApplyStatusInArea(
 		const FVector& HitLocation,
 		const FVector& HitNormal,
 		float Radius,
 		EStatusEffectType Status,
 		float Duration,
+		const FVector& BurstOrigin,
+		TSet<FSurfaceCellCoord>& ProcessedCoords,
 		AActor* Instigator = nullptr,
-		TSet<FSurfaceCellCoord>* ProcessedCoords = nullptr,
-		uint8 Tier = 0,
-		const FVector* BurstOrigin = nullptr);
+		uint8 Tier = 0);
 
 	/**
 	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.

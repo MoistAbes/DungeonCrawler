@@ -147,7 +147,7 @@ bool UDungeonSurfaceSubsystem::IsValidSurfaceTarget(const AActor* Actor)
 	return SurfaceGridGeometryUtils::IsValidSurfaceTarget(Actor);
 }
 
-int32 UDungeonSurfaceSubsystem::PaintSurfaceFromHit(
+int32 UDungeonSurfaceSubsystem::ApplyStatusFromHit(
 	const FHitResult& HitResult,
 	float Radius,
 	EStatusEffectType Status,
@@ -170,10 +170,10 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceFromHit(
 		return 0;
 	}
 
-	// Wyliczenie orientacji powłoki powierzchniowej i namalowanie komórek
+	// Wyliczenie orientacji powłoki powierzchniowej i nałożenie statusu na komórki
 	const FVector SurfaceNormal = HitResult.ImpactNormal.IsNearlyZero() ? FVector::UpVector : HitResult.ImpactNormal.GetSafeNormal();
 
-	return PaintSurface(
+	return ApplyStatusToSurface(
 		HitResult.ImpactPoint,
 		SurfaceNormal,
 		Radius,
@@ -303,7 +303,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	return true;
 }
 
-int32 UDungeonSurfaceSubsystem::PaintSurface(
+int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
 	const FVector& HitLocation,
 	const FVector& HitNormal,
 	float Radius,
@@ -311,20 +311,6 @@ int32 UDungeonSurfaceSubsystem::PaintSurface(
 	float Duration,
 	AActor* Instigator,
 	uint8 Tier)
-{
-	return PaintSurfaceInternal(HitLocation, HitNormal, Radius, Status, Duration, Instigator, nullptr, Tier, nullptr);
-}
-
-int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
-	const FVector& HitLocation,
-	const FVector& HitNormal,
-	float Radius,
-	EStatusEffectType Status,
-	float Duration,
-	AActor* Instigator,
-	TSet<FSurfaceCellCoord>* ProcessedCoords,
-	uint8 Tier,
-	const FVector* BurstOrigin)
 {
 	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
 	{
@@ -344,7 +330,7 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 	const float RadiusSq = FMath::Square(Radius);
 
 	int32 AffectedCount = 0;
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfacePaintValidation), false, Instigator);
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceStatusValidation), false, Instigator);
 	if (Instigator)
 	{
 		TraceParams.AddIgnoredActor(Instigator);
@@ -369,19 +355,9 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 				continue;
 			}
 
-			// 2. Line of Sight (LoS):
-			// Jeśli wybuch pochodzi z przestrzennego źródła 3D (BurstOrigin, np. bomba):
-			// weryfikujemy czy fala wybuchu ma bezpośrednią linię wzroku z BurstOrigin do rzeczywistego punktu powierzchni!
-			if (BurstOrigin)
+			// 2. Line of Sight po powierzchni od punktu uderzenia (PointImpact / 2D)
+			if (!Offset.IsNearlyZero())
 			{
-				if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(GetWorld(), *BurstOrigin, SurfaceHit.ImpactPoint, Normal, SurfaceHit.GetActor(), TraceParams))
-				{
-					continue;
-				}
-			}
-			else if (!Offset.IsNearlyZero())
-			{
-				// Dla lokalnych uderzeń punktowych (np. rozbicie flakonu na ścianie) sprawdzamy LoS po powierzchni od punktu uderzenia
 				if (!SurfaceGridGeometryUtils::HasSurfaceLineOfSight(GetWorld(), HitLocation, SamplePoint, Normal, TraceParams))
 				{
 					continue;
@@ -390,15 +366,88 @@ int32 UDungeonSurfaceSubsystem::PaintSurfaceInternal(
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
 
-			// Pomijamy koordynaty już przetworzone w tym samym złożonym zdarzeniu (np. wybuch wielopromieniowy)
-			if (ProcessedCoords)
+			// Rozpoznanie tożsamości materiałowej trafionego elementu architektury
+			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
+
+			// JEDYNY PUNKT STYKU: ApplyStatusToCell decyduje o reakcji i stanie komórki
+			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceHit.GetActor(), Tier))
 			{
-				if (ProcessedCoords->Contains(Coord))
-				{
-					continue;
-				}
-				ProcessedCoords->Add(Coord);
+				AffectedCount++;
 			}
+		}
+	}
+
+	return AffectedCount;
+}
+
+int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
+	const FVector& HitLocation,
+	const FVector& HitNormal,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	const FVector& BurstOrigin,
+	TSet<FSurfaceCellCoord>& ProcessedCoords,
+	AActor* Instigator,
+	uint8 Tier)
+{
+	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
+	{
+		return 0;
+	}
+
+	const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(HitNormal);
+	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
+
+	// Wyznaczamy wektory styczne do płaszczyzny ściany/podłogi
+	FVector TangentU;
+	FVector TangentV;
+	SurfaceGridGeometryUtils::GetFaceTangents(FaceDir, TangentU, TangentV);
+
+	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
+	const float RadiusSq = FMath::Square(Radius);
+
+	int32 AffectedCount = 0;
+	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceStatusValidation), false, Instigator);
+	if (Instigator)
+	{
+		TraceParams.AddIgnoredActor(Instigator);
+	}
+
+	for (int32 du = -StepRadius; du <= StepRadius; ++du)
+	{
+		for (int32 dv = -StepRadius; dv <= StepRadius; ++dv)
+		{
+			const FVector Offset = (static_cast<float>(du) * TangentU + static_cast<float>(dv) * TangentV) * SafeCellSize;
+			if (Offset.SizeSquared() > RadiusSq)
+			{
+				continue;
+			}
+
+			const FVector SamplePoint = HitLocation + Offset;
+
+			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura (brak wiszenia w powietrzu poza filarem)
+			FHitResult SurfaceHit;
+			if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(GetWorld(), SamplePoint, Normal, SurfaceHit, TraceParams))
+			{
+				continue;
+			}
+
+			// 2. Line of Sight z BurstOrigin do punktu na powierzchni (RadialBurst / 3D)
+			if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(GetWorld(), BurstOrigin, SurfaceHit.ImpactPoint, Normal, SurfaceHit.GetActor(), TraceParams))
+			{
+				continue;
+			}
+
+			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
+
+			// Pomijamy koordynaty już przetworzone w tym samym złożonym zdarzeniu (np. wybuch wielopromieniowy)
+			if (ProcessedCoords.Contains(Coord))
+			{
+				continue;
+			}
+			ProcessedCoords.Add(Coord);
 
 			// Rozpoznanie tożsamości materiałowej trafionego elementu architektury
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
@@ -660,16 +709,16 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 				const float BaseDiscRadius = FMath::Sqrt(FMath::Max(0.0f, RadiusSq - FMath::Square(DistToSurface)));
 				const float SplashRadius = (RayDir.Z < -0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
 
-				AffectedCount += PaintSurfaceInternal(
+				AffectedCount += ApplyStatusInArea(
 					SurfaceHit.ImpactPoint,
 					SurfaceHit.ImpactNormal,
 					SplashRadius,
 					Status,
 					Duration,
+					Origin,
+					ProcessedCoords,
 					Instigator,
-					&ProcessedCoords,
-					Tier,
-					&Origin);
+					Tier);
 			}
 		}
 	}

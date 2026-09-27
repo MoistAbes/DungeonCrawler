@@ -281,7 +281,7 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 	{
 		if (StatusType != EStatusEffectType::None && SplashRadius > 0.0f)
 		{
-			SurfaceSubsystem->PaintSurfaceFromHit(HitResult, SplashRadius, StatusType, Duration, InstigatorActor);
+			SurfaceSubsystem->ApplyStatusFromHit(HitResult, SplashRadius, StatusType, Duration, InstigatorActor);
 		}
 	}
 
