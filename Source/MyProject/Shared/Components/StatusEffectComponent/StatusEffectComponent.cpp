@@ -83,20 +83,43 @@ void UStatusEffectComponent::TickComponent(float DeltaTime, ELevelTick TickType,
 
     for (FActiveStatusEffectInstance& Instance : ActiveStatusEffects)
     {
-        // Okresowe tyknięcie (np. DoT pobierany z rejestru konfiguracji)
+        // Okresowe tyknięcie (np. DoT pobierany z rejestru konfiguracji) z akumulatorem nadrabiającym opóźnienia
         Instance.TimeUntilNextTick -= DeltaTime;
-        if (Instance.TimeUntilNextTick <= 0.0f)
+        if (Instance.TickInterval <= 0.0f)
+        {
+            Instance.TickInterval = 1.0f;
+        }
+
+        int32 TicksApplied = 0;
+        while (Instance.TimeUntilNextTick <= 0.0f && TicksApplied < 3)
         {
             Instance.TimeUntilNextTick += Instance.TickInterval;
+            TicksApplied++;
 
             const FStatusEffectConfig& Def = UElementalReactionRules::GetEffectConfig(Instance.EffectType);
+            if (!Def.bIsDoTType)
+            {
+                break;
+            }
+
             const float DamagePerSec = Def.GetDamagePerSecond(Instance.Tier);
             if (DamagePerSec > 0.0f && DamageableComponent)
             {
                 const float TickDamage = DamagePerSec * Instance.TickInterval;
                 const EDamageType DamageType = PhysicalMaterialUtils::StatusToDamageType(Instance.EffectType);
                 DamageableComponent->ApplyDamage(TickDamage, DamageType, Instance.InstigatorActor.Get());
+
+                if (!IsValid(GetOwner()) || !IsValid(DamageableComponent))
+                {
+                    break;
+                }
             }
+        }
+
+        // Anti-runaway clamp: przy hitchach > 3s resetujemy interwał, zapobiegając lawinie ticków w kolejnej klatce
+        if (Instance.TimeUntilNextTick <= 0.0f)
+        {
+            Instance.TimeUntilNextTick = Instance.TickInterval;
         }
 
         // Weryfikacja wygaśnięcia czasu trwania (Zero-Bandwidth pattern)

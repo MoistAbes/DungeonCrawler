@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/EngineTypes.h"
@@ -42,6 +42,28 @@ public:
     /** Bezpieczne odpięcie trzymanego obiektu z przywróceniem symulacji fizyki Chaos i nadaniem pędu */
     UFUNCTION(BlueprintCallable, Category = "Custom|Networking")
     static void DetachCarriedProp(AActor* PropActor, UPrimitiveComponent* PropMesh, AActor* CarrierActor, const FVector& LaunchVelocity = FVector::ZeroVector);
+
+    /** Sprawdza, czy cel znajduje się w dozwolonym zasięgu przestrzennym od gracza z uwzględnieniem promienia kolizji celu i tolerancji */
+    UFUNCTION(BlueprintPure, Category = "Custom|Networking", meta = (DefaultToSelf = "Observer"))
+    static bool ValidateInteractionDistance(
+        const AActor* Observer,
+        const AActor* Target,
+        float MaxTraceDistance,
+        float Tolerance = 50.0f);
+
+    /** Sprawdza, czy gracz ma bezpośrednią widoczność (Line of Sight) do celu bez przeszkód po drodze */
+    UFUNCTION(BlueprintPure, Category = "Custom|Networking", meta = (DefaultToSelf = "Observer"))
+    static bool ValidateLineOfSight(
+        const AActor* Observer,
+        const AActor* Target,
+        ECollisionChannel TraceChannel = ECC_Visibility);
+
+    /** Sprawdza widoczność z dodatkową listą ignorowanych aktorów (wersja C++) */
+    static bool ValidateLineOfSightWithIgnored(
+        const AActor* Observer,
+        const AActor* Target,
+        ECollisionChannel TraceChannel,
+        const TArray<AActor*>& AdditionalIgnoredActors);
 };
 
 namespace NetUtils
@@ -80,6 +102,30 @@ namespace NetUtils
     FORCEINLINE void DetachCarriedProp(AActor* PropActor, UPrimitiveComponent* PropMesh, AActor* CarrierActor, const FVector& LaunchVelocity = FVector::ZeroVector)
     {
         UNetworkFunctionLibrary::DetachCarriedProp(PropActor, PropMesh, CarrierActor, LaunchVelocity);
+    }
+
+    /** Walidacja zasięgu interakcji */
+    FORCEINLINE bool ValidateInteractionDistance(
+        const AActor* Observer,
+        const AActor* Target,
+        float MaxTraceDistance,
+        float Tolerance = 50.0f)
+    {
+        return UNetworkFunctionLibrary::ValidateInteractionDistance(Observer, Target, MaxTraceDistance, Tolerance);
+    }
+
+    /** Walidacja widoczności (Line of Sight) */
+    FORCEINLINE bool ValidateLineOfSight(
+        const AActor* Observer,
+        const AActor* Target,
+        ECollisionChannel TraceChannel = ECC_Visibility,
+        const TArray<AActor*>& AdditionalIgnoredActors = {})
+    {
+        if (AdditionalIgnoredActors.IsEmpty())
+        {
+            return UNetworkFunctionLibrary::ValidateLineOfSight(Observer, Target, TraceChannel);
+        }
+        return UNetworkFunctionLibrary::ValidateLineOfSightWithIgnored(Observer, Target, TraceChannel, AdditionalIgnoredActors);
     }
 }
 

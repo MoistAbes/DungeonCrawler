@@ -1,6 +1,8 @@
 #include "NetworkFunctionLibrary.h"
 
+#include "CollisionQueryParams.h"
 #include "Components/PrimitiveComponent.h"
+#include "Engine/HitResult.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
@@ -221,3 +223,72 @@ void UNetworkFunctionLibrary::DetachCarriedProp(AActor* PropActor, UPrimitiveCom
         PropActor->ForceNetUpdate();
     }
 }
+
+bool UNetworkFunctionLibrary::ValidateInteractionDistance(
+    const AActor* Observer,
+    const AActor* Target,
+    float MaxTraceDistance,
+    float Tolerance)
+{
+    if (!IsValid(Observer) || !IsValid(Target))
+    {
+        return false;
+    }
+
+    const float TargetRadius = Target->GetSimpleCollisionRadius();
+    const float AllowedDistance = MaxTraceDistance + TargetRadius + Tolerance;
+    const float DistSq = FVector::DistSquared(Observer->GetActorLocation(), Target->GetActorLocation());
+
+    return DistSq <= FMath::Square(AllowedDistance);
+}
+
+bool UNetworkFunctionLibrary::ValidateLineOfSight(
+    const AActor* Observer,
+    const AActor* Target,
+    ECollisionChannel TraceChannel)
+{
+    static const TArray<AActor*> EmptyIgnored;
+    return ValidateLineOfSightWithIgnored(Observer, Target, TraceChannel, EmptyIgnored);
+}
+
+bool UNetworkFunctionLibrary::ValidateLineOfSightWithIgnored(
+    const AActor* Observer,
+    const AActor* Target,
+    ECollisionChannel TraceChannel,
+    const TArray<AActor*>& AdditionalIgnoredActors)
+{
+    if (!IsValid(Observer) || !IsValid(Target))
+    {
+        return false;
+    }
+
+    const UWorld* World = Observer->GetWorld();
+    if (!World)
+    {
+        return false;
+    }
+
+    const FVector Start = Observer->IsA<APawn>()
+        ? Cast<APawn>(Observer)->GetPawnViewLocation()
+        : Observer->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
+    const FVector End = Target->GetActorLocation();
+
+    FHitResult HitResult;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(NetValidateLOS), false, Observer);
+    for (const AActor* IgnoredActor : AdditionalIgnoredActors)
+    {
+        if (IsValid(IgnoredActor))
+        {
+            Params.AddIgnoredActor(IgnoredActor);
+        }
+    }
+
+    const bool bHit = World->LineTraceSingleByChannel(HitResult, Start, End, TraceChannel, Params);
+    if (bHit && HitResult.GetActor() != Target && HitResult.GetActor() != Observer)
+    {
+        return false;
+    }
+
+    return true;
+}
+

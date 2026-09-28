@@ -1,4 +1,4 @@
-﻿#include "PhysicsCarryComponent.h"
+#include "PhysicsCarryComponent.h"
 
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
@@ -390,13 +390,19 @@ bool UPhysicsCarryComponent::CanGrabServer(const AActor* TargetActor, const UPri
         return false;
     }
 
-    const float BoundsRadius = TargetActor->GetSimpleCollisionRadius();
-    const float AllowedDist = 300.0f + BoundsRadius + 100.0f;
-    const float DistSq = FVector::DistSquared(Owner->GetActorLocation(), TargetActor->GetActorLocation());
-    if (DistSq > FMath::Square(AllowedDist))
+    // 1. Walidacja odległości serwerowej (z tolerancją na rozmiar obiektu)
+    if (!NetUtils::ValidateInteractionDistance(Owner, TargetActor, 300.0f, 100.0f))
     {
-        UE_LOG(LogDungeonInteraction, Warning, TEXT("[PhysicsCarryComponent][Server] CanGrabServer Denied: Distance (%.1f cm > allowed %.1f cm)."),
-            FMath::Sqrt(DistSq), AllowedDist);
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[PhysicsCarryComponent][Server] CanGrabServer Denied: Target %s out of allowed distance for %s."),
+            *GetNameSafe(TargetActor), *GetNameSafe(Owner));
+        return false;
+    }
+
+    // 2. Walidacja widoczności (Line of Sight)
+    if (!NetUtils::ValidateLineOfSight(Owner, TargetActor, ECC_Visibility))
+    {
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[PhysicsCarryComponent][Server] CanGrabServer Denied: No line of sight to %s from %s."),
+            *GetNameSafe(TargetActor), *GetNameSafe(Owner));
         return false;
     }
 

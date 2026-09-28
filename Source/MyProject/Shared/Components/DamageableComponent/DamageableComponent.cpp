@@ -97,6 +97,7 @@ float UDamageableComponent::GetTotalResistance(EDamageType DamageType) const
 
 void UDamageableComponent::SetResistanceModifier(EDamageType DamageType, float Modifier)
 {
+    REQUIRE_AUTHORITY();
     ResistanceModifiers.FindOrAdd(DamageType) = Modifier;
 }
 

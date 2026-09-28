@@ -1,4 +1,4 @@
-﻿#include "InteractionComponent.h"
+#include "InteractionComponent.h"
 
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
@@ -250,11 +250,30 @@ void UInteractionComponent::Server_RequestInteract_Implementation(AActor* Target
     }
     LastServerInteractionTime = CurrentTime;
 
+    AActor* Owner = GetOwner();
+    if (!IsValid(Owner)) return;
+
+    // 1. Walidacja odległości przestrzennej (Distance Check z tolerancją)
+    if (!NetUtils::ValidateInteractionDistance(Owner, TargetActor, TraceDistance, 50.0f))
+    {
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionComponent][Server] Server_RequestInteract Denied: Target %s out of range for %s."),
+            *GetNameSafe(TargetActor), *GetNameSafe(Owner));
+        return;
+    }
+
+    // 2. Walidacja widoczności (Line of Sight Check)
+    if (!NetUtils::ValidateLineOfSight(Owner, TargetActor, InteractionChannel))
+    {
+        UE_LOG(LogDungeonInteraction, Warning, TEXT("[InteractionComponent][Server] Server_RequestInteract Denied: No line of sight to %s from %s."),
+            *GetNameSafe(TargetActor), *GetNameSafe(Owner));
+        return;
+    }
+
     if (IInteractableInterface* Interactable = Cast<IInteractableInterface>(TargetActor))
     {
-        if (Interactable->CanInteract(GetOwner()))
+        if (Interactable->CanInteract(Owner))
         {
-            Interactable->Interact(GetOwner());
+            Interactable->Interact(Owner);
             OnInteractionCompleted.Broadcast(TargetActor);
         }
     }
