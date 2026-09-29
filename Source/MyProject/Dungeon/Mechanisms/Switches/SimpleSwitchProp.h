@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MyProject/Dungeon/Props/SwitchPropBase/SwitchPropBase.h"
-#include "MyProject/Shared/Interfaces/IInteractableInterface.h"
+#include "MyProject/Dungeon/Mechanisms/Switches/SwitchPropBase.h"
+#include "MyProject/Shared/Interfaces/InteractableInterface.h"
 #include "SimpleSwitchProp.generated.h"
 
 /**

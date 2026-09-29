@@ -192,21 +192,6 @@ private:
 	/** Przetwarza interakcję pojedynczego aktora ze stykającymi się komórkami */
 	void ProcessActorInteraction(AActor* Actor, UStatusEffectComponent* StatusComp, float CurrentTime);
 
-	/** Faza A: Aktor wpływa na stykające się komórki (np. podpalenie plamy oleju, gaszenie wodą) */
-	void ApplyActorEffectsToFloor(
-		AActor* Actor,
-		UStatusEffectComponent* StatusComp,
-		const TArray<FSurfaceCellCoord>& TouchedCells,
-		TArray<EStatusEffectType>& InOutActorStatuses);
-
-	/** Faza B: Podłoże wpływa na aktora (aplikacja dominującej cieczy i wtórnych statusów podłogi) */
-	void ApplyFloorEffectsToActor(
-		AActor* Actor,
-		UStatusEffectComponent* StatusComp,
-		const TArray<FSurfaceCellCoord>& TouchedCells);
-
-	/** Zwraca współrzędne wszystkich komórek, z którymi w danej chwili styka się bryła kolizyjna lub stopy aktora */
-	void GetCellsTouchingActor(const AActor* Actor, TArray<FSurfaceCellCoord>& OutCoords) const;
 
 	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową. Zwraca false jeśli brak fizycznej geometrii. */
 	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;

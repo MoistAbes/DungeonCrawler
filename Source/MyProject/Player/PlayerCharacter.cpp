@@ -12,14 +12,14 @@
 #include "Components/SkeletalMeshComponent.h"
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Shared/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
-#include "MyProject/Player/Components/PlayerCameraComponent/PlayerCameraComponent.h"
-#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
-#include "MyProject/Shared/Interfaces/IInteractableInterface.h"
+#include "MyProject/Player/Components/PlayerCameraComponent.h"
+#include "MyProject/Shared/Interfaces/GrabbableInterface.h"
+#include "MyProject/Shared/Interfaces/InteractableInterface.h"
 
 
 APlayerCharacter::APlayerCharacter()

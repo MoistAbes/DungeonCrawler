@@ -1,10 +1,10 @@
-﻿#include "PlayerHUD.h"
+#include "PlayerHUD.h"
 
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/PlayerController.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
-#include "MyProject/UI/PlayerHUDWidget/PlayerHUDWidget.h"
+#include "MyProject/UI/PlayerHUDWidget.h"
 #include "UObject/ConstructorHelpers.h"
 
 APlayerHUD::APlayerHUD()

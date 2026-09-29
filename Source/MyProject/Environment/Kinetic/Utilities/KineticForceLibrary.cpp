@@ -10,10 +10,10 @@
 #include "Kismet/GameplayStatics.h"
 
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Environment/Kinetic/Components/KnockbackComponent/KnockbackComponent.h"
+#include "MyProject/Shared/Components/KnockbackComponent/KnockbackComponent.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
-#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase.h"
 
 namespace KineticHelpers
 {

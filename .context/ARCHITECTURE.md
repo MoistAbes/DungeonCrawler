@@ -116,6 +116,10 @@ Dungeon/
 
 ├── Mechanisms/
 
+│   ├── Switches/
+
+│   └── Traps/
+
 ├── Props/
 
 └── Structure/
@@ -130,6 +134,8 @@ Contains dungeon-specific interactive gameplay such as:
 
 \* mechanisms,
 
+\* switches and activators,
+
 \* traps,
 
 \* interactive props,
@@ -141,6 +147,12 @@ Contains dungeon-specific interactive gameplay such as:
 Examples include:
 
 
+
+\* `ASwitchPropBase`
+
+\* `ASimpleSwitchProp`
+
+\* `APressurePlateProp`
 
 \* `AMechanismTrapBase`
 
@@ -180,8 +192,6 @@ Environment/
 
 ├── Kinetic/
 
-│   ├── Components/
-
 │   └── Utilities/
 
 └── Zones/
@@ -210,6 +220,8 @@ Important existing systems include:
 
 \* environmental effects,
 
+\* sparse 3D surface cell grid,
+
 \* kinetic/physics-related functionality.
 
 
@@ -225,6 +237,14 @@ Important classes/libraries include:
 \* `UDungeonSurfaceSubsystem`
 
 \* `UElementalReactionRules`
+
+\* `USurfaceCellTransitionUtils`
+
+\* `SurfaceGridGeometryUtils`
+
+\* `SurfaceGridProjectionUtils`
+
+\* `SurfaceActorInteractionUtils`
 
 \* `UStatusZoneLibrary`
 
@@ -351,6 +371,8 @@ Important components include:
 \* `UInteractionComponent`
 
 \* `UPhysicsCarryComponent`
+
+\* `UKnockbackComponent`
 
 \* `UStatusEffectComponent`
 

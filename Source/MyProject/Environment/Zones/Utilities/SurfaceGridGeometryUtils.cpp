@@ -4,7 +4,7 @@
 #include "Engine/Brush.h"
 #include "GameFramework/Pawn.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
-#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 

@@ -9,7 +9,7 @@
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
+#include "MyProject/Shared/Interfaces/GrabbableInterface.h"
 #include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
 
 ADungeonStructureBase::ADungeonStructureBase()

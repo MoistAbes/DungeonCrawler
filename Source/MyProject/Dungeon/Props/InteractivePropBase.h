@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
-#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
-#include "MyProject/Shared/Interfaces/IInteractableInterface.h"
+#include "MyProject/Shared/Interfaces/GrabbableInterface.h"
+#include "MyProject/Shared/Interfaces/InteractableInterface.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "InteractivePropBase.generated.h"
 

@@ -8,7 +8,7 @@
 #include "CollisionShape.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
-#include "MyProject/Shared/Interfaces/IInteractableInterface.h"
+#include "MyProject/Shared/Interfaces/InteractableInterface.h"
 
 UInteractionComponent::UInteractionComponent()
 {

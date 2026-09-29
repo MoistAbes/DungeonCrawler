@@ -1,7 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
-#include "MyProject/Dungeon/Props/SwitchPropBase/SwitchPropBase.h"
+#include "MyProject/Dungeon/Mechanisms/Switches/SwitchPropBase.h"
 #include "PressurePlateProp.generated.h"
 
 class UBoxComponent;

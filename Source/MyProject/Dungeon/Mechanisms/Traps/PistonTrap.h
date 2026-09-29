@@ -1,7 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
-#include "MyProject/Dungeon/Mechanisms/MechanismTrapBase/MechanismTrapBase.h"
+#include "MyProject/Dungeon/Mechanisms/Traps/MechanismTrapBase.h"
 #include "PistonTrap.generated.h"
 
 class UBoxComponent;

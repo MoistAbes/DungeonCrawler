@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
@@ -6,7 +6,7 @@
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/UI/StatBarWidget.h"
-#include "MyProject/UI/StatusIconWidget/StatusIconWidget.h"
+#include "MyProject/UI/StatusIconWidget.h"
 #include "PlayerHUDWidget.generated.h"
 
 class UPanelWidget;

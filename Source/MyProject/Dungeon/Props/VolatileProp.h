@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MyProject/Dungeon/Props/InteractivePropBase/InteractivePropBase.h"
+#include "MyProject/Dungeon/Props/InteractivePropBase.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "MyProject/Environment/Zones/Data/ZoneTypes.h"
 #include "VolatileProp.generated.h"

@@ -142,10 +142,23 @@ classDiagram
 
 - **`UDungeonSurfaceSubsystem` (`Source/MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h`):**
   Podsystem świata (`UWorldSubsystem`) zarządzający rzadką siatką komórek powierzchniowych (`ActiveCells`). Odpowiada za:
-  - Dyskretną projekcję 3D uderzeń i wybuchów na ściany, sufity i podłogi z uwzględnieniem strony fundamentu (`ESurfaceFaceDirection`).
+  - Przechowywanie aktywnych komórek i orkiestrację cyklu życia siatki.
   - Atomową aplikację statusów przez `ApplyStatusToCell` z automatyczną natychmiastową reakcją z wiszącymi strefami (`bCheckOverlappingZones`).
-  - Cykliczną pętlę serwera `ProcessGridTick` (0.25 s): wygaszanie statusów, czyszczenie osieroconych ładunków, propagację żywiołów (Cellular Automata), interakcję z aktorami oraz ciągłą ewaluację z zarejestrowanymi strefami `RegisteredStatusZones`.
+  - Cykliczną pętlę serwera `ProcessGridTick` (0.25 s): wygaszanie statusów, propagację żywiołów (Cellular Automata), interakcję z aktorami oraz ciągłą ewaluację z zarejestrowanymi strefami `RegisteredStatusZones`.
   - Błyskawiczne czyszczenie komórek ze zniszczonych struktur (`ClearCellsInBounds`).
+  - Delegację skanowania geometrii do `SurfaceGridProjectionUtils`, interakcji aktorów do `SurfaceActorInteractionUtils`, a tranzycji komórek do `USurfaceCellTransitionUtils`.
+
+- **`SurfaceGridGeometryUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h`):**
+  Narzędzia topologii fizycznej i próbkowania przestrzennego (`ProbeSurfaceAt`, `FindSpreadCandidates` z hierarchią `Coplanar`/`Corner` i separacją strukturalną `CornerActor != SourceActor`).
+
+- **`SurfaceGridProjectionUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridProjectionUtils.h`):**
+  Narzędzia rzutowania wybuchów 3D, próbkowania dysków powierzchniowych, testów krawędzi (drop-off line traces) i weryfikacji linii wzroku (Line-of-Sight).
+
+- **`SurfaceActorInteractionUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceActorInteractionUtils.h`):**
+  Narzędzia dwukierunkowej wymiany żywiołów posadzka <-> aktor (Faza A: transfer z aktora na komórkę; Faza B: transfer z komórki na aktora).
+
+- **`USurfaceCellTransitionUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceCellTransitionUtils.h`):**
+  Adapter aplikujący reguły reakcji żywiołowych (`CalculateCellTransition`) bezpośrednio na strukturę `FSurfaceCellData` oraz zarządzający stanem wizualnym podłoża (np. płonącą posadzką).
 
 - **`UStatusZoneLibrary` (`Source/MyProject/Environment/Zones/Utilities/StatusZoneLibrary.h`):**
   Statyczna fabryka operacji obszarowych: `SpawnVolumetricZone`, `ApplyRadialBurst`, `ApplyPointImpact`, `ApplyPointHit`.
@@ -177,7 +190,7 @@ classDiagram
 
 Wszelkie zmiany stanu komórki (niezależnie czy wywołane wybuchem, pociskiem, propagacją, strefą czy wejściem postaci) przechodzą przez pojedynczą funkcję `ApplyStatusToCell`:
 1. Pobiera obecną tożsamość materiałową podłoża (`ExplicitMaterial` lub trace w głąb architektury).
-2. Wywołuje `UElementalReactionRules::CalculateElementalTransition`.
+2. Wywołuje `USurfaceCellTransitionUtils::CalculateCellTransition` (która deleguje reguły chemiczne do `UElementalReactionRules::CalculateElementalTransition`).
 3. Usuwa statusy wygaszone/skonsumowane/wyparte (`Plan.StatusesToRemove`).
 4. Dodaje lub odświeża statusy wynikowe (`Plan.StatusesToApply`).
 5. **Natychmiastowa ewaluacja stref (`bCheckOverlappingZones`):** Jeśli komórka znajduje się pod zarejestrowaną strefą wolumetryczną (np. świeży olej wylany pod chmurę prądu), funkcja natychmiast aplikuje żywioł strefy z flagą `bCheckOverlappingZones = false` (zabezpieczenie przed pętlą rekurencyjną).

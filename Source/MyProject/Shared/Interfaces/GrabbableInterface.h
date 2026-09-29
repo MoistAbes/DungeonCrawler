@@ -1,8 +1,8 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "IGrabbableInterface.generated.h"
+#include "GrabbableInterface.generated.h"
 
 UINTERFACE(MinimalAPI, BlueprintType)
 class UGrabbableInterface : public UInterface

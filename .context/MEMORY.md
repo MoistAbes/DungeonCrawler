@@ -74,6 +74,8 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UDamageableComponent` — shared damage/durability behavior.
 
+\* `UKnockbackComponent` — reusable pawn/character knockback handling with mass/resistance scaling and stun tracking.
+
 \* `UStatusEffectComponent` — status-effect state with Zero-Bandwidth networking, dynamic carrier/fuel duration syncing, and modular helpers (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`).
 
 \* `AStatusZoneBase` and derived status-zone actors — environmental status zones with automatic `UDungeonSurfaceSubsystem` registration and point geometry evaluation.
@@ -82,11 +84,17 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
-\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, solid fuel combustion orchestration, structural damage aggregation, and actor interaction.
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, solid fuel combustion orchestration, and structural damage aggregation. Delegates spatial burst projections to `SurfaceGridProjectionUtils` and floor/actor transfers to `SurfaceActorInteractionUtils`.
 
 \* `SurfaceGridGeometryUtils` — spatial sampling and physical topology engine (`ProbeSurfaceAt`, `FindSpreadCandidates` with `Coplanar`/`Corner` hierarchy and structural separation `CornerActor != SourceActor`).
 
-\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateCellTransition`, `CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, and propagation.
+\* `SurfaceGridProjectionUtils` — surface projection, 3D burst scans, edge drop-off line traces, and line-of-sight verification utilities.
+
+\* `SurfaceActorInteractionUtils` — bidirectional floor/actor elemental transfer calculations (Phase A Actor->Floor and Phase B Floor->Actor).
+
+\* `USurfaceCellTransitionUtils` — cell-level transition resolver (`CalculateCellTransition`), applying reaction rules to `FSurfaceCellData` and managing burning visual states.
+
+\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, and propagation.
 
 * **Level Design & Unreal MCP Map Editing** — The map (`Map_Dungeon_01.umap`) is 100% editable programmatically via Unreal MCP. Do not scan C++ engine headers for level tools. Always use the project CLI bridge: `& "E:\UE_5.8\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" Tools/MCP/unreal_mcp.py status` (and `run-script`, `save-level`). Full instructions and templates are in [`Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md`](file:///E:/UE_PROJECTS/MyProject/Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md).
 

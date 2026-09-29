@@ -8,7 +8,7 @@
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Interfaces/CarryAnchorProviderInterface.h"
-#include "MyProject/Shared/Interfaces/IGrabbableInterface.h"
+#include "MyProject/Shared/Interfaces/GrabbableInterface.h"
 
 UPhysicsCarryComponent::UPhysicsCarryComponent()
 {

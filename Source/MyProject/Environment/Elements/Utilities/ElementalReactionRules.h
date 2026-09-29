@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
-#include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
 #include "ElementalReactionRules.generated.h"
 
 /**
@@ -100,24 +99,6 @@ public:
 		float IncomingDuration,
 		uint8 IncomingTier,
 		const TArray<FElementalActiveStatusSnapshot>& CurrentStatuses);
-
-	/**
-	 * Główny resolver stanu komórki powierzchniowej.
-	 * Wylicza całkowity nowy stan komórki (reakcje, nośniki, wygaszanie, tożsamość materiałowa).
-	 * Modyfikuje InOutCellData i zwraca raport z przejścia stanu.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
-	static FSurfaceCellTransitionResult CalculateCellTransition(
-		UPARAM(ref) FSurfaceCellData& InOutCellData,
-		EStatusEffectType IncomingStatus,
-		float Duration,
-		AActor* Instigator,
-		float CurrentTime,
-		uint8 Tier = 0);
-
-	/** Usuwa z komórki statusy, które bez swoich nośników nie mogą dłużej legalnie istnieć na tym materiale */
-	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
-	static bool CleanOrphanedStatuses(UPARAM(ref) FSurfaceCellData& InOutCellData, EStatusEffectType StatusToPreserve = EStatusEffectType::None);
 
 private:
 	static const TMap<EStatusEffectType, FStatusEffectConfig>& GetConfigRegistry();
