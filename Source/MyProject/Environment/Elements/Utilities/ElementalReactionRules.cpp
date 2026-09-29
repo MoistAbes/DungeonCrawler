@@ -450,12 +450,9 @@ float UElementalReactionRules::ApplyCarrierSync(
 	return CurrentDuration;
 }
 
-namespace
+bool UElementalReactionRules::IsPermanentStatus(EPhysicalMaterialType Material, EStatusEffectType Status)
 {
-	FORCEINLINE bool IsPermanentEffect(EPhysicalMaterialType Material, EStatusEffectType Status)
-	{
-		return (Status == EStatusEffectType::Burning) && PhysicalMaterialUtils::GetTraits(Material).bSelfSustainingFuel;
-	}
+	return (Status == EStatusEffectType::Burning) && PhysicalMaterialUtils::GetTraits(Material).bSelfSustainingFuel;
 }
 
 FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
@@ -510,7 +507,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 
 	auto ComputeDuration = [&](EStatusEffectType Status, float ReqDuration, bool bSyncCarrier) -> float
 	{
-		if (IsPermanentEffect(TargetMaterial, Status))
+		if (IsPermanentStatus(TargetMaterial, Status))
 		{
 			return 0.0f;
 		}
@@ -546,7 +543,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 		}
 
 		const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, false);
-		const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+		const bool bPerm = IsPermanentStatus(TargetMaterial, IncomingStatus);
 
 		Plan.bAccepted = true;
 		Plan.bStateModified = true;
@@ -603,7 +600,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 			if (CanMaterialReceiveStatus(TargetMaterial, IncomingStatus, GetWorkingTypes()))
 			{
 				const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, Reaction.bSyncWithCarrierDuration);
-				const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+				const bool bPerm = IsPermanentStatus(TargetMaterial, IncomingStatus);
 				WorkingEntries.Add({ IncomingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
 			}
 		}
@@ -615,7 +612,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 			{
 				const float ReqDur = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : GetEffectConfig(Reaction.ResultingStatus).GetBaseDuration(IncomingTier);
 				const float FinalDuration = ComputeDuration(Reaction.ResultingStatus, ReqDur, Reaction.bSyncWithCarrierDuration);
-				const bool bPerm = IsPermanentEffect(TargetMaterial, Reaction.ResultingStatus);
+				const bool bPerm = IsPermanentStatus(TargetMaterial, Reaction.ResultingStatus);
 				WorkingEntries.Add({ Reaction.ResultingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
 			}
 		}
@@ -630,7 +627,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 		}
 
 		const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, false);
-		const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+		const bool bPerm = IsPermanentStatus(TargetMaterial, IncomingStatus);
 		WorkingEntries.Add({ IncomingStatus, IncomingTier, FinalDuration, bPerm, false, false });
 	}
 
@@ -673,7 +670,7 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 						{
 							const float ReqDur = (SubReaction.ResultingDuration > 0.0f) ? SubReaction.ResultingDuration : GetEffectConfig(SubReaction.ResultingStatus).GetBaseDuration();
 							const float FinalDuration = ComputeDuration(SubReaction.ResultingStatus, ReqDur, SubReaction.bSyncWithCarrierDuration);
-							const bool bPerm = IsPermanentEffect(TargetMaterial, SubReaction.ResultingStatus);
+							const bool bPerm = IsPermanentStatus(TargetMaterial, SubReaction.ResultingStatus);
 							WorkingEntries.Add({ SubReaction.ResultingStatus, 0, FinalDuration, bPerm, SubReaction.bSyncWithCarrierDuration, false });
 						}
 					}

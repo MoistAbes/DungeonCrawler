@@ -100,6 +100,8 @@ The following systems already exist and should be reused or extended when applic
 
 * **Volatile Props & Item Tier Architecture** — Planned data-driven architecture separating Item Tier (explosion radius, instant damage, knockback, inventory tooltips) from Status Tier (chemical duration, DoT, tick intervals). Full specification in [`.context/specs/VOLATILE_PROP_TIER_SYSTEM.md`](file:///E:/UE_PROJECTS/MyProject/.context/specs/VOLATILE_PROP_TIER_SYSTEM.md).
 
+* **Environmental & Dungeon Interaction Loop** — Planned vertical slice architecture covering open-ended movement modifiers (friction/speed/sensory), mechanism receivers (dungeon gates/doors responding to pressure plates/switches), dual-interaction loot chests (peaceful open vs brute-force smash), and optional ice/chilled balance design. Full specification in [`.context/specs/ENVIRONMENTAL_INTERACTION_LOOP.md`](file:///e:/UE_PROJECTS/MyProject/.context/specs/ENVIRONMENTAL_INTERACTION_LOOP.md).
+
 Detailed contracts and implementation belong in `ARCHITECTURE.md` and feature specifications.
 
 

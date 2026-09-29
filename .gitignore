@@ -1,9 +1,9 @@
 # Unreal Engine generated folders (Build artifacts)
-Binaries/
-DerivedDataCache/
-Intermediate/
-Saved/
-Build/
+/Binaries/
+/DerivedDataCache/
+/Intermediate/
+/Saved/
+/Build/
 
 # IDE files
 .idea/

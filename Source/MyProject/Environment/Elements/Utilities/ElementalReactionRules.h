@@ -74,6 +74,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
 	static bool RequiresCarrierToSustain(EPhysicalMaterialType Material, EStatusEffectType Status);
 
+	/** Sprawdza, czy dany status na danym materiale jest permanentny (np. Burning na materiale bSelfSustainingFuel) */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool IsPermanentStatus(EPhysicalMaterialType Material, EStatusEffectType Status);
+
 	/**
 	 * Uniwersalny resolver czasu trwania statusu zależnego od nośnika (Single Source of Truth).
 	 * Oblicza skorygowany czas trwania na podstawie właściwości materiału celu oraz obecności nośnika.

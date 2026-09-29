@@ -2,17 +2,12 @@
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 
-namespace
+namespace SurfaceCellTransitionUtils_Private
 {
-	FORCEINLINE bool IsPermanentEffect(EPhysicalMaterialType Material, EStatusEffectType Status)
-	{
-		return (Status == EStatusEffectType::Burning) && PhysicalMaterialUtils::GetTraits(Material).bSelfSustainingFuel;
-	}
-
 	/** Aktualizuje czas istniejącego wpisu w komórce lub dodaje nowy wpis (Upsert) */
 	void UpsertStatusEntry(FSurfaceCellData& CellData, EStatusEffectType Status, float EndTime, AActor* Instigator, uint8 Tier = 0)
 	{
-		const bool bCanBePermanent = IsPermanentEffect(CellData.SurfaceMaterial, Status);
+		const bool bCanBePermanent = UElementalReactionRules::IsPermanentStatus(CellData.SurfaceMaterial, Status);
 
 		if (FSurfaceCellStatusEntry* Existing = CellData.FindStatus(Status))
 		{
@@ -46,7 +41,7 @@ namespace
 		{
 			if (OtherEntry.Status != CarrierStatus && UElementalReactionRules::DoesStatusSyncWithCarrier(OtherEntry.Status, CarrierStatus))
 			{
-				const bool bDependentCanBePermanent = IsPermanentEffect(CellData.SurfaceMaterial, OtherEntry.Status);
+				const bool bDependentCanBePermanent = UElementalReactionRules::IsPermanentStatus(CellData.SurfaceMaterial, OtherEntry.Status);
 				if (CarrierEndTime == 0.0f && bDependentCanBePermanent)
 				{
 					OtherEntry.SetPermanent();
@@ -138,10 +133,10 @@ FSurfaceCellTransitionResult USurfaceCellTransitionUtils::CalculateCellTransitio
 	for (const FElementalStatusApplyInfo& ApplyInfo : Plan.StatusesToApply)
 	{
 		const float EndTime = ApplyInfo.bPermanent ? 0.0f : (CurrentTime + ApplyInfo.Duration);
-		UpsertStatusEntry(InOutCellData, ApplyInfo.Status, EndTime, Instigator, ApplyInfo.Tier);
+		SurfaceCellTransitionUtils_Private::UpsertStatusEntry(InOutCellData, ApplyInfo.Status, EndTime, Instigator, ApplyInfo.Tier);
 		if (ApplyInfo.bSyncWithCarrierDuration || UElementalReactionRules::IsLiquidStatus(ApplyInfo.Status))
 		{
-			SyncDependentsWithCarrier(InOutCellData, ApplyInfo.Status, EndTime);
+			SurfaceCellTransitionUtils_Private::SyncDependentsWithCarrier(InOutCellData, ApplyInfo.Status, EndTime);
 		}
 	}
 
