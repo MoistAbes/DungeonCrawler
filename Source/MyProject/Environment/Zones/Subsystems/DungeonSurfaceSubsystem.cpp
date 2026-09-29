@@ -1175,7 +1175,8 @@ void UDungeonSurfaceSubsystem::ApplyActorEffectsToFloor(
 					--StatusIdx;
 				}
 
-				const float ReactionDuration = (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : 5.0f);
+				const float FallbackDuration = UElementalReactionRules::GetEffectConfig(TargetStatus).GetBaseDuration();
+				const float ReactionDuration = (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : FallbackDuration);
 				ApplyStatusToCell(CellCoord, TargetStatus, ReactionDuration, Actor);
 
 				// Po ewentualnej modyfikacji komórki przez ApplyStatusToCell odświeżamy wskaźnik
@@ -1190,8 +1191,15 @@ void UDungeonSurfaceSubsystem::ApplyFloorEffectsToActor(
 	UStatusEffectComponent* StatusComp,
 	const TArray<FSurfaceCellCoord>& TouchedCells)
 {
-	TMap<EStatusEffectType, TWeakObjectPtr<AActor>> FloorStatusesToApply;
+	struct FFloorStatusCandidate
+	{
+		uint8 Tier = 0;
+		TWeakObjectPtr<AActor> Instigator = nullptr;
+	};
+
+	TMap<EStatusEffectType, FFloorStatusCandidate> FloorStatusesToApply;
 	EStatusEffectType DominantLiquid = EStatusEffectType::None;
+	uint8 DominantLiquidTier = 0;
 	TWeakObjectPtr<AActor> DominantLiquidInstigator = nullptr;
 	float MinLiquidDistSq = TNumericLimits<float>::Max();
 	const FVector ActorLocation = Actor->GetActorLocation();
@@ -1216,12 +1224,18 @@ void UDungeonSurfaceSubsystem::ApplyFloorEffectsToActor(
 				{
 					MinLiquidDistSq = CellDistSq;
 					DominantLiquid = Entry.Status;
+					DominantLiquidTier = Entry.Tier;
 					DominantLiquidInstigator = Entry.Instigator;
 				}
 			}
-			else if (!FloorStatusesToApply.Contains(Entry.Status))
+			else
 			{
-				FloorStatusesToApply.Add(Entry.Status, Entry.Instigator);
+				FFloorStatusCandidate& Candidate = FloorStatusesToApply.FindOrAdd(Entry.Status);
+				if (Entry.Tier > Candidate.Tier || !Candidate.Instigator.IsValid())
+				{
+					Candidate.Tier = Entry.Tier;
+					Candidate.Instigator = Entry.Instigator;
+				}
 			}
 		}
 	}
@@ -1229,9 +1243,9 @@ void UDungeonSurfaceSubsystem::ApplyFloorEffectsToActor(
 	// 1. ZŁOTA ZASADA: NAJPIERW aplikujemy płyn podłoża (fizyczny nośnik otoczenia, np. woda zmywa olej)
 	if (DominantLiquid != EStatusEffectType::None)
 	{
-		UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying dominant floor liquid %s to %s"),
-			*UEnum::GetValueAsString(DominantLiquid), *Actor->GetName());
-		StatusComp->ApplyStatus(DominantLiquid, 0, -1.0f, DominantLiquidInstigator.Get());
+		UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying dominant floor liquid %s (T%d) to %s"),
+			*UEnum::GetValueAsString(DominantLiquid), DominantLiquidTier, *Actor->GetName());
+		StatusComp->ApplyStatus(DominantLiquid, DominantLiquidTier, -1.0f, DominantLiquidInstigator.Get());
 
 		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
 		{
@@ -1244,9 +1258,9 @@ void UDungeonSurfaceSubsystem::ApplyFloorEffectsToActor(
 	{
 		if (StatusPair.Key != DominantLiquid)
 		{
-			UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying secondary floor status %s to %s"),
-				*UEnum::GetValueAsString(StatusPair.Key), *Actor->GetName());
-			StatusComp->ApplyStatus(StatusPair.Key, 0, -1.0f, StatusPair.Value.Get());
+			UE_LOG(LogDungeonElements, Verbose, TEXT("[ProcessGridTick] Applying secondary floor status %s (T%d) to %s"),
+				*UEnum::GetValueAsString(StatusPair.Key), StatusPair.Value.Tier, *Actor->GetName());
+			StatusComp->ApplyStatus(StatusPair.Key, StatusPair.Value.Tier, -1.0f, StatusPair.Value.Instigator.Get());
 		}
 	}
 }

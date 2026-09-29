@@ -40,16 +40,23 @@ void UInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
         {
             if (NetUtils::HasAuthority(this))
             {
-                if (IInteractableInterface* Interactable = Cast<IInteractableInterface>(CompletedActor))
+                const AActor* Owner = GetOwner();
+                if (IsValid(Owner) &&
+                    NetUtils::ValidateInteractionDistance(Owner, CompletedActor, TraceDistance, 100.0f) &&
+                    NetUtils::ValidateLineOfSight(Owner, CompletedActor, InteractionChannel))
                 {
-                    Interactable->Interact(GetOwner());
+                    if (IInteractableInterface* Interactable = Cast<IInteractableInterface>(CompletedActor))
+                    {
+                        Interactable->Interact(GetOwner());
+                    }
+                    OnInteractionCompleted.Broadcast(CompletedActor);
                 }
             }
             else
             {
                 Server_RequestInteract(CompletedActor);
+                OnInteractionCompleted.Broadcast(CompletedActor);
             }
-            OnInteractionCompleted.Broadcast(CompletedActor);
         }
     }
 }
@@ -83,12 +90,17 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     const UWorld* World = GetWorld();
     if (!World) return false;
 
-    FVector CameraLocation;
-    FRotator CameraRotation;
-    GetCameraViewPoint(CameraLocation, CameraRotation);
+    // Promień ZAWSZE wychodzi z oczu postaci - eliminuje sięganie kamerą 3rd person zza rogów/ścian
+    const FVector Start = Owner->IsA<APawn>()
+        ? Cast<APawn>(Owner)->GetPawnViewLocation()
+        : Owner->GetActorLocation() + FVector(0.0f, 0.0f, 50.0f);
 
-    const float ExtendedTraceDistance = TraceDistance + 1000.0f;
-    const FVector TraceEnd = CameraLocation + (CameraRotation.Vector() * ExtendedTraceDistance);
+    FVector CameraLoc;
+    FRotator CameraRot;
+    GetCameraViewPoint(CameraLoc, CameraRot);
+
+    // Długość promienia to dokładnie maksymalny zasięg interakcji (300 cm)
+    const FVector End = Start + (CameraRot.Vector() * TraceDistance);
 
     FCollisionQueryParams Params(SCENE_QUERY_STAT(InteractionTrace), false, Owner);
     Params.AddIgnoredActor(Owner);
@@ -99,8 +111,8 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
         const FCollisionShape SphereShape = FCollisionShape::MakeSphere(InteractionTraceRadius);
         bHit = World->SweepSingleByChannel(
             OutHit,
-            CameraLocation,
-            TraceEnd,
+            Start,
+            End,
             FQuat::Identity,
             InteractionChannel,
             SphereShape,
@@ -111,35 +123,21 @@ bool UInteractionComponent::PerformTrace(FHitResult& OutHit) const
     {
         bHit = World->LineTraceSingleByChannel(
             OutHit,
-            CameraLocation,
-            TraceEnd,
+            Start,
+            End,
             InteractionChannel,
             Params
         );
     }
 
-    if (!bHit)
-    {
-        return false;
-    }
-
-    const float DistanceFromPlayer = FVector::Dist(OutHit.ImpactPoint, Owner->GetActorLocation());
-    if (DistanceFromPlayer > TraceDistance)
-    {
-        return false;
-    }
-
 #if ENABLE_DRAW_DEBUG
-    if (InteractionTraceRadius > 0.0f)
+    if (bHit)
     {
         DrawDebugSphere(World, OutHit.ImpactPoint, InteractionTraceRadius, 12, FColor::Green, false, 2.0f, 0, 1.5f);
     }
-    else
-    {
-        DrawDebugLine(World, CameraLocation, OutHit.ImpactPoint, FColor::Green, false, 2.0f, 0, 2.0f);
-    }
 #endif
-    return true;
+
+    return bHit;
 }
 
 void UInteractionComponent::InteractWith(AActor* TargetActor)
@@ -165,6 +163,14 @@ void UInteractionComponent::InteractWith(AActor* TargetActor)
 
     if (NetUtils::HasAuthority(this))
     {
+        const AActor* Owner = GetOwner();
+        if (!IsValid(Owner) ||
+            !NetUtils::ValidateInteractionDistance(Owner, TargetActor, TraceDistance, 100.0f) ||
+            !NetUtils::ValidateLineOfSight(Owner, TargetActor, InteractionChannel))
+        {
+            return;
+        }
+
         Interactable->Interact(GetOwner());
         OnInteractionCompleted.Broadcast(TargetActor);
     }

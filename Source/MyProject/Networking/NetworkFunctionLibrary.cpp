@@ -289,6 +289,18 @@ bool UNetworkFunctionLibrary::ValidateLineOfSightWithIgnored(
         return false;
     }
 
+    // Dodatkowy test fizycznej geometrii świata (WorldStatic) - zabezpieczenie przed sięganiem
+    // przez przeszkody fizyczne nieblokujące kanału widoczności (np. szkło, przezroczyste bariery)
+    if (TraceChannel != ECC_WorldStatic)
+    {
+        FHitResult StaticHit;
+        const bool bStaticHit = World->LineTraceSingleByChannel(StaticHit, Start, End, ECC_WorldStatic, Params);
+        if (bStaticHit && StaticHit.GetActor() != Target && StaticHit.GetActor() != Observer)
+        {
+            return false;
+        }
+    }
+
     return true;
 }
 

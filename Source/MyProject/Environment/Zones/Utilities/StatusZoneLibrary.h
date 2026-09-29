@@ -78,7 +78,8 @@ public:
 		EStatusEffectType StatusType,
 		float Duration,
 		float DirectDamage = 0.0f,
-		AActor* InstigatorActor = nullptr);
+		AActor* InstigatorActor = nullptr,
+		uint8 Tier = 0);
 
 	/**
 	 * 4. POINT HIT (Uderzenie punktowe / bezpośrednie trafienie pociskiem - prosty wrapper)
@@ -93,5 +94,6 @@ public:
 		float Duration,
 		float DirectDamage = 15.0f,
 		float SplashRadius = 45.0f,
-		AActor* InstigatorActor = nullptr);
+		AActor* InstigatorActor = nullptr,
+		uint8 Tier = 0);
 };

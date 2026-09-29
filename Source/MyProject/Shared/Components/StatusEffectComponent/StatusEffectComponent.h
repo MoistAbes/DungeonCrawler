@@ -15,7 +15,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnElementalReactionTriggered, ES
 
 /**
  * Pojedyncza instancja aktywnego statusu na obiekcie.
- * Zoptymalizowana pod Zero-Bandwidth Networking (tylko 9 bajtów w pakiecie sieciowym).
+ * Zoptymalizowana pod Zero-Bandwidth Networking (ServerEndTime zamiast countdown).
  */
 USTRUCT(BlueprintType)
 struct FActiveStatusEffectInstance
@@ -28,7 +28,7 @@ struct FActiveStatusEffectInstance
 
     /** Poziom/tier nałożonego statusu (0 = bazowy, 1 = silny, ...) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
-    int32 Tier = 0;
+    uint8 Tier = 0;
 
     /** Całkowity czas, na jaki został zaaplikowany ten status (np. 5.0s) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Status")
@@ -83,7 +83,7 @@ public:
      * Jeśli OverrideDuration <= 0.0f, czas trwania pobierany jest automatycznie z konfiguracji danego tieru (BaseDuration).
      */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
-    bool ApplyStatus(EStatusEffectType NewStatus, int32 Tier = 0, float OverrideDuration = -1.0f, AActor* InstigatorActor = nullptr);
+    bool ApplyStatus(EStatusEffectType NewStatus, uint8 Tier = 0, float OverrideDuration = -1.0f, AActor* InstigatorActor = nullptr);
 
     /** Usuwa aktywny status z obiektu (Tylko Serwer) */
     UFUNCTION(BlueprintCallable, Category = "Custom|Status Effects")
@@ -103,7 +103,7 @@ public:
 
     /** Zwraca tier danego aktywnego statusu (0 jeśli brak lub bazowy) */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
-    int32 GetStatusTier(EStatusEffectType Status) const;
+    uint8 GetStatusTier(EStatusEffectType Status) const;
 
     /** Zwraca pozostały czas trwania danego statusu w sekundach (obliczany on-demand z ServerEndTime) */
     UFUNCTION(BlueprintPure, Category = "Custom|Status Effects")
@@ -166,9 +166,6 @@ private:
     void UpdateTickState();
     void DrawDebugLabels() const;
 
-    /** Przetwarza potencjalną reakcję chemiczną żywiołów. Zwraca wynik ewaluacji reakcji */
-    FElementalReactionResult ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses);
-
     /** Wylicza ostateczny czas trwania statusu z uwzględnieniem fizycznych nośników obecnych na obiekcie */
     float ComputeAdjustedDuration(EStatusEffectType Status, float BaseDuration, bool bSyncWithCarrier) const;
 
@@ -179,13 +176,13 @@ private:
     void SyncDependentStatusesWithCarrier(EStatusEffectType CarrierStatus, float CarrierEndTime);
 
     /** Dodaje nową instancję statusu lub odświeża istniejącą (Upsert) */
-    void UpsertStatus(EStatusEffectType Status, int32 Tier, float Duration, float EndTime, AActor* InstigatorActor);
+    void UpsertStatus(EStatusEffectType Status, uint8 Tier, float Duration, float EndTime, AActor* InstigatorActor);
 
     /** Odświeża czas trwania i parametry istniejącego statusu */
-    void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
+    void RefreshExistingStatus(FActiveStatusEffectInstance& Existing, uint8 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
 
     /** Tworzy i rejestruje nową instancję statusu na podstawie danych z rejestru */
-    void AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
+    void AddNewStatusInstance(EStatusEffectType NewStatus, uint8 Tier, float Duration, float NewEndTime, AActor* InstigatorActor);
 
     /** Flaga chroniąca przed zapętleniem rekurencji podczas czyszczenia osieroconych statusów */
     bool bIsCleaningOrphans = false;

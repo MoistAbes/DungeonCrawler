@@ -211,6 +211,18 @@ const FStatusEffectConfig& UElementalReactionRules::GetEffectConfig(EStatusEffec
 	}
 
 	// 2. Bezpieczny fallback C++ (zbudowany na starcie, zero crashy)
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	static TSet<EStatusEffectType> WarnedStatuses;
+	if (!WarnedStatuses.Contains(Status))
+	{
+		WarnedStatuses.Add(Status);
+		UE_LOG(LogDungeonElements, Warning,
+			TEXT("[Config] GetEffectConfig(%s): DataAsset missing or incomplete, using C++ fallback. "
+			     "This may cause divergence from designer-tuned values."),
+			*UEnum::GetValueAsString(Status));
+	}
+#endif
+
 	const TMap<EStatusEffectType, FStatusEffectConfig>& Registry = GetConfigRegistry();
 	if (const FStatusEffectConfig* Found = Registry.Find(Status))
 	{
@@ -422,6 +434,44 @@ bool UElementalReactionRules::CleanOrphanedStatuses(FSurfaceCellData& InOutCellD
 	return bEvictedAny;
 }
 
+float UElementalReactionRules::ApplyCarrierSync(
+	EPhysicalMaterialType Material,
+	EStatusEffectType Status,
+	float CurrentDuration,
+	EStatusEffectType CarrierStatus,
+	float CarrierRemainingTime,
+	bool bSyncWithCarrier)
+{
+	if (CarrierStatus == Status || CarrierRemainingTime <= 0.0f)
+	{
+		return CurrentDuration;
+	}
+
+	if (!DoesStatusSyncWithCarrier(Status, CarrierStatus) &&
+		!GetEffectConfig(Status).BypassTraitsIfActive.Contains(CarrierStatus))
+	{
+		return CurrentDuration;
+	}
+
+	if (RequiresCarrierToSustain(Material, Status))
+	{
+		if (bSyncWithCarrier || DoesStatusSyncWithCarrier(Status, CarrierStatus))
+		{
+			return CarrierRemainingTime;
+		}
+		else
+		{
+			return FMath::Min(CurrentDuration, CarrierRemainingTime);
+		}
+	}
+	else if (bSyncWithCarrier || DoesStatusSyncWithCarrier(Status, CarrierStatus))
+	{
+		return FMath::Max(CurrentDuration, CarrierRemainingTime);
+	}
+
+	return CurrentDuration;
+}
+
 namespace
 {
 	FORCEINLINE bool IsPermanentEffect(EPhysicalMaterialType Material, EStatusEffectType Status)
@@ -450,30 +500,14 @@ namespace
 
 		for (const FSurfaceCellStatusEntry& Entry : CellData.ActiveStatuses)
 		{
-			if (Entry.Status != Status &&
-				(UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status) ||
-				 UElementalReactionRules::GetEffectConfig(Status).BypassTraitsIfActive.Contains(Entry.Status)))
-			{
-				const float CarrierRemaining = Entry.IsPermanent() ? FallbackDuration : (Entry.ServerEndTime - CurrentTime);
-				if (CarrierRemaining > 0.0f)
-				{
-					if (UElementalReactionRules::RequiresCarrierToSustain(Material, Status))
-					{
-						if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status))
-						{
-							FinalDuration = CarrierRemaining;
-						}
-						else
-						{
-							FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
-						}
-					}
-					else if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, Entry.Status))
-					{
-						FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
-					}
-				}
-			}
+			const float CarrierRemaining = Entry.IsPermanent() ? FallbackDuration : (Entry.ServerEndTime - CurrentTime);
+			FinalDuration = UElementalReactionRules::ApplyCarrierSync(
+				Material,
+				Status,
+				FinalDuration,
+				Entry.Status,
+				CarrierRemaining,
+				bSyncWithCarrier);
 		}
 
 		return FMath::Max(0.1f, FinalDuration);
@@ -557,6 +591,311 @@ namespace
 	}
 }
 
+FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
+	EPhysicalMaterialType TargetMaterial,
+	EStatusEffectType IncomingStatus,
+	float IncomingDuration,
+	uint8 IncomingTier,
+	const TArray<FElementalActiveStatusSnapshot>& CurrentStatuses)
+{
+	FElementalTransitionPlan Plan;
+
+	if (IncomingStatus == EStatusEffectType::None || IncomingDuration < 0.0f)
+	{
+		return Plan;
+	}
+
+	struct FWorkingStatusEntry
+	{
+		EStatusEffectType Status = EStatusEffectType::None;
+		uint8 Tier = 0;
+		float Duration = 0.0f;
+		bool bPermanent = false;
+		bool bSyncWithCarrier = false;
+		bool bWasOriginallyPresent = false;
+	};
+
+	TArray<FWorkingStatusEntry> WorkingEntries;
+	TArray<EStatusEffectType> OriginalStatusTypes;
+	for (const FElementalActiveStatusSnapshot& Snap : CurrentStatuses)
+	{
+		if (Snap.Status != EStatusEffectType::None)
+		{
+			WorkingEntries.Add({ Snap.Status, Snap.Tier, Snap.RemainingDuration, Snap.bPermanent, false, true });
+			OriginalStatusTypes.AddUnique(Snap.Status);
+		}
+	}
+
+	auto GetWorkingTypes = [&]() -> TArray<EStatusEffectType>
+	{
+		TArray<EStatusEffectType> Types;
+		for (const auto& E : WorkingEntries)
+		{
+			Types.Add(E.Status);
+		}
+		return Types;
+	};
+
+	auto FindWorkingEntry = [&](EStatusEffectType S) -> FWorkingStatusEntry*
+	{
+		return WorkingEntries.FindByPredicate([S](const FWorkingStatusEntry& E) { return E.Status == S; });
+	};
+
+	auto ComputeDuration = [&](EStatusEffectType Status, float ReqDuration, bool bSyncCarrier) -> float
+	{
+		if (IsPermanentEffect(TargetMaterial, Status))
+		{
+			return 0.0f;
+		}
+
+		const float FallbackDuration = GetEffectConfig(Status).GetBaseDuration(IncomingTier);
+		float FinalDuration = (ReqDuration > 0.0f) ? ReqDuration : FallbackDuration;
+
+		for (const FWorkingStatusEntry& Other : WorkingEntries)
+		{
+			if (Other.Status != Status)
+			{
+				const float CarrierRemaining = Other.bPermanent ? FallbackDuration : Other.Duration;
+				FinalDuration = ApplyCarrierSync(
+					TargetMaterial,
+					Status,
+					FinalDuration,
+					Other.Status,
+					CarrierRemaining,
+					bSyncCarrier);
+			}
+		}
+
+		return FMath::Max(0.1f, FinalDuration);
+	};
+
+	// 1. Pusty cel: sprawdzamy czy materiał może przyjąć ten status
+	if (WorkingEntries.IsEmpty())
+	{
+		if (!CanMaterialReceiveStatus(TargetMaterial, IncomingStatus, {}))
+		{
+			Plan.bAccepted = false;
+			return Plan;
+		}
+
+		const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, false);
+		const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+
+		Plan.bAccepted = true;
+		Plan.bStateModified = true;
+		Plan.StatusesToApply.Add({ IncomingStatus, IncomingTier, FinalDuration, bPerm, false });
+		return Plan;
+	}
+
+	// 2. Identyczny żywioł: odświeżamy czas trwania i synchronizujemy nośniki
+	if (FWorkingStatusEntry* Existing = FindWorkingEntry(IncomingStatus))
+	{
+		Existing->Tier = FMath::Max(Existing->Tier, IncomingTier);
+		const float NewDuration = ComputeDuration(IncomingStatus, IncomingDuration, false);
+		Existing->Duration = FMath::Max(Existing->Duration, NewDuration);
+
+		Plan.bAccepted = true;
+		Plan.bStateModified = true;
+		Plan.StatusesToApply.Add({ Existing->Status, Existing->Tier, Existing->Duration, Existing->bPermanent, false });
+
+		// Synchronizacja nośników
+		for (FWorkingStatusEntry& Other : WorkingEntries)
+		{
+			if (Other.Status != IncomingStatus && DoesStatusSyncWithCarrier(Other.Status, IncomingStatus))
+			{
+				Other.Duration = ApplyCarrierSync(TargetMaterial, Other.Status, Other.Duration, IncomingStatus, Existing->Duration, true);
+				Plan.StatusesToApply.Add({ Other.Status, Other.Tier, Other.Duration, Other.bPermanent, true });
+			}
+		}
+
+		return Plan;
+	}
+
+	// 3. Różny żywioł: KROK 1 - Reakcja pierwotna (Ingress Reaction)
+	TArray<EStatusEffectType> ActiveTypesBefore = GetWorkingTypes();
+	SortByReactionPriority(ActiveTypesBefore);
+	const FElementalReactionResult Reaction = EvaluateReaction(IncomingStatus, ActiveTypesBefore);
+	Plan.PrimaryReaction = Reaction;
+
+	if (Reaction.bReactionOccurred)
+	{
+		if (Reaction.ReactionTag != NAME_None)
+		{
+			Plan.TriggeredReactionTags.AddUnique(Reaction.ReactionTag);
+		}
+
+		// A. Usunięcie wygaszonego / skonsumowanego statusu
+		if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
+		{
+			WorkingEntries.RemoveAll([&](const FWorkingStatusEntry& E) { return E.Status == Reaction.ExistingStatusToRemove; });
+		}
+
+		// B. Dodanie przychodzącego statusu (jeśli nie został zużyty, np. Oiled)
+		if (!Reaction.bConsumeIncomingStatus)
+		{
+			if (CanMaterialReceiveStatus(TargetMaterial, IncomingStatus, GetWorkingTypes()))
+			{
+				const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, Reaction.bSyncWithCarrierDuration);
+				const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+				WorkingEntries.Add({ IncomingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
+			}
+		}
+
+		// C. Dodanie statusu wynikowego reakcji (jeśli powstał, np. Burning z iskry na oleju)
+		if (Reaction.ResultingStatus != EStatusEffectType::None)
+		{
+			if (CanMaterialReceiveStatus(TargetMaterial, Reaction.ResultingStatus, GetWorkingTypes()))
+			{
+				const float ReqDur = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : GetEffectConfig(Reaction.ResultingStatus).GetBaseDuration(IncomingTier);
+				const float FinalDuration = ComputeDuration(Reaction.ResultingStatus, ReqDur, Reaction.bSyncWithCarrierDuration);
+				const bool bPerm = IsPermanentEffect(TargetMaterial, Reaction.ResultingStatus);
+				WorkingEntries.Add({ Reaction.ResultingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
+			}
+		}
+	}
+	else
+	{
+		// Brak reakcji bezpośredniej: sprawdzamy czy materiał i obecne powłoki pozwalają na koegzystencję
+		if (!CanMaterialReceiveStatus(TargetMaterial, IncomingStatus, GetWorkingTypes()))
+		{
+			Plan.bAccepted = false;
+			return Plan;
+		}
+
+		const float FinalDuration = ComputeDuration(IncomingStatus, IncomingDuration, false);
+		const bool bPerm = IsPermanentEffect(TargetMaterial, IncomingStatus);
+		WorkingEntries.Add({ IncomingStatus, IncomingTier, FinalDuration, bPerm, false, false });
+	}
+
+	// 4. KROK 2 - Pętla Równowagi Chemicznej (Chemical Equilibrium Loop)
+	// Rozwiązuje reakcje wewnętrzne pomiędzy współistniejącymi statusami (np. Burning vs Wet -> Steam_Extinguish)
+	int32 Iteration = 0;
+	bool bChanged = true;
+	while (bChanged && Iteration++ < 3 && WorkingEntries.Num() > 1)
+	{
+		bChanged = false;
+		TArray<EStatusEffectType> CurrentTypes = GetWorkingTypes();
+		SortByReactionPriority(CurrentTypes);
+
+		for (int32 i = 0; i < CurrentTypes.Num() && !bChanged; ++i)
+		{
+			for (int32 j = i + 1; j < CurrentTypes.Num() && !bChanged; ++j)
+			{
+				const FElementalReactionResult SubReaction = EvaluateReaction(CurrentTypes[i], { CurrentTypes[j] });
+				if (SubReaction.bReactionOccurred &&
+					(SubReaction.ExistingStatusToRemove != EStatusEffectType::None ||
+					 SubReaction.bConsumeIncomingStatus ||
+					 SubReaction.ResultingStatus != EStatusEffectType::None))
+				{
+					if (SubReaction.ReactionTag != NAME_None)
+					{
+						Plan.TriggeredReactionTags.AddUnique(SubReaction.ReactionTag);
+					}
+
+					if (SubReaction.ExistingStatusToRemove != EStatusEffectType::None)
+					{
+						WorkingEntries.RemoveAll([&](const FWorkingStatusEntry& E) { return E.Status == SubReaction.ExistingStatusToRemove; });
+					}
+					if (SubReaction.bConsumeIncomingStatus)
+					{
+						WorkingEntries.RemoveAll([&](const FWorkingStatusEntry& E) { return E.Status == CurrentTypes[i]; });
+					}
+					if (SubReaction.ResultingStatus != EStatusEffectType::None)
+					{
+						if (CanMaterialReceiveStatus(TargetMaterial, SubReaction.ResultingStatus, GetWorkingTypes()))
+						{
+							const float ReqDur = (SubReaction.ResultingDuration > 0.0f) ? SubReaction.ResultingDuration : GetEffectConfig(SubReaction.ResultingStatus).GetBaseDuration();
+							const float FinalDuration = ComputeDuration(SubReaction.ResultingStatus, ReqDur, SubReaction.bSyncWithCarrierDuration);
+							const bool bPerm = IsPermanentEffect(TargetMaterial, SubReaction.ResultingStatus);
+							WorkingEntries.Add({ SubReaction.ResultingStatus, 0, FinalDuration, bPerm, SubReaction.bSyncWithCarrierDuration, false });
+						}
+					}
+
+					bChanged = true;
+				}
+			}
+		}
+	}
+
+	// 5. KROK 3 - Złota Zasada Płynów (Liquid Mutual Exclusivity)
+	// Tylko jeden płyn może pokrywać daną powierzchnię w tym samym czasie.
+	// Nowszy płyn (IncomingStatus) lub płyn o wyższym priorytecie wypiera pozostałe.
+	EStatusEffectType DominantLiquid = EStatusEffectType::None;
+	if (IsLiquidStatus(IncomingStatus) && FindWorkingEntry(IncomingStatus))
+	{
+		DominantLiquid = IncomingStatus;
+	}
+	else
+	{
+		for (const FWorkingStatusEntry& Entry : WorkingEntries)
+		{
+			if (IsLiquidStatus(Entry.Status))
+			{
+				if (DominantLiquid == EStatusEffectType::None || GetReactionPriority(Entry.Status) > GetReactionPriority(DominantLiquid))
+				{
+					DominantLiquid = Entry.Status;
+				}
+			}
+		}
+	}
+
+	if (DominantLiquid != EStatusEffectType::None)
+	{
+		WorkingEntries.RemoveAll([&](const FWorkingStatusEntry& E) {
+			return E.Status != DominantLiquid && IsLiquidStatus(E.Status);
+		});
+	}
+
+	// 6. KROK 4 - Czyszczenie osieroconych statusów (Clean Orphaned Statuses)
+	for (int32 Index = WorkingEntries.Num() - 1; Index >= 0; --Index)
+	{
+		const EStatusEffectType StatusToCheck = WorkingEntries[Index].Status;
+		TArray<EStatusEffectType> OtherActive;
+		for (int32 OtherIdx = 0; OtherIdx < WorkingEntries.Num(); ++OtherIdx)
+		{
+			if (OtherIdx != Index)
+			{
+				OtherActive.Add(WorkingEntries[OtherIdx].Status);
+			}
+		}
+
+		if (!CanMaterialReceiveStatus(TargetMaterial, StatusToCheck, OtherActive))
+		{
+			WorkingEntries.RemoveAt(Index);
+		}
+	}
+
+	// 7. KROK 5 - Budowa wynikowego planu przejścia (Final Plan Assembly)
+	Plan.bAccepted = true;
+	TArray<EStatusEffectType> FinalActiveTypes = GetWorkingTypes();
+
+	for (EStatusEffectType OrigStatus : OriginalStatusTypes)
+	{
+		if (!FinalActiveTypes.Contains(OrigStatus))
+		{
+			Plan.StatusesToRemove.Add(OrigStatus);
+			Plan.bStateModified = true;
+		}
+	}
+
+	for (const FWorkingStatusEntry& Entry : WorkingEntries)
+	{
+		Plan.StatusesToApply.Add({ Entry.Status, Entry.Tier, Entry.Duration, Entry.bPermanent, Entry.bSyncWithCarrier });
+		if (!OriginalStatusTypes.Contains(Entry.Status))
+		{
+			Plan.bStateModified = true;
+		}
+	}
+
+	Plan.bBecameEmpty = WorkingEntries.IsEmpty();
+	if (Plan.StatusesToRemove.Num() > 0 || Plan.StatusesToApply.Num() > 0)
+	{
+		Plan.bStateModified = true;
+	}
+
+	return Plan;
+}
+
 FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 	FSurfaceCellData& InOutCellData,
 	EStatusEffectType IncomingStatus,
@@ -572,101 +911,54 @@ FSurfaceCellTransitionResult UElementalReactionRules::CalculateCellTransition(
 		return Result;
 	}
 
-	// 1. Pusta komórka: sprawdzamy czy materiał może przyjąć ten status
-	if (InOutCellData.IsEmpty())
+	// 1. Zbuduj migawkę aktywnych statusów komórki
+	TArray<FElementalActiveStatusSnapshot> Snapshots;
+	for (const FSurfaceCellStatusEntry& Entry : InOutCellData.ActiveStatuses)
 	{
-		if (!CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, {}))
-		{
-			Result.bAccepted = false;
-			return Result;
-		}
+		Snapshots.Add({
+			Entry.Status,
+			Entry.Tier,
+			Entry.IsPermanent() ? 0.0f : Entry.GetRemainingDuration(CurrentTime),
+			Entry.IsPermanent()
+		});
+	}
 
-		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
-		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
+	// 2. Wywołaj centralny kalkulator przejścia (Single Source of Truth)
+	const FElementalTransitionPlan Plan = CalculateElementalTransition(
+		InOutCellData.SurfaceMaterial,
+		IncomingStatus,
+		Duration,
+		Tier,
+		Snapshots);
 
-		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator, Tier);
-		Result.bAccepted = true;
-		Result.bStateModified = true;
+	Result.bAccepted = Plan.bAccepted;
+	Result.bStateModified = Plan.bStateModified;
+	Result.bCellBecameEmpty = Plan.bBecameEmpty;
+	Result.Reaction = Plan.PrimaryReaction;
+
+	if (!Plan.bAccepted)
+	{
 		return Result;
 	}
 
-	// 2. Identyczny żywioł: odświeżamy czas trwania i synchronizujemy nośniki
-	if (InOutCellData.HasStatus(IncomingStatus))
+	// 3. Zaaplikuj usunięcia statusów
+	for (EStatusEffectType StatusToRemove : Plan.StatusesToRemove)
 	{
-		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
-		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
-
-		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator, Tier);
-		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);
-
-		Result.bAccepted = true;
-		Result.bStateModified = true;
-		return Result;
+		InOutCellData.RemoveStatus(StatusToRemove);
 	}
 
-	// 3. Różny żywioł: ewaluacja reakcji chemicznej
-	TArray<EStatusEffectType> ActiveStatusesBefore = InOutCellData.GetStatusTypes();
-	SortByReactionPriority(ActiveStatusesBefore);
-	const FElementalReactionResult Reaction = EvaluateReaction(IncomingStatus, ActiveStatusesBefore);
-	Result.Reaction = Reaction;
-
-	if (Reaction.bReactionOccurred)
+	// 4. Zaaplikuj nałożenia / aktualizacje statusów
+	for (const FElementalStatusApplyInfo& ApplyInfo : Plan.StatusesToApply)
 	{
-		// Określamy status do nałożenia: status wynikowy reakcji (np. Burning z iskry na oleju)
-		// lub przychodzący status jeśli nie został zużyty (np. Conductive Shock: prąd w wodzie)
-		const EStatusEffectType StatusToApply = (Reaction.ResultingStatus != EStatusEffectType::None)
-			? Reaction.ResultingStatus
-			: (!Reaction.bConsumeIncomingStatus ? IncomingStatus : EStatusEffectType::None);
-
-		if (StatusToApply != EStatusEffectType::None && CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, StatusToApply, ActiveStatusesBefore))
+		const float EndTime = ApplyInfo.bPermanent ? 0.0f : (CurrentTime + ApplyInfo.Duration);
+		UpsertStatusEntry(InOutCellData, ApplyInfo.Status, EndTime, Instigator, ApplyInfo.Tier);
+		if (ApplyInfo.bSyncWithCarrierDuration || IsLiquidStatus(ApplyInfo.Status))
 		{
-			const float RequestedDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : Duration;
-			const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, StatusToApply, RequestedDuration, Reaction.bSyncWithCarrierDuration, InOutCellData, CurrentTime);
-			const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, StatusToApply) ? 0.0f : (CurrentTime + FinalDuration);
-
-			UpsertStatusEntry(InOutCellData, StatusToApply, EndTime, Instigator, Tier);
-			SyncDependentsWithCarrier(InOutCellData, StatusToApply, EndTime);
-			Result.bStateModified = true;
+			SyncDependentsWithCarrier(InOutCellData, ApplyInfo.Status, EndTime);
 		}
-
-		// Usunięcie wygaszonego/skonsumowanego statusu
-		if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-		{
-			InOutCellData.RemoveStatus(Reaction.ExistingStatusToRemove);
-			CleanOrphanedStatuses(InOutCellData, StatusToApply);
-			Result.bStateModified = true;
-		}
-
-		// ZŁOTA ZASADA CHEMICZNA: Komórka nigdy nie może posiadać dwóch płynów jednocześnie
-		if (EnforceLiquidMutualExclusivity(InOutCellData, StatusToApply))
-		{
-			Result.bStateModified = true;
-		}
-
-		Result.bAccepted = Result.bStateModified;
-		Result.bCellBecameEmpty = InOutCellData.IsEmpty();
-		return Result;
 	}
 
-	// 4. Brak reakcji chemicznej: koegzystencja nowego żywiołu z obecnymi powłokami
-	if (CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, IncomingStatus, ActiveStatusesBefore))
-	{
-		if (EnforceLiquidMutualExclusivity(InOutCellData, IncomingStatus))
-		{
-			Result.bStateModified = true;
-		}
-
-		const float FinalDuration = ComputeAdjustedDuration(InOutCellData.SurfaceMaterial, IncomingStatus, Duration, false, InOutCellData, CurrentTime);
-		const float EndTime = IsPermanentEffect(InOutCellData.SurfaceMaterial, IncomingStatus) ? 0.0f : (CurrentTime + FinalDuration);
-
-		UpsertStatusEntry(InOutCellData, IncomingStatus, EndTime, Instigator);
-		SyncDependentsWithCarrier(InOutCellData, IncomingStatus, EndTime);
-
-		Result.bAccepted = true;
-		Result.bStateModified = true;
-		return Result;
-	}
-
+	Result.bCellBecameEmpty = InOutCellData.IsEmpty();
 	return Result;
 }
 

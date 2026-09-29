@@ -30,8 +30,8 @@ struct MYPROJECT_API FZoneEffectConfig
 	EStatusEffectType AppliedStatus = EStatusEffectType::None;
 
 	/** Poziom (Tier) nakładanego statusu żywiołowego (0 = bazowy, 1 = zaawansowany, 2 = elitarny) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Zone|Status", meta = (ClampMin = "0"))
-	int32 StatusTier = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Zone|Status", meta = (ClampMin = "0", ClampMax = "255"))
+	uint8 StatusTier = 0;
 
 	// --- Impuls Natychmiastowy / Wybuch (Apply Once on Burst / Hit) ---
 

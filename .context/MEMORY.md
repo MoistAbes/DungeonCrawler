@@ -90,7 +90,7 @@ The following systems already exist and should be reused or extended when applic
 
 * **Level Design & Unreal MCP Map Editing** — The map (`Map_Dungeon_01.umap`) is 100% editable programmatically via Unreal MCP. Do not scan C++ engine headers for level tools. Always use the project CLI bridge: `& "E:\UE_5.8\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" Tools/MCP/unreal_mcp.py status` (and `run-script`, `save-level`). Full instructions and templates are in [`Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md`](file:///E:/UE_PROJECTS/MyProject/Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md).
 
-
+* **Volatile Props & Item Tier Architecture** — Planned data-driven architecture separating Item Tier (explosion radius, instant damage, knockback, inventory tooltips) from Status Tier (chemical duration, DoT, tick intervals). Full specification in [`.context/specs/VOLATILE_PROP_TIER_SYSTEM.md`](file:///E:/UE_PROJECTS/MyProject/.context/specs/VOLATILE_PROP_TIER_SYSTEM.md).
 
 Detailed contracts and implementation belong in `ARCHITECTURE.md` and feature specifications.
 

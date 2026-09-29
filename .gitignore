@@ -23,3 +23,7 @@ Build/
 # AI Agent local artifacts
 .antigravity/
 *.log
+
+# Python cache
+__pycache__/
+*.pyc

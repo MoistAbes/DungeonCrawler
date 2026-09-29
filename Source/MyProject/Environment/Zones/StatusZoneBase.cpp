@@ -160,7 +160,7 @@ void AStatusZoneBase::HandleBeginOverlap(
 	{
 		if (UStatusEffectComponent* StatusComp = OtherActor->FindComponentByClass<UStatusEffectComponent>())
 		{
-			StatusComp->ApplyStatus(EffectConfig.AppliedStatus, 0, -1.0f, ZoneInstigator.Get());
+			StatusComp->ApplyStatus(EffectConfig.AppliedStatus, EffectConfig.StatusTier, -1.0f, ZoneInstigator.Get());
 		}
 	}
 }
@@ -340,14 +340,14 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			return;
 		}
 
-		// 3. Reakcja bez bezpośredniej zamiany (np. Conductive Shock: woda i prąd)
-		if (IncomingStatus == EStatusEffectType::Electrified)
+		// 3. Reakcja współistnienia / nie-konsumpcji (np. Conductive Shock: prąd elektryzuje całą strefę wody)
+		if (!Reaction.bConsumeIncomingStatus && IncomingStatus != EStatusEffectType::None)
 		{
-			EffectConfig.AppliedStatus = EStatusEffectType::Electrified;
-			const FStatusEffectConfig& ElectrifiedConfig = UElementalReactionRules::GetEffectConfig(EStatusEffectType::Electrified);
-			const float ShockDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ElectrifiedConfig.GetBaseDuration();
-			ServerEndTime = GetWorld()->GetTimeSeconds() + ShockDuration;
-			EffectConfig.ContinuousDamagePerSec = ElectrifiedConfig.GetDamagePerSecond();
+			EffectConfig.AppliedStatus = IncomingStatus;
+			const FStatusEffectConfig& IncomingConfig = UElementalReactionRules::GetEffectConfig(IncomingStatus);
+			const float EffectDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : IncomingConfig.GetBaseDuration();
+			ServerEndTime = GetWorld()->GetTimeSeconds() + EffectDuration;
+			EffectConfig.ContinuousDamagePerSec = IncomingConfig.GetDamagePerSecond();
 
 			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
 			FlushNetDormancy();

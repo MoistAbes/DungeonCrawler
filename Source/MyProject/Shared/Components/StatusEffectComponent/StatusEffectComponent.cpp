@@ -145,30 +145,14 @@ float UStatusEffectComponent::ComputeAdjustedDuration(EStatusEffectType Status, 
 
     for (const FActiveStatusEffectInstance& ActiveInst : ActiveStatusEffects)
     {
-        if (ActiveInst.EffectType != Status &&
-            (UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType) ||
-             UElementalReactionRules::GetEffectConfig(Status).BypassTraitsIfActive.Contains(ActiveInst.EffectType)))
-        {
-            const float CarrierRemaining = ActiveInst.ServerEndTime - CurrentTime;
-            if (CarrierRemaining > 0.0f)
-            {
-                if (UElementalReactionRules::RequiresCarrierToSustain(Material, Status))
-                {
-                    if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType))
-                    {
-                        FinalDuration = CarrierRemaining;
-                    }
-                    else
-                    {
-                        FinalDuration = FMath::Min(FinalDuration, CarrierRemaining);
-                    }
-                }
-                else if (bSyncWithCarrier || UElementalReactionRules::DoesStatusSyncWithCarrier(Status, ActiveInst.EffectType))
-                {
-                    FinalDuration = FMath::Max(FinalDuration, CarrierRemaining);
-                }
-            }
-        }
+        const float CarrierRemaining = ActiveInst.ServerEndTime - CurrentTime;
+        FinalDuration = UElementalReactionRules::ApplyCarrierSync(
+            Material,
+            Status,
+            FinalDuration,
+            ActiveInst.EffectType,
+            CarrierRemaining,
+            bSyncWithCarrier);
     }
 
     return FinalDuration;
@@ -203,7 +187,7 @@ void UStatusEffectComponent::SyncDependentStatusesWithCarrier(EStatusEffectType 
     }
 }
 
-void UStatusEffectComponent::UpsertStatus(EStatusEffectType Status, int32 Tier, float Duration, float EndTime, AActor* InstigatorActor)
+void UStatusEffectComponent::UpsertStatus(EStatusEffectType Status, uint8 Tier, float Duration, float EndTime, AActor* InstigatorActor)
 {
     if (FActiveStatusEffectInstance* Existing = FindInstance(Status))
     {
@@ -215,7 +199,7 @@ void UStatusEffectComponent::UpsertStatus(EStatusEffectType Status, int32 Tier, 
     }
 }
 
-bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier, float OverrideDuration, AActor* InstigatorActor)
+bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, uint8 Tier, float OverrideDuration, AActor* InstigatorActor)
 {
     REQUIRE_AUTHORITY_RET(false);
 
@@ -231,107 +215,83 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, int32 Tier
         return false;
     }
 
-    const float NewEndTime = GetCurrentSyncedTime() + Duration;
+    const float CurrentTime = GetCurrentSyncedTime();
 
-    // 1. Jeśli dany status jest już aktywny, odświeżamy tylko czas trwania (lub podnosimy tier) i nie wywołujemy reakcji
-    if (FActiveStatusEffectInstance* Existing = FindInstance(NewStatus))
+    // 1. Zbuduj migawkę aktywnych statusów obiektu
+    TArray<FElementalActiveStatusSnapshot> Snapshots;
+    for (const FActiveStatusEffectInstance& Inst : ActiveStatusEffects)
     {
-        RefreshExistingStatus(*Existing, Tier, Duration, NewEndTime, InstigatorActor);
-        return true;
+        Snapshots.Add({
+            Inst.EffectType,
+            Inst.Tier,
+            FMath::Max(0.0f, Inst.ServerEndTime - CurrentTime),
+            false
+        });
     }
 
-    const EPhysicalMaterialType OwnerMaterial = GetOwnerMaterialType();
-    const TArray<EStatusEffectType> ActiveStatusList = GetActiveStatuses();
+    // 2. Wywołaj centralny kalkulator przejścia (Single Source of Truth)
+    const FElementalTransitionPlan Plan = UElementalReactionRules::CalculateElementalTransition(
+        GetOwnerMaterialType(),
+        NewStatus,
+        Duration,
+        Tier,
+        Snapshots);
 
-    // 2. Reakcje chemiczne żywiołów (np. Vaporize, Extinguish, Oil Ignition, Conductive Shock)
-    const FElementalReactionResult Reaction = ProcessElementalReaction(NewStatus, ActiveStatusList);
-    if (Reaction.bReactionOccurred)
+    if (!Plan.bAccepted)
     {
-        // A. Jeśli reakcja wytworzyła nowy status wynikowy (np. Olej + Ogień -> Burning, Iskra + Olej -> Burning)
-        if (Reaction.ResultingStatus != EStatusEffectType::None)
-        {
-            if (UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, Reaction.ResultingStatus, ActiveStatusList))
-            {
-                const FStatusEffectConfig& ResultConfig = UElementalReactionRules::GetEffectConfig(Reaction.ResultingStatus);
-                const float ResultBaseDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : ResultConfig.GetBaseDuration(Tier);
-                const float ResultInitialDuration = (OverrideDuration > 0.0f) ? OverrideDuration : ResultBaseDuration;
-                const float ResultDuration = ComputeAdjustedDuration(Reaction.ResultingStatus, ResultInitialDuration, Reaction.bSyncWithCarrierDuration);
-                const float ResultEndTime = GetCurrentSyncedTime() + ResultDuration;
-
-                UpsertStatus(Reaction.ResultingStatus, Tier, ResultDuration, ResultEndTime, InstigatorActor);
-            }
-            return true;
-        }
-
-        // B. Jeśli przychodzący status został skonsumowany/zneutralizowany w reakcji (np. woda zgasiła ogień)
-        if (Reaction.bConsumeIncomingStatus)
-        {
-            UpdateTickState();
-            return true;
-        }
-
-        // C. Jeśli przychodzący status nie został skonsumowany (np. Conductive Shock: woda i prąd współistnieją),
-        // kontynuujemy do standardowej walidacji materiałowej i dodania NewStatus.
-    }
-
-    // 3. Walidacja tożsamości materiałowej celu: czy materiał może utrzymać ten status?
-    // Przekazujemy listę powłok z momentu uderzenia (np. naoliwiony kamień pozwala na podtrzymanie ognia)
-    if (!UElementalReactionRules::CanMaterialReceiveStatus(OwnerMaterial, NewStatus, ActiveStatusList))
-    {
-        UE_LOG(LogDungeonElements, Verbose, TEXT("[StatusEffect]%s %s cannot sustain %s (Material %d incompatible)"),
-            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(OwnerMaterial));
+        UE_LOG(LogDungeonElements, Verbose, TEXT("[StatusEffect]%s %s rejected status %s (Material %d incompatible)"),
+            *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), static_cast<int32>(GetOwnerMaterialType()));
         return false;
     }
 
-    // 4. Wyliczenie skorygowanego czasu trwania z nośnikiem i zarejestrowanie statusu
-    const float FinalDuration = ComputeAdjustedDuration(NewStatus, Duration, Reaction.bSyncWithCarrierDuration);
-    const float FinalEndTime = GetCurrentSyncedTime() + FinalDuration;
+    // 3. Rozgłoś wszystkie reakcje żywiołowe, które odpaliły w łańcuchu (VFX, SFX, audio, delegat)
+    if (Plan.PrimaryReaction.bReactionOccurred)
+    {
+        OnElementalReactionTriggered.Broadcast(NewStatus, Plan.PrimaryReaction.ExistingStatusToRemove, Plan.PrimaryReaction.ReactionTag);
+    }
+    for (FName ReactionTag : Plan.TriggeredReactionTags)
+    {
+        if (ReactionTag != Plan.PrimaryReaction.ReactionTag)
+        {
+            OnElementalReactionTriggered.Broadcast(NewStatus, EStatusEffectType::None, ReactionTag);
+        }
 
-    UpsertStatus(NewStatus, Tier, FinalDuration, FinalEndTime, InstigatorActor);
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+        if (bShowDebugInWorld && GetWorld() && GetOwner())
+        {
+            const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
+            DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
+        }
+        if (GEngine && GetOwner())
+        {
+            GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
+                FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *ReactionTag.ToString()));
+        }
+#endif
+    }
 
+    // 4. Usuń statusy wskazane przez plan (np. zneutralizowana woda, rozładowany prąd)
+    for (EStatusEffectType StatusToRemove : Plan.StatusesToRemove)
+    {
+        RemoveStatus(StatusToRemove);
+    }
+
+    // 5. Nałóż/odśwież statusy wskazane przez plan
+    for (const FElementalStatusApplyInfo& ApplyInfo : Plan.StatusesToApply)
+    {
+        const float FinalEndTime = CurrentTime + ApplyInfo.Duration;
+        UpsertStatus(ApplyInfo.Status, ApplyInfo.Tier, ApplyInfo.Duration, FinalEndTime, InstigatorActor);
+        if (ApplyInfo.bSyncWithCarrierDuration || UElementalReactionRules::IsLiquidStatus(ApplyInfo.Status))
+        {
+            SyncDependentStatusesWithCarrier(ApplyInfo.Status, FinalEndTime);
+        }
+    }
+
+    UpdateTickState();
     return true;
 }
 
-FElementalReactionResult UStatusEffectComponent::ProcessElementalReaction(EStatusEffectType NewStatus, const TArray<EStatusEffectType>& ActiveStatuses)
-{
-    const FElementalReactionResult Reaction = UElementalReactionRules::EvaluateReaction(NewStatus, ActiveStatuses);
-    if (!Reaction.bReactionOccurred)
-    {
-        return Reaction;
-    }
-
-    // Usunięcie skonsumowanego/wypartego statusu (np. woda odparowuje od ognia, olej spala się)
-    if (Reaction.ExistingStatusToRemove != EStatusEffectType::None)
-    {
-        RemoveStatus(Reaction.ExistingStatusToRemove);
-    }
-
-    // ZŁOTA ZASADA CHEMICZNA: Jeśli przychodzący status jest płynem (np. Wet),
-    // to KAŻDY inny aktywny płyn (np. Oiled) zostaje bezwzględnie zmyty z celu
-    DisplaceOtherLiquids(NewStatus);
-
-    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusReaction]%s %s: Triggered '%s'!"),
-        *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString());
-
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-    if (bShowDebugInWorld && GetWorld() && GetOwner())
-    {
-        const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
-        DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *Reaction.ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
-    }
-    if (GEngine && GetOwner())
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
-            FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *Reaction.ReactionTag.ToString()));
-    }
-#endif
-
-    OnElementalReactionTriggered.Broadcast(NewStatus, Reaction.ExistingStatusToRemove, Reaction.ReactionTag);
-
-    return Reaction;
-}
-
-void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
+void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& Existing, uint8 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
     // ZŁOTA ZASADA CHEMICZNA: Jeśli odświeżany status jest płynem, żaden inny płyn nie może istnieć
     DisplaceOtherLiquids(Existing.EffectType);
@@ -373,7 +333,7 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
     OnStatusEffectApplied.Broadcast(Existing.EffectType, GetRemainingDuration(Existing.EffectType));
 }
 
-void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, int32 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
+void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, uint8 Tier, float Duration, float NewEndTime, AActor* InstigatorActor)
 {
     // ZŁOTA ZASADA CHEMICZNA: Całkowity zakaz koegzystencji dwóch płynów (Liquid Mutual Exclusivity).
     DisplaceOtherLiquids(NewStatus);
@@ -411,7 +371,7 @@ void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, i
     OnStatusEffectApplied.Broadcast(NewStatus, Duration);
 }
 
-int32 UStatusEffectComponent::GetStatusTier(EStatusEffectType Status) const
+uint8 UStatusEffectComponent::GetStatusTier(EStatusEffectType Status) const
 {
     if (const FActiveStatusEffectInstance* Found = FindInstance(Status))
     {

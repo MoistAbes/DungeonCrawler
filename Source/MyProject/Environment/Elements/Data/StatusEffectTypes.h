@@ -34,9 +34,9 @@ struct FStatusReactionRule
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	bool bCanSpreadToNeighbor = false;
 
-	/** Czas trwania nowego statusu powstałego w wyniku reakcji */
+	/** Czas trwania nowego statusu powstałego w wyniku reakcji (0.0f = użyj bazowego czasu z konfiguracji statusu) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
-	float ResultingDuration = 5.0f;
+	float ResultingDuration = 0.0f;
 
 	/** Czy czas trwania statusu powinien zsynchronizować się z istniejącym nośnikiem (np. prąd na wodzie trwa do końca wody) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
@@ -168,4 +168,87 @@ struct FStatusEffectConfig
 	float GetBaseDamagePerSecond(int32 TierIndex = 0) const { return GetDamagePerSecond(TierIndex); }
 	float GetBaseDuration(int32 TierIndex = 0) const { return GetTier(TierIndex).BaseDuration; }
 	float GetTickInterval(int32 TierIndex = 0) const { return GetTier(TierIndex).TickInterval; }
+};
+
+/**
+ * Lekka migawka aktywnego statusu przekazywana do centralnego silnika chemii (UElementalReactionRules).
+ */
+USTRUCT(BlueprintType)
+struct FElementalActiveStatusSnapshot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	EStatusEffectType Status = EStatusEffectType::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	uint8 Tier = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	float RemainingDuration = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	bool bPermanent = false;
+};
+
+/**
+ * Instrukcja nałożenia lub odświeżenia statusu wygenerowana przez plan przejścia.
+ */
+USTRUCT(BlueprintType)
+struct FElementalStatusApplyInfo
+{
+	GENERATED_BODY()
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	EStatusEffectType Status = EStatusEffectType::None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	uint8 Tier = 0;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	float Duration = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bPermanent = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bSyncWithCarrierDuration = false;
+};
+
+/**
+ * Całościowy plan przejścia stanu elementarnego wyliczony przez UElementalReactionRules.
+ * Uniwersalny Single Source of Truth dla komórek posadzki oraz obiektów (UStatusEffectComponent).
+ */
+USTRUCT(BlueprintType)
+struct FElementalTransitionPlan
+{
+	GENERATED_BODY()
+
+	/** Czy próba nałożenia statusu została zaakceptowana przez reguły materiałowe i chemiczne */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bAccepted = false;
+
+	/** Czy jakikolwiek status został dodany, usunięty lub zmodyfikowany */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bStateModified = false;
+
+	/** Czy cel po przejściu nie posiada już żadnych aktywnych statusów */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	bool bBecameEmpty = false;
+
+	/** Lista statusów, które należy usunąć z celu */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	TArray<EStatusEffectType> StatusesToRemove;
+
+	/** Lista statusów, które należy nałożyć lub zaktualizować na celu */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	TArray<FElementalStatusApplyInfo> StatusesToApply;
+
+	/** Wszystkie unikalne reakcje żywiołowe, które zaszły w łańcuchu (do VFX, SFX, audio, delegatów) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	TArray<FName> TriggeredReactionTags;
+
+	/** Główna reakcja (dla kompatybilności wstecznej) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Elemental")
+	FElementalReactionResult PrimaryReaction;
 };

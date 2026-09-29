@@ -105,7 +105,7 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 	{
 		if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
 		{
-			SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor);
+			SurfaceSubsystem->ApplyElementalBurst(Origin, Radius, EffectConfig.AppliedStatus, Duration, InstigatorActor, EffectConfig.StatusTier);
 		}
 	}
 
@@ -238,7 +238,8 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 	EStatusEffectType StatusType,
 	float Duration,
 	float DirectDamage,
-	AActor* InstigatorActor)
+	AActor* InstigatorActor,
+	uint8 Tier)
 {
 	UWorld* World = GEngine ? GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull) : nullptr;
 	if (!World || World->GetNetMode() == NM_Client || !HitResult.bBlockingHit)
@@ -271,7 +272,7 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 		{
 			if (UStatusEffectComponent* StatusComp = TargetActor->FindComponentByClass<UStatusEffectComponent>())
 			{
-				StatusComp->ApplyStatus(StatusType, 0, Duration, InstigatorActor);
+				StatusComp->ApplyStatus(StatusType, Tier, Duration, InstigatorActor);
 			}
 		}
 	}
@@ -281,7 +282,7 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 	{
 		if (StatusType != EStatusEffectType::None && SplashRadius > 0.0f)
 		{
-			SurfaceSubsystem->ApplyStatusFromHit(HitResult, SplashRadius, StatusType, Duration, InstigatorActor);
+			SurfaceSubsystem->ApplyStatusFromHit(HitResult, SplashRadius, StatusType, Duration, InstigatorActor, Tier);
 		}
 	}
 
@@ -301,7 +302,8 @@ bool UStatusZoneLibrary::ApplyPointHit(
 	float Duration,
 	float DirectDamage,
 	float SplashRadius,
-	AActor* InstigatorActor)
+	AActor* InstigatorActor,
+	uint8 Tier)
 {
 	if (!TargetActor || !NetUtils::HasAuthority(TargetActor) || StatusType == EStatusEffectType::None)
 	{
@@ -323,6 +325,7 @@ bool UStatusZoneLibrary::ApplyPointHit(
 		StatusType,
 		Duration,
 		DirectDamage,
-		InstigatorActor);
+		InstigatorActor,
+		Tier);
 }
 

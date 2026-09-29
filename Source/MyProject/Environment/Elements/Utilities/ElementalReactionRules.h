@@ -76,6 +76,32 @@ public:
 	static bool RequiresCarrierToSustain(EPhysicalMaterialType Material, EStatusEffectType Status);
 
 	/**
+	 * Uniwersalny resolver czasu trwania statusu zależnego od nośnika (Single Source of Truth).
+	 * Oblicza skorygowany czas trwania na podstawie właściwości materiału celu oraz obecności nośnika.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static float ApplyCarrierSync(
+		EPhysicalMaterialType Material,
+		EStatusEffectType Status,
+		float CurrentDuration,
+		EStatusEffectType CarrierStatus,
+		float CarrierRemainingTime,
+		bool bSyncWithCarrier);
+
+	/**
+	 * Centralny, uniwersalny kalkulator przejścia stanu elementarnego (Single Source of Truth).
+	 * Wykonuje pełny łańcuch reakcji żywiołowych, pętlę równowagi chemicznej, wyparcie płynów oraz czyszczenie osieroconych statusów.
+	 * Wykorzystywany zarówno przez komórki siatki podłoża, jak i komponenty aktorów (UStatusEffectComponent).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static FElementalTransitionPlan CalculateElementalTransition(
+		EPhysicalMaterialType TargetMaterial,
+		EStatusEffectType IncomingStatus,
+		float IncomingDuration,
+		uint8 IncomingTier,
+		const TArray<FElementalActiveStatusSnapshot>& CurrentStatuses);
+
+	/**
 	 * Główny resolver stanu komórki powierzchniowej.
 	 * Wylicza całkowity nowy stan komórki (reakcje, nośniki, wygaszanie, tożsamość materiałowa).
 	 * Modyfikuje InOutCellData i zwraca raport z przejścia stanu.

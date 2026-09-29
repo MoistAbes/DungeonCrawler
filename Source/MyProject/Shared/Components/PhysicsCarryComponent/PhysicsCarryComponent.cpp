@@ -411,7 +411,10 @@ bool UPhysicsCarryComponent::CanGrabServer(const AActor* TargetActor, const UPri
 
 void UPhysicsCarryComponent::TryGrab(AActor* TargetActor, UPrimitiveComponent* ComponentToGrab)
 {
-    if (!TargetActor) return;
+    if (!CanGrabServer(TargetActor, ComponentToGrab))
+    {
+        return;
+    }
 
     const UWorld* World = GetWorld();
     if (!World) return;
@@ -421,25 +424,6 @@ void UPhysicsCarryComponent::TryGrab(AActor* TargetActor, UPrimitiveComponent* C
     {
         return;
     }
-
-    if (CarryState != ECarryState::None)
-    {
-        return;
-    }
-
-    const IGrabbableInterface* Grabbable = Cast<IGrabbableInterface>(TargetActor);
-    if (!Grabbable || !Grabbable->CanGrab(GetOwner()))
-    {
-        return;
-    }
-
-    if (Grabbable->GetMass() > MaxCarryMass)
-    {
-        UE_LOG(LogDungeonInteraction, Warning, TEXT("[PhysicsCarryComponent] Prop mass (%.1f kg) exceeds limit (%.1f kg)."),
-            Grabbable->GetMass(), MaxCarryMass);
-        return;
-    }
-
     LastClientInteractionTime = CurrentTime;
 
     if (NetUtils::HasAuthority(this))
