@@ -22,7 +22,6 @@ AStatusZoneBase::AStatusZoneBase()
 	NetDormancy = DORM_DormantAll;
 
 	Radius = 300.0f;
-	ShapeType = EZoneShapeType::VolumetricSphere;
 	ZoneCreationTime = 0.0f;
 	bDrawDebugZone = true;
 
@@ -42,7 +41,6 @@ void AStatusZoneBase::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AStatusZoneBase, EffectConfig);
 	DOREPLIFETIME(AStatusZoneBase, Radius);
 	DOREPLIFETIME(AStatusZoneBase, ServerEndTime);
-	DOREPLIFETIME(AStatusZoneBase, ShapeType);
 	DOREPLIFETIME(AStatusZoneBase, ZoneCreationTime);
 }
 
@@ -91,7 +89,6 @@ void AStatusZoneBase::InitializeZoneBase(
 	const FZoneEffectConfig& InConfig,
 	float InRadius,
 	float InDuration,
-	EZoneShapeType InShapeType,
 	AActor* InInstigator)
 {
 	REQUIRE_AUTHORITY();
@@ -103,7 +100,6 @@ void AStatusZoneBase::InitializeZoneBase(
 	Radius = FMath::Max(30.0f, InRadius);
 	ServerEndTime = (InDuration > 0.0f) ? (CurrentTime + InDuration) : 0.0f;
 	ZoneCreationTime = CurrentTime;
-	ShapeType = InShapeType;
 	ZoneInstigator = InInstigator;
 
 	if (ZoneCollision)

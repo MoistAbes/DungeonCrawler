@@ -5,16 +5,6 @@
 #include "ZoneTypes.generated.h"
 
 /**
- * Kształt geometryczny i tryb przestrzenny strefy statusu w świecie gry.
- */
-UENUM(BlueprintType)
-enum class EZoneShapeType : uint8
-{
-	/** Przestrzenna, pełna bryła sferyczna w powietrzu (chmury, gazy, mgła, silence) */
-	VolumetricSphere UMETA(DisplayName = "Volumetric Sphere")
-};
-
-/**
  * Zunifikowana konfiguracja parametrów i efektów strefy.
  * Pozwala na modularne definiowanie zarówno wybuchów jednorazowych, jak i trwałych stref w świecie.
  */

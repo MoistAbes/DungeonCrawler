@@ -53,18 +53,6 @@ public:
 		bool bApplyToSurfaceGrid = true);
 
 	/**
-	 * Alias wsteczny dla ApplyRadialBurst (zachowanie pełnej kompatybilności wstecznej).
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (WorldContext = "WorldContextObject"))
-	static void ApplyInstantBurst(
-		const UObject* WorldContextObject,
-		const FVector& Origin,
-		float Radius,
-		const FZoneEffectConfig& EffectConfig,
-		float Duration = 4.0f,
-		AActor* InstigatorActor = nullptr);
-
-	/**
 	 * 3. POINT IMPACT (Uderzenie punktowe w pojedynczą powierzchnię lub cel)
 	 * Dedykowane dla rzucanych butelek wody/oleju, koktajli Mołotowa, strzał żywiołowych, bełtów, pułapek naciskowych.
 	 * Maluje wyłącznie uderzoną powierzchnię (od precyzyjnego 1-komórkowego trafienia przy SplashRadius <= 25cm do szerokiej plamy).
@@ -78,22 +66,6 @@ public:
 		EStatusEffectType StatusType,
 		float Duration,
 		float DirectDamage = 0.0f,
-		AActor* InstigatorActor = nullptr,
-		uint8 Tier = 0);
-
-	/**
-	 * 4. POINT HIT (Uderzenie punktowe / bezpośrednie trafienie pociskiem - prosty wrapper)
-	 * Trafienie pojedynczym pociskiem w cel (postać, strefa, niszczalna drewniana struktura).
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Environment|Zones|Delivery", meta = (DefaultToSelf = "InstigatorActor"))
-	static bool ApplyPointHit(
-		AActor* TargetActor,
-		const FVector& HitLocation,
-		const FVector& HitNormal,
-		EStatusEffectType StatusType,
-		float Duration,
-		float DirectDamage = 15.0f,
-		float SplashRadius = 45.0f,
 		AActor* InstigatorActor = nullptr,
 		uint8 Tier = 0);
 };

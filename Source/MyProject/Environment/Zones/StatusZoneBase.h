@@ -35,7 +35,6 @@ public:
 		const FZoneEffectConfig& InConfig,
 		float InRadius,
 		float InDuration,
-		EZoneShapeType InShapeType,
 		AActor* InInstigator = nullptr);
 
 	/** Obsługuje uderzenie żywiołem w strefę (np. ogień w plamę oleju) */
@@ -57,10 +56,6 @@ public:
 	/** Zwraca promień strefy */
 	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
 	float GetRadius() const { return Radius; }
-
-	/** Zwraca typ kształtu strefy */
-	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
-	EZoneShapeType GetShapeType() const { return ShapeType; }
 
 	/** Zwraca czas utworzenia strefy na serwerze */
 	UFUNCTION(BlueprintPure, Category = "Custom|Zone")
@@ -108,9 +103,6 @@ protected:
 
 	UPROPERTY(Replicated)
 	float ZoneCreationTime = 0.0f;
-
-	UPROPERTY(Replicated)
-	EZoneShapeType ShapeType = EZoneShapeType::VolumetricSphere;
 
 	UFUNCTION()
 	virtual void OnRep_EffectConfig();

@@ -140,18 +140,6 @@ public:
         AActor* InstigatorActor = nullptr);
 
     /**
-     * Aplikuje siłę przyciągającą w stronę środka (wir / czarna dziura / pułapka magnetyczna).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Environment|Kinetic", meta = (WorldContext = "WorldContextObject"))
-    static void ApplyVortexPull(
-        const UObject* WorldContextObject,
-        const FVector& Center,
-        float Radius,
-        float PullStrength,
-        AActor* InstigatorActor = nullptr,
-        bool bDrawDebug = false);
-
-    /**
      * Aplikuje fizyczną siłę pchania (np. przy zderzeniu postaci z ciałem sztywnym lub przy niesieniu tarczy/propa).
      * Jeśli obiekt mieści się w limicie masy (<= MaxPushableMass), aplikuje rzeczywistą siłę AddForceAtLocation.
      * Jeśli obiekt jest zbyt ciężki (> MaxPushableMass) i podano VelocityStopThreshold > 0, tłumi mikroruchy Chaos.

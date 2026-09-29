@@ -56,10 +56,9 @@ classDiagram
         #float Radius
         #float ServerEndTime
         #float ZoneCreationTime
-        #EZoneShapeType ShapeType
         #float ZoneTickInterval
         #TWeakObjectPtr~AActor~ ZoneInstigator
-        +InitializeZoneBase(Config, Radius, Duration, ShapeType, Instigator)
+        +InitializeZoneBase(Config, Radius, Duration, Instigator)
         +ApplyElementalHit(IncomingStatus, InstantDamage, Instigator)
         +MergeWithZone(Duration, RadiusGrowthMultiplier, MaxRadiusCap)
         +GetZoneInstigator() AActor*

@@ -220,17 +220,6 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 	}
 }
 
-void UStatusZoneLibrary::ApplyInstantBurst(
-	const UObject* WorldContextObject,
-	const FVector& Origin,
-	float Radius,
-	const FZoneEffectConfig& EffectConfig,
-	float Duration,
-	AActor* InstigatorActor)
-{
-	ApplyRadialBurst(WorldContextObject, Origin, Radius, EffectConfig, Duration, InstigatorActor);
-}
-
 bool UStatusZoneLibrary::ApplyPointImpact(
 	const UObject* WorldContextObject,
 	const FHitResult& HitResult,
@@ -294,38 +283,4 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 	return true;
 }
 
-bool UStatusZoneLibrary::ApplyPointHit(
-	AActor* TargetActor,
-	const FVector& HitLocation,
-	const FVector& HitNormal,
-	EStatusEffectType StatusType,
-	float Duration,
-	float DirectDamage,
-	float SplashRadius,
-	AActor* InstigatorActor,
-	uint8 Tier)
-{
-	if (!TargetActor || !NetUtils::HasAuthority(TargetActor) || StatusType == EStatusEffectType::None)
-	{
-		return false;
-	}
-
-	FHitResult SyntheticHit;
-	SyntheticHit.bBlockingHit = true;
-	SyntheticHit.HitObjectHandle = FActorInstanceHandle(TargetActor);
-	SyntheticHit.ImpactPoint = HitLocation;
-	SyntheticHit.ImpactNormal = HitNormal;
-	SyntheticHit.Location = HitLocation;
-	SyntheticHit.Normal = HitNormal;
-
-	return ApplyPointImpact(
-		TargetActor,
-		SyntheticHit,
-		SplashRadius,
-		StatusType,
-		Duration,
-		DirectDamage,
-		InstigatorActor,
-		Tier);
-}
 

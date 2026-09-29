@@ -6,7 +6,6 @@
 
 AVolumetricStatusZone::AVolumetricStatusZone()
 {
-	ShapeType = EZoneShapeType::VolumetricSphere;
 }
 
 void AVolumetricStatusZone::InitializeVolumetricZone(
@@ -15,7 +14,7 @@ void AVolumetricStatusZone::InitializeVolumetricZone(
 	float InDuration,
 	AActor* InInstigator)
 {
-	InitializeZoneBase(InConfig, InRadius, InDuration, EZoneShapeType::VolumetricSphere, InInstigator);
+	InitializeZoneBase(InConfig, InRadius, InDuration, InInstigator);
 
 	// Wolumetryczna strefa żywiołowa (np. kula prądu, chmura ognia) projektuje swój status
 	// na siatkę powierzchniową lochu (posadzkę / ściany) w swoim geometrycznym zasięgu
