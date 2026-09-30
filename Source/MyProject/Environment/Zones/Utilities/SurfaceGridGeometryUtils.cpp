@@ -7,6 +7,7 @@
 #include "MyProject/Dungeon/Props/InteractivePropBase.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Shared/Interfaces/SurfaceGridTargetInterface.h"
 
 namespace SurfaceGridGeometryUtils
 {
@@ -23,10 +24,15 @@ namespace SurfaceGridGeometryUtils
 			return false;
 		}
 
-		// 2. Akceptujemy oficjalne fundamenty i architekturę lochu (ściany, podłogi, sufity)
+		// 2. Akceptujemy aktorów implementujących ISurfaceGridTargetInterface (fundamenty, mechanizmy, bramy, pułapki)
+		if (Actor->GetClass()->ImplementsInterface(USurfaceGridTargetInterface::StaticClass()))
+		{
+			return ISurfaceGridTargetInterface::Execute_CanReceiveSurfaceCells(Actor);
+		}
+
+		// 3. Fallback dla architektury lochu (ADungeonStructureBase)
 		if (const ADungeonStructureBase* Structure = Cast<ADungeonStructureBase>(Actor))
 		{
-			// Tylko zniszczalne elementy architektury lochu mogą przestać być powierzchnią po zniszczeniu
 			if (Structure->IsDestructible())
 			{
 				if (const UDamageableComponent* DmgComp = Structure->GetDamageableComponent())
@@ -40,7 +46,7 @@ namespace SurfaceGridGeometryUtils
 			return true;
 		}
 
-		// 3. Akceptujemy geometrię poziomu (BSP Brushes map testowych i prototypowych)
+		// 4. Akceptujemy geometrię poziomu (BSP Brushes map testowych i prototypowych)
 		if (Actor->IsA<ABrush>())
 		{
 			return true;
@@ -77,7 +83,9 @@ namespace SurfaceGridGeometryUtils
 		const FVector ProbeEnd = ProbeLocation - SurfaceNormal * ProbeDistance;
 
 		TArray<FHitResult> Hits;
-		const FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
+		FCollisionObjectQueryParams ObjectParams;
+		ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 		if (World->LineTraceMultiByObjectType(Hits, ProbeStart, ProbeEnd, ObjectParams, Params))
 		{
 			for (const FHitResult& Hit : Hits)

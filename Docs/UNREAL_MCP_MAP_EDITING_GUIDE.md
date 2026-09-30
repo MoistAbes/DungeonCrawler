@@ -377,3 +377,49 @@ Wystarczy krótki, czytelny opis, np.:
 ### Problem 8: `TimeoutError: timed out` przy masowej generacji (200+ aktorów)
 - **Przyczyna:** Domyślny timeout żądań HTTP w skrypcie mostka CLI wynosił 30 sekund. Tworzenie złożonej komnaty z kilkuset aktorami wraz z fizyką i oświetleniem w silniku zajmuje 40–70 sekund, przez co klient Pythona przedwcześnie zrywał połączenie mimo trwającej pracy w silniku.
 - **Rozwiązanie:** W [`Tools/MCP/unreal_mcp.py`](file:///E:/UE_PROJECTS/MyProject/Tools/MCP/unreal_mcp.py) timeout został zwiększony do **180 sekund** (`timeout=180`), co pozwala na bezproblemowe, jednorazowe generowanie całych wielkich sal i pięter.
+
+### Problem 9: Ciche zamykanie edytora przy uruchamianiu z PowerShell (Windows Job Object)
+- **Przyczyna:** Standardowe uruchomienie edytora przez `Start-Process UnrealEditor.exe` w sesji terminala lub podprocesie agenta AI przypisuje Unreal Editor do tymczasowego **Windows Job Object**. Gdy polecenie powłoki się kończy, jądro Windows automatycznie zabija wszystkie procesy potomne powiązane z tym Job Objectem (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`). W logu widać: `LogMemory: Process is running as part of a Windows Job with separate resource limits` i po kilku sekundach edytor znika bez żadnego pliku crasha w `Saved/Crashes`.
+- **Rozwiązanie:** Należy uruchomić proces edytora przez **WMI** (`Win32_Process.Create`), co odpina proces od drzewa procesów powłoki i uruchamia go w trwałym kontekście systemowym:
+  ```powershell
+  $cmd = 'E:\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe "E:\UE_PROJECTS\MyProject\MyProject.uproject"'
+  Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine = $cmd}
+  ```
+
+### Problem 10: `Parameter error: ... is not a valid object path for property 'blueprint'`
+- **Przyczyna:** `BlueprintTools.get_default_object` oraz `BlueprintTools.compile_blueprint` nie akceptują ścieżki pakietu assetu (np. `{"refPath": "/Game/Interactive/Props/BP_Switch_Lever"}`).
+- **Rozwiązanie:** Należy podać pełną ścieżkę do obiektu Blueprinta z kropką:
+  ```json
+  {"blueprint": {"refPath": "/Game/Interactive/Props/BP_Switch_Lever.BP_Switch_Lever"}}
+  ```
+
+### Problem 11: Pułapki nazw parametrów w schematach narzędzi MCP (Strict Schema Gotchas)
+Narzędzia MCP w Unreal walidują schematy JSON rygorystycznie. Użycie intuicyjnej nazwy zamiast dokładnej nazwy ze schematu skutkuje błędem `input param "..." is required by the function input schema Json, but is missing`:
+- **`AssetTools.create_folder`**: Parametr to **`path`**, a NIE `folder_path`.
+- **`ObjectTools.list_properties`**: Parametr to **`instance`**, a NIE `object`.
+- **`ObjectTools.get_properties`**: Parametr to **`properties`** (tablica nazw string), a NIE `property_names`.
+- **`StaticMeshTools.get_bounds`**: Parametr to **`mesh`**, a NIE `static_mesh`.
+- **`SceneTools.find_actors`**: Wymaga przekazania wszystkich trzech pól oznaczonych w schemacie jako wymagane: `name`, `tag` oraz `collision_channels` (np. `{"name": "...", "tag": "", "collision_channels": []}`).
+
+### Problem 12: Wyszukiwanie `find_actors` po `name` filtruje etykietę (`ActorLabel`), a nie nazwę instancji UObject
+- **Przyczyna:** Wyszukiwanie `find_actors` z `name: "BP_DungeonGate_Portcullis"` nie zwraca wyników, jeśli etykieta aktora na poziomie to np. `Gate_Arena_Entrance` lub wygenerowane `Gate`.
+- **Rozwiązanie:** Szukaj po fragmencie etykiety (np. `name: "Gate"`) lub pobieraj aktorów z dedykowanego folderu Outlinera za pomocą `SceneTools.get_actors_in_folder(folder_path, recursive=True)`.
+
+### Problem 13: Łączenie aktorów referencjami (np. `TargetMechanisms`, tablice `TArray<AActor*>`)
+- **Format:** Aby ustawić tablicę wskaźników do innych aktorów w scenie na instancji aktora (np. `TargetMechanisms` w płytach naciskowych i dźwigniach), przekaż listę obiektów `refPath`:
+  ```python
+  target_vals = {
+      "targetMechanisms": [
+          {"refPath": "/Game/Maps/Map_Dungeon_01.Map_Dungeon_01:PersistentLevel.BP_DungeonGate_Portcullis_C_0"}
+      ]
+  }
+  execute_tool("editor_toolset.toolsets.object.ObjectTools.set_properties", json.dumps({
+      "instance": plate_actor,
+      "values": json.dumps(target_vals)
+  }))
+  ```
+
+### Problem 14: `UnicodeEncodeError: 'charmap' codec can't encode character...` w Pythonie CLI
+- **Przyczyna:** Konsola PowerShell w Windows domyślnie używa kodowania strony kodowej `cp1252` lub `cp852`. Wypisywanie polskich znaków diakrytycznych w instrukcjach `print(...)` w skryptach Pythona uruchamianych przez silnikowy `python.exe` powoduje natychmiastowe przerwanie skryptu błędem kodowania.
+- **Rozwiązanie:** Używaj w komunikatach diagnostycznych skryptów MCP wyłącznie znaków ASCII (bez polskich ogonków) lub ustaw w środowisku `PYTHONIOENCODING=utf-8`.
+

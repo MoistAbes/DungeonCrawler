@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Shared/Interfaces/SurfaceGridTargetInterface.h"
 #include "DungeonStructureBase.generated.h"
 
 class UStaticMeshComponent;
@@ -15,7 +16,7 @@ class UDamageableComponent;
  * Posiada UDamageableComponent do obsługi punktów wytrzymałości i zniszczeń kinetycznych/żywiołowych.
  */
 UCLASS(Abstract)
-class MYPROJECT_API ADungeonStructureBase : public AActor, public IMaterialProviderInterface
+class MYPROJECT_API ADungeonStructureBase : public AActor, public IMaterialProviderInterface, public ISurfaceGridTargetInterface
 {
 	GENERATED_BODY()
 
@@ -24,6 +25,10 @@ public:
 
 	// --- IMaterialProviderInterface ---
 	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
+
+	// --- ISurfaceGridTargetInterface ---
+	virtual bool CanReceiveSurfaceCells_Implementation() const override;
+	virtual bool IsDynamicSurface_Implementation() const override { return false; }
 
 	// --- Gettery ---
 

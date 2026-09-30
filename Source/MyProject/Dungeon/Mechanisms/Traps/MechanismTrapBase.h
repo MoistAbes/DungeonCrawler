@@ -1,15 +1,15 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
 #include "MyProject/Shared/Interfaces/MechanismReceiverInterface.h"
+#include "MyProject/Shared/Interfaces/SurfaceGridTargetInterface.h"
 #include "MechanismTrapBase.generated.h"
 
 class UStaticMeshComponent;
 class UDamageableComponent;
-class UStatusEffectComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTrapTriggeredSignature, AActor*, InstigatorActor);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTrapActiveStateChangedSignature, bool, bIsActive);
@@ -21,12 +21,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnTrapActiveStateChangedSignature, 
  * Implementuje:
  * - IMechanismReceiverInterface (reakcja na sygnały z przełączników ASwitchPropBase i płyt APressurePlateProp).
  * - IMaterialProviderInterface (tożsamość materiałowa).
- * - Świętą Trójcę (StaticMesh bazy, UDamageableComponent, UStatusEffectComponent).
+ * - ISurfaceGridTargetInterface (powierzchnia pod komórki lochu).
  * - Tryb pętli czasowej (bIsContinuousLoop) oraz tryb wyzwalany sygnałem ze świata.
  * - Server-Authoritative First – cała logika aktywacji i fizyki jest autorytatywna.
  */
 UCLASS(Abstract)
-class MYPROJECT_API AMechanismTrapBase : public AActor, public IMechanismReceiverInterface, public IMaterialProviderInterface
+class MYPROJECT_API AMechanismTrapBase : public AActor, public IMechanismReceiverInterface, public IMaterialProviderInterface, public ISurfaceGridTargetInterface
 {
 	GENERATED_BODY()
 
@@ -37,6 +37,10 @@ public:
 
 	// --- IMaterialProviderInterface ---
 	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
+
+	// --- ISurfaceGridTargetInterface ---
+	virtual bool CanReceiveSurfaceCells_Implementation() const override;
+	virtual bool IsDynamicSurface_Implementation() const override { return false; }
 
 	// --- IMechanismReceiverInterface ---
 	virtual void SetMechanismState_Implementation(bool bActive, AActor* TriggeringActor) override;
@@ -65,9 +69,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
-
-	UFUNCTION(BlueprintPure, Category = "Custom|Components")
-	UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
 
 	// --- Delegaty ---
 
@@ -121,10 +122,6 @@ protected:
 	/** Komponent wytrzymałości fizycznej (pozwala na rozbicie pułapki) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
-
-	/** Komponent obsługujący stany żywiołowe */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-	TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja

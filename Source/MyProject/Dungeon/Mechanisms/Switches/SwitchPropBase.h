@@ -1,14 +1,14 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Shared/Interfaces/MaterialProviderInterface.h"
+#include "MyProject/Shared/Interfaces/SurfaceGridTargetInterface.h"
 #include "SwitchPropBase.generated.h"
 
 class UStaticMeshComponent;
 class UDamageableComponent;
-class UStatusEffectComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSwitchToggledSignature, bool, bNewState, AActor*, TriggeringActor);
 
@@ -20,10 +20,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSwitchToggledSignature, bool, bN
  * - Autorytatywną kontrolę stanu sieciowego (Server-Authoritative Co-op).
  * - Obsługę przełączników jednokierunkowych / zatrzaskowych (bAllowSwitchBack).
  * - Bezpośrednie dispatchowanie sygnału do powiązanych aktorów docelowych (TargetMechanisms).
- * - Implementację Świętej Trójcy: tożsamość materiałowa, punkty życia/odporność, reakcje żywiołowe.
+ * - Implementację tożsamości materiałowej oraz obsługę komórek powierzchniowych (ISurfaceGridTargetInterface).
  */
 UCLASS(Abstract)
-class MYPROJECT_API ASwitchPropBase : public AActor, public IMaterialProviderInterface
+class MYPROJECT_API ASwitchPropBase : public AActor, public IMaterialProviderInterface, public ISurfaceGridTargetInterface
 {
 	GENERATED_BODY()
 
@@ -34,6 +34,10 @@ public:
 
 	// --- IMaterialProviderInterface ---
 	virtual EPhysicalMaterialType GetMaterialType_Implementation() const override { return MaterialType; }
+
+	// --- ISurfaceGridTargetInterface ---
+	virtual bool CanReceiveSurfaceCells_Implementation() const override;
+	virtual bool IsDynamicSurface_Implementation() const override { return false; }
 
 	// --- Stan i Sterowanie ---
 
@@ -76,9 +80,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
 
-	UFUNCTION(BlueprintPure, Category = "Custom|Components")
-	UStatusEffectComponent* GetStatusEffectComponent() const { return StatusEffectComponent; }
-
 	// --- Zdarzenia ---
 
 	/** Wywoływane przy każdej zmianie stanu przełącznika (zwraca nowy stan oraz aktora aktywującego) */
@@ -113,10 +114,6 @@ protected:
 	/** Komponent punktów wytrzymałości i zniszczenia */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<UDamageableComponent> DamageableComponent;
-
-	/** Komponent obsługujący stany żywiołowe (np. przewodzenie prądu) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-	TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
 
 	// -------------------------------------------------------------------------
 	// Konfiguracja

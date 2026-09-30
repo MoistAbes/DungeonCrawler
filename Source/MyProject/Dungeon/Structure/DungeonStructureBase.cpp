@@ -154,3 +154,19 @@ void ADungeonStructureBase::SpawnDebris(UWorld* World)
 		World->SpawnActor<AActor>(DestroyedDebrisClass, GetActorTransform(), SpawnParams);
 	}
 }
+
+bool ADungeonStructureBase::CanReceiveSurfaceCells_Implementation() const
+{
+	if (IsActorBeingDestroyed())
+	{
+		return false;
+	}
+
+	if (bIsDestructible && DamageableComponent && DamageableComponent->IsDestroyed())
+	{
+		return false;
+	}
+
+	return true;
+}
+

@@ -1,4 +1,4 @@
-﻿#include "MechanismTrapBase.h"
+#include "MechanismTrapBase.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -6,7 +6,6 @@
 #include "MyProject/Logging/DungeonLogCategories.h"
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
-#include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 
 AMechanismTrapBase::AMechanismTrapBase()
 {
@@ -23,7 +22,6 @@ AMechanismTrapBase::AMechanismTrapBase()
 	BaseMeshComponent->SetGenerateOverlapEvents(false);
 
 	DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
-	StatusEffectComponent = CreateDefaultSubobject<UStatusEffectComponent>(TEXT("StatusEffectComponent"));
 
 	MaterialType = EPhysicalMaterialType::Stone;
 	bIsDestructible = false;
@@ -199,3 +197,19 @@ void AMechanismTrapBase::HandleOnDestroyed(AActor* DestroyedActor)
 	StopLoopTimer();
 	Destroy();
 }
+
+bool AMechanismTrapBase::CanReceiveSurfaceCells_Implementation() const
+{
+	if (IsActorBeingDestroyed())
+	{
+		return false;
+	}
+
+	if (bIsDestructible && DamageableComponent && DamageableComponent->IsDestroyed())
+	{
+		return false;
+	}
+
+	return true;
+}
+
