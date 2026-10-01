@@ -10,6 +10,8 @@ class USurfaceGridTargetInterface : public UInterface
 	GENERATED_BODY()
 };
 
+class USceneComponent;
+
 /**
  * Kontrakt dla wszystkich aktorow w swiecie gry (fundamenty architektury lochu,
  * mechanizmy, plyty naciskowe, wrota, zapadnie), ktore moga byc stabilnym podlozem
@@ -33,4 +35,12 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Custom|SurfaceGrid")
 	bool IsDynamicSurface() const;
+
+	/**
+	 * Zwraca komponent sceny, wzgledem ktorego transformowane sa komorki lokalne w przestrzeni dynamicznej.
+	 * Domyslnie zwraca nullptr (co powoduje uzycie RootComponent aktora w subsystemie).
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Custom|SurfaceGrid")
+	USceneComponent* GetSurfaceTransformComponent() const;
+	virtual USceneComponent* GetSurfaceTransformComponent_Implementation() const { return nullptr; }
 };

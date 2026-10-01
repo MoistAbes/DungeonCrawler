@@ -64,6 +64,7 @@ public:
 	// --- ISurfaceGridTargetInterface ---
 	virtual bool CanReceiveSurfaceCells_Implementation() const override;
 	virtual bool IsDynamicSurface_Implementation() const override { return true; }
+	virtual USceneComponent* GetSurfaceTransformComponent_Implementation() const override;
 
 	// --- IMechanismReceiverInterface ---
 	virtual void SetMechanismState_Implementation(bool bActive, AActor* TriggeringActor) override;
@@ -102,9 +103,6 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UStaticMeshComponent* GetGateMeshComponent() const { return GateMeshComponent; }
-
-	UFUNCTION(BlueprintPure, Category = "Custom|Components")
-	UStaticMeshComponent* GetFrameMeshComponent() const { return FrameMeshComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "Custom|Components")
 	UDamageableComponent* GetDamageableComponent() const { return DamageableComponent; }
@@ -166,10 +164,6 @@ protected:
 	/** Nieruchomy punkt bazowy na poziomie posadzki */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
 	TObjectPtr<USceneComponent> SceneRootComponent;
-
-	/** Opcjonalna nieruchoma futryna / prowadnice boczne bramy */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
-	TObjectPtr<UStaticMeshComponent> FrameMeshComponent;
 
 	/** Ruchoma krata lub wrota unoszące się w górę */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")

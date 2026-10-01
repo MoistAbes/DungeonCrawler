@@ -22,12 +22,6 @@ ADungeonGateProp::ADungeonGateProp()
 	SceneRootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRootComponent"));
 	RootComponent = SceneRootComponent;
 
-	// Nieruchoma futryna / prowadnice
-	FrameMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FrameMeshComponent"));
-	FrameMeshComponent->SetupAttachment(RootComponent);
-	FrameMeshComponent->SetSimulatePhysics(false);
-	FrameMeshComponent->SetCollisionProfileName(TEXT("BlockAll"));
-
 	// Ruchoma krata lub wrota
 	GateMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GateMeshComponent"));
 	GateMeshComponent->SetupAttachment(RootComponent);
@@ -443,5 +437,10 @@ bool ADungeonGateProp::CanReceiveSurfaceCells_Implementation() const
 	}
 
 	return true;
+}
+
+USceneComponent* ADungeonGateProp::GetSurfaceTransformComponent_Implementation() const
+{
+	return GateMeshComponent;
 }
 

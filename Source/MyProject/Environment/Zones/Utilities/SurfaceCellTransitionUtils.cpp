@@ -143,3 +143,128 @@ FSurfaceCellTransitionResult USurfaceCellTransitionUtils::CalculateCellTransitio
 	Result.bCellBecameEmpty = InOutCellData.IsEmpty();
 	return Result;
 }
+
+bool USurfaceCellTransitionUtils::ApplyStatusToCellInMap(
+	TMap<FSurfaceCellCoord, FSurfaceCellData>& CellMap,
+	const FSurfaceCellCoord& Coord,
+	EStatusEffectType IncomingStatus,
+	float Duration,
+	AActor* Instigator,
+	EPhysicalMaterialType ExplicitMaterial,
+	AActor* SurfaceActor,
+	uint8 Tier,
+	float CurrentTime,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+{
+	if (IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
+	{
+		return false;
+	}
+
+	FSurfaceCellData* Existing = CellMap.Find(Coord);
+	FSurfaceCellData CellData;
+	if (Existing)
+	{
+		CellData = *Existing;
+	}
+	else
+	{
+		CellData.SurfaceMaterial = ExplicitMaterial;
+		CellData.SurfaceActor = SurfaceActor;
+	}
+
+	const FSurfaceCellTransitionResult Result = CalculateCellTransition(
+		CellData,
+		IncomingStatus,
+		Duration,
+		Instigator,
+		CurrentTime,
+		Tier);
+
+	if (!Result.bAccepted)
+	{
+		return false;
+	}
+
+	// Inicjalizacja czasu pierwszego rozprzestrzenienia dla stałego paliwa (np. drewno)
+	if (CellData.HasStatus(EStatusEffectType::Burning))
+	{
+		const FPhysicalMaterialTraits Traits = PhysicalMaterialUtils::GetTraits(CellData.SurfaceMaterial);
+		if (Traits.bSelfSustainingFuel && CellData.NextFuelSpreadTime <= 0.0f)
+		{
+			CellData.NextFuelSpreadTime = CurrentTime + Traits.FuelSpreadInterval;
+		}
+	}
+
+	// Komórka została opróżniona (np. ugaszenie ognia wodą)
+	if (Result.bCellBecameEmpty)
+	{
+		CellMap.Remove(Coord);
+		OnCellChanged(Coord, EStatusEffectType::None, Instigator);
+		return true;
+	}
+
+	// Zapisanie nowego stanu komórki
+	CellMap.Add(Coord, CellData);
+	OnCellChanged(Coord, CellData.GetDominantStatus(), CellData.GetDominantInstigator());
+
+	return true;
+}
+
+void USurfaceCellTransitionUtils::ExpireCellsInMap(
+	TMap<FSurfaceCellCoord, FSurfaceCellData>& CellMap,
+	float CurrentTime,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+{
+	for (auto It = CellMap.CreateIterator(); It; ++It)
+	{
+		FSurfaceCellData& Cell = It.Value();
+		bool bStatusRemoved = false;
+
+		for (int32 Index = Cell.ActiveStatuses.Num() - 1; Index >= 0; --Index)
+		{
+			if (Cell.ActiveStatuses[Index].IsExpired(CurrentTime))
+			{
+				Cell.ActiveStatuses.RemoveAt(Index);
+				bStatusRemoved = true;
+			}
+		}
+
+		if (bStatusRemoved && !Cell.IsEmpty())
+		{
+			CleanOrphanedStatuses(Cell);
+		}
+
+		if (Cell.IsEmpty())
+		{
+			OnCellChanged(It.Key(), EStatusEffectType::None, nullptr);
+			It.RemoveCurrent();
+		}
+		else if (bStatusRemoved)
+		{
+			OnCellChanged(It.Key(), Cell.GetDominantStatus(), Cell.GetDominantInstigator());
+		}
+	}
+}
+
+FColor USurfaceCellTransitionUtils::GetCellDebugColor(const FSurfaceCellData& CellData)
+{
+	if (CellData.IsEmpty())
+	{
+		return FColor(200, 200, 200);
+	}
+
+	if (CellData.HasStatus(EStatusEffectType::Wet) && CellData.HasStatus(EStatusEffectType::Electrified))
+	{
+		return FColor(0, 255, 255); // Cyan / Electric Blue
+	}
+
+	switch (CellData.GetDominantStatus())
+	{
+	case EStatusEffectType::Burning:     return FColor(255, 69, 0);   // Red-Orange
+	case EStatusEffectType::Wet:         return FColor(30, 144, 255); // Dodger Blue
+	case EStatusEffectType::Oiled:       return FColor(139, 69, 19);  // Saddle Brown
+	case EStatusEffectType::Electrified: return FColor(255, 215, 0);  // Gold
+	default:                             return FColor(200, 200, 200);
+	}
+}

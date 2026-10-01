@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
+#include "MyProject/Environment/Zones/Managers/StaticSurfaceGridManager.h"
+#include "MyProject/Environment/Zones/Managers/DynamicSurfaceGridManager.h"
 #include "DungeonSurfaceSubsystem.generated.h"
 
 class ACharacter;
@@ -13,13 +15,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnSurfaceCellChanged, const FSur
 /**
  * Podsystem świata zarządzający rzadką siatką komórek powierzchniowych (Sparse World Surface Grid).
  * 
- * Zastępuje analityczne obrysy radialne stref powierzchniowych.
- * Odpowiada za:
- * - Przechowywanie aktywnych komórek w pamięci podręcznej (TMap) bez alokacji osobnych aktorów.
- * - Mapowanie uderzeń cieczy/ognia na dyskretne komórki z uwzględnieniem strony fundamentu (Face Direction).
- * - Ewaluację reakcji chemicznych między żywiołami (np. Ogień + Olej = Płomień).
- * - Błyskawiczne usuwanie komórek z obszaru zniszczonych fundamentów (ClearCellsInBounds).
- * - Cykliczną aplikację statusów na wchodzące postacie oraz wygaszanie przeterminowanych komórek.
+ * Pełni rolę architektonicznej Fasady (Facade Pattern) i orkiestratora:
+ * - Koordynuje statyczną siatkę świata (FStaticSurfaceGridManager) i dynamiczne siatki mechanizmów (FDynamicSurfaceGridManager).
+ * - Realizuje cykliczny tick serwera: wygaszanie, dwukierunkowy automat komórkowy (FSurfaceGridPropagationUtils),
+ *   niszczenie architektury lochu, samozapłon paliwa i interakcję z postaciami.
+ * - Udostępnia publiczne, autorytatywne API (Single Point of Truth) dla pocisków, wybuchów i interakcji.
  */
 UCLASS()
 class MYPROJECT_API UDungeonSurfaceSubsystem : public UWorldSubsystem
@@ -51,22 +51,19 @@ public:
 	bool bDrawDebugGrid = true;
 
 	// -------------------------------------------------------------------------
-	// Główne API Domenowe
+	// Główne API Domenowe (Fasada)
 	// -------------------------------------------------------------------------
 
 	/**
 	 * Kwalifikuje, czy dany aktor może być podłożem pod komórki powierzchniowe.
-	 * Akceptuje fundamenty lochu (ADungeonStructureBase) oraz geometrię poziomu (ABrush).
-	 * Odrzuca dynamiczne rekwizyty (AInteractivePropBase) oraz postacie (APawn).
 	 */
 	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
 	static bool IsValidSurfaceTarget(const AActor* Actor);
 
 	/**
 	 * Rozwiązuje uderzenie żywiołem w świecie (Hit Resolver):
-	 * - Trafienie w postać/rekwizyt: nakłada status na cel i szuka podłogi pod jego stopami (FloorTrace), nakładając status na podłoże.
-	 * - Trafienie w strefę przestrzenną (np. chmurę): przekazuje trafienie żywiołowe strefie.
-	 * - Trafienie w ścianę/podłogę: weryfikuje podłoże i wywołuje ApplyStatusToSurface.
+	 * - Dynamiczny mechanizm (np. brama, winda) -> kieruje do ApplyStatusToDynamicSurface.
+	 * - Statyczna architektura (podłoga, ściana) -> kieruje do ApplyStatusToSurface.
 	 * 
 	 * @return Liczba zmodyfikowanych komórek powierzchniowych.
 	 */
@@ -80,10 +77,7 @@ public:
 		uint8 Tier = 0);
 
 	/**
-	 * Nakłada status na komórki pojedynczej powierzchni wokół punktu uderzenia.
-	 * Wyznacza komórki w promieniu Radius, uwzględnia orientację ściany/podłogi,
-	 * sprawdza Line of Sight po powierzchni i przeprowadza ewaluację reakcji chemicznych.
-	 * Używane przez PointImpact (np. rozbicie flakonu na ścianie).
+	 * Nakłada status na komórki pojedynczej powierzchni statycznej wokół punktu uderzenia.
 	 * 
 	 * @return Liczba zmodyfikowanych lub zaktualizowanych komórek.
 	 */
@@ -98,10 +92,8 @@ public:
 		uint8 Tier = 0);
 
 	/**
-	 * JEDYNY ATOMOWY PUNKT STYKU (Single Point of Truth) dla stanu komórki w siatce.
-	 * Przyjmuje status z dowolnego źródła (wybuch, plama, pocisk, postać, propagacja),
-	 * odpytuje reguły UElementalReactionRules, aplikuje wynik reakcji i zarządza ActiveCells.
-	 *
+	 * JEDYNY ATOMOWY PUNKT STYKU (Single Point of Truth) dla stanu komórki w siatce statycznej.
+	 * 
 	 * @return true jeśli komórka została zmodyfikowana (dodana, odświeżona, przereagowana lub usunięta).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
@@ -116,9 +108,6 @@ public:
 
 	/**
 	 * Nakłada status na komórki w obszarze 3D wokół źródła wybuchu (RadialBurst).
-	 * Sprawdza Line of Sight z BurstOrigin do każdej komórki, obsługuje wiele powierzchni jednocześnie.
-	 * Używa ProcessedCoords do uniknięcia wielokrotnego przetwarzania tej samej komórki
-	 * w ramach jednego złożonego zdarzenia (np. wybuchu wielopromieniowego).
 	 */
 	int32 ApplyStatusInArea(
 		const FVector& HitLocation,
@@ -132,8 +121,49 @@ public:
 		uint8 Tier = 0);
 
 	/**
-	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.
-	 * Wywoływane automatycznie przez ADungeonStructureBase w momencie zniszczenia ściany lub podłogi.
+	 * Nakłada status na powierzchnię pojedynczego dynamicznego aktora w jego przestrzeni lokalnej.
+	 * 
+	 * @return Liczba zmodyfikowanych komórek.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	int32 ApplyStatusToDynamicSurface(
+		AActor* DynamicActor,
+		USceneComponent* TransformComp,
+		const FVector& HitLocation,
+		const FVector& HitNormal,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator = nullptr,
+		uint8 Tier = 0);
+
+	/**
+	 * Nakłada status na komórkę w lokalnej siatce dynamicznego aktora.
+	 * 
+	 * @return true jeśli komórka została zmodyfikowana.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	bool ApplyStatusToDynamicCell(
+		AActor* DynamicActor,
+		USceneComponent* TransformComp,
+		const FSurfaceCellCoord& LocalCoord,
+		EStatusEffectType IncomingStatus,
+		float Duration,
+		AActor* Instigator = nullptr,
+		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone,
+		uint8 Tier = 0);
+
+	/** Pomocnicza metoda zwracająca komponent transformacji dla dynamicznego aktora */
+	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
+	static USceneComponent* GetDynamicActorTransformComponent(AActor* Actor);
+
+	/** Pomocnicza metoda zwracająca transformację sztywną komponentu (translacja + rotacja, skala 1.0) */
+	UFUNCTION(BlueprintPure, Category = "Custom|SurfaceGrid")
+	static FTransform GetDynamicRigidTransform(const USceneComponent* Comp);
+
+	/**
+	 * Usuwa wszystkie aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB
+	 * (zarówno ze statycznej siatki świata, jak i dynamicznych obiektów).
 	 * 
 	 * @return Liczba usuniętych komórek.
 	 */
@@ -142,7 +172,6 @@ public:
 
 	/**
 	 * Aplikuje impuls żywiołowy w sferze o zadanym promieniu (wybuch beczki, czar obszarowy).
-	 * Wywołuje reakcje chemiczne ze wszystkimi komórkami w zasięgu oraz opcjonalnie maluje strefę na trafionej posadzce.
 	 * 
 	 * @return Liczba zaktualizowanych lub pomalowanych komórek.
 	 */
@@ -165,8 +194,22 @@ public:
 	/** Wyrejestrowuje komponent statusów z podsystemu */
 	void UnregisterStatusComponent(UStatusEffectComponent* Comp);
 
+	/** Dostęp do menedżerów składowych */
+	const FStaticSurfaceGridManager& GetStaticGridManager() const { return StaticGridManager; }
+	FStaticSurfaceGridManager& GetStaticGridManager() { return StaticGridManager; }
+	const FDynamicSurfaceGridManager& GetDynamicGridManager() const { return DynamicGridManager; }
+	FDynamicSurfaceGridManager& GetDynamicGridManager() { return DynamicGridManager; }
+
+	/** Dostęp do danych dla kompatybilności wstecznej */
+	const TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCells() const { return StaticGridManager.GetActiveCells(); }
+	const TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetDynamicSurfaceGrids() const { return DynamicGridManager.GetGrids(); }
+
+	/** Metody pomocnicze ustalania materiału podłożowego */
+	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;
+	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
+
 protected:
-	/** Okresowa pętla serwera: wygaszanie starych komórek i aplikacja statusów na postacie */
+	/** Okresowa pętla serwera: wygaszanie, propagacja, obrażenia i aplikacja statusów na postacie */
 	UFUNCTION()
 	void ProcessGridTick();
 
@@ -174,37 +217,18 @@ protected:
 	void DrawDebugVisuals() const;
 
 private:
-	/** Wygasza przeterminowane statusy w aktywnych komórkach siatki */
-	void ExpireCellStatuses(float CurrentTime);
-
-	/** Propaguje żywioły na sąsiednie komórki (Cellular Automata) */
-	void PropagateElementalSpreads(float CurrentTime, float SafeCellSize);
-
-	/** Rozprzestrzenia stały ogień po materiale stanowiącym paliwo (bSelfSustainingFuel, np. drewno) */
-	void ProcessSolidFuelCombustion(float CurrentTime, float SafeCellSize);
-
-	/** Aplikuje zagregowane obrażenia od aktywnych komórek żywiołów do fundamentów architektury lochu */
-	void ProcessSurfaceStructuralDamage(float CurrentTime, float DeltaTime);
-
 	/** Ewaluuje dwukierunkową interakcję z zarejestrowanymi komponentami statusów */
 	void ProcessActorInteractions(float CurrentTime);
-
-	/** Przetwarza interakcję pojedynczego aktora ze stykającymi się komórkami */
-	void ProcessActorInteraction(AActor* Actor, UStatusEffectComponent* StatusComp, float CurrentTime);
-
-
-	/** Pobiera materiał fizyczny architektury lochu pod daną komórką powierzchniową. Zwraca false jeśli brak fizycznej geometrii. */
-	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;
-
-	/** Pobiera materiał fizyczny oraz wskaźnik do aktora architektury lochu pod daną komórką powierzchniową. */
-	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
 
 	/** Rejestr aktywnych komponentów statusów w świecie podlegających interakcji z podłożem */
 	UPROPERTY()
 	TArray<TWeakObjectPtr<UStatusEffectComponent>> RegisteredStatusComponents;
 
-	/** Rzadka mapa aktywnych komórek powierzchniowych */
-	TMap<FSurfaceCellCoord, FSurfaceCellData> ActiveCells;
+	/** Menedżer komórek statycznej siatki świata */
+	FStaticSurfaceGridManager StaticGridManager;
+
+	/** Menedżer komórek dynamicznych mechanizmów lochu */
+	FDynamicSurfaceGridManager DynamicGridManager;
 
 	/** Uchwyt timera serwerowego */
 	FTimerHandle GridTickTimerHandle;

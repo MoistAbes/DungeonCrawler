@@ -377,6 +377,24 @@ bool UElementalReactionRules::CanSpreadToNeighbor(
 	return OutReactionResult.bReactionOccurred && OutReactionResult.bCanSpreadToNeighbor;
 }
 
+bool UElementalReactionRules::CanStatusSpread(EStatusEffectType Status)
+{
+	if (Status == EStatusEffectType::None)
+	{
+		return false;
+	}
+
+	const FStatusEffectConfig& Config = GetEffectConfig(Status);
+	for (const auto& ReactionPair : Config.Reactions)
+	{
+		if (ReactionPair.Value.bCanSpreadToNeighbor)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 int32 UElementalReactionRules::GetReactionPriority(EStatusEffectType Status)
 {
 	return GetEffectConfig(Status).ReactionPriority;

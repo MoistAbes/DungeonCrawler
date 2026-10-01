@@ -55,6 +55,14 @@ public:
 		EStatusEffectType TargetStatus,
 		FElementalReactionResult& OutReactionResult);
 
+	/**
+	 * Sprawdza, czy dany status posiada przynajmniej jedną regułę reakcji,
+	 * która pozwala mu rozprzestrzenić się na sąsiednią komórkę w siatce (bCanSpreadToNeighbor == true).
+	 * Używane przez automat komórkowy do szybkiego pre-filtrowania komórek aktywnych.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool CanStatusSpread(EStatusEffectType Status);
+
 	/** Zwraca wagę pierwszeństwa reakcji chemicznej dla danego statusu */
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
 	static int32 GetReactionPriority(EStatusEffectType Status);

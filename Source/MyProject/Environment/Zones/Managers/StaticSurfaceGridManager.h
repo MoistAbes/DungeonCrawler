@@ -1,0 +1,95 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
+#include "MyProject/Environment/Elements/Data/StatusEffectTypes.h"
+
+class AActor;
+class UWorld;
+class UStatusEffectComponent;
+class FDynamicSurfaceGridManager;
+
+/**
+ * Menedżer statycznej siatki powierzchniowej lochu (ActiveCells).
+ * Operuje bezpośrednio w przestrzeni świata (World Space).
+ */
+class MYPROJECT_API FStaticSurfaceGridManager
+{
+public:
+	FStaticSurfaceGridManager() = default;
+
+	/**
+	 * Główny resolver stanu komórki statycznej w siatce świata.
+	 */
+	bool ApplyStatusToCell(
+		UWorld* World,
+		const FSurfaceCellCoord& Coord,
+		EStatusEffectType IncomingStatus,
+		float Duration,
+		AActor* Instigator,
+		EPhysicalMaterialType ExplicitMaterial,
+		AActor* SurfaceActor,
+		uint8 Tier,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+
+	/**
+	 * Usuwa aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.
+	 */
+	int32 ClearCellsInBounds(const FBox& BoundingBox, TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Wygasza przeterminowane statusy w komórkach statycznych.
+	 */
+	void ExpireCells(float CurrentTime, TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Rozprzestrzenia stały ogień po materiale stanowiącym paliwo (bSelfSustainingFuel).
+	 */
+	void ProcessSolidFuelCombustion(
+		UWorld* World,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Aplikuje zagregowane obrażenia od aktywnych komórek żywiołów do fundamentów lochu.
+	 */
+	void ProcessSurfaceStructuralDamage(
+		UWorld* World,
+		const FDynamicSurfaceGridManager& DynamicGridManager,
+		float DeltaTime);
+
+	/**
+	 * Przetwarza interakcję pojedynczego aktora ze stykającymi się komórkami statycznymi.
+	 */
+	void ProcessActorInteraction(
+		AActor* Actor,
+		UStatusEffectComponent* StatusComp,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<bool(const FSurfaceCellCoord&, EStatusEffectType, float, AActor*)> ApplyToCellCallback);
+
+	/**
+	 * Pobiera materiał fizyczny oraz aktora lochu pod daną komórką powierzchniową.
+	 */
+	static bool GetSurfaceMaterialAtCoord(
+		const UWorld* World,
+		float SafeCellSize,
+		const FSurfaceCellCoord& Coord,
+		EPhysicalMaterialType& OutMaterial,
+		AActor*& OutSurfaceActor);
+
+	/** Dostęp do mapy komórek */
+	const TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCells() const { return ActiveCells; }
+	TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCellsMutable() { return ActiveCells; }
+
+	/** Rysowanie debugowe */
+	void DrawDebug(const UWorld* World, float SafeCellSize) const;
+
+private:
+	/** Rzadka mapa aktywnych komórek powierzchniowych (World Space) */
+	TMap<FSurfaceCellCoord, FSurfaceCellData> ActiveCells;
+};

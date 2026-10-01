@@ -39,4 +39,36 @@ public:
 	static bool CleanOrphanedStatuses(
 		UPARAM(ref) FSurfaceCellData& InOutCellData,
 		EStatusEffectType StatusToPreserve = EStatusEffectType::None);
+
+	/**
+	 * Atomowa aplikacja statusu do komórki w dowolnej rzadkiej mapie komórek (zarówno statycznej, jak i dynamicznej).
+	 * Wylicza przejście stanu chemicznego, inicjalizuje paliwo stałe, modyfikuje mapę i powiadamia o zmianie stanu.
+	 * 
+	 * @return true jeśli komórka została zmodyfikowana.
+	 */
+	static bool ApplyStatusToCellInMap(
+		TMap<FSurfaceCellCoord, FSurfaceCellData>& CellMap,
+		const FSurfaceCellCoord& Coord,
+		EStatusEffectType IncomingStatus,
+		float Duration,
+		AActor* Instigator,
+		EPhysicalMaterialType ExplicitMaterial,
+		AActor* SurfaceActor,
+		uint8 Tier,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Uniwersalna pętla wygaszania komórek w dowolnej rzadkiej mapie komórek (statycznej lub dynamicznej).
+	 * Wygasza przeterminowane statusy, oczyszcza osierocone nośniki, usuwa puste komórki i wywołuje callback OnCellChanged.
+	 */
+	static void ExpireCellsInMap(
+		TMap<FSurfaceCellCoord, FSurfaceCellData>& CellMap,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Zwraca kolor debugowy odpowiadający dominującemu stanowi komórki (oraz stanom złożonym np. Wet + Electrified).
+	 */
+	static FColor GetCellDebugColor(const FSurfaceCellData& CellData);
 };
