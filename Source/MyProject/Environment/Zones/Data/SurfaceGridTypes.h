@@ -157,6 +157,9 @@ struct MYPROJECT_API FSurfaceCellCoord
 	void GetDirectionalSpreadPaths(TArray<struct FSurfaceSpreadPath, TInlineAllocator<4>>& OutPaths) const;
 
 
+	/** Zwraca 4 potencjalne warianty wokseli kandydujących na krawędzi narożnika 90° dla wskazanego kierunku prostopadłego */
+	void GetCornerCandidateCoords(ESurfaceFaceDirection CornerFace, TArray<FSurfaceCellCoord, TInlineAllocator<4>>& OutCoords) const;
+
 	/** Zwraca wszystkich sąsiadów: 4 współpłaszczyznowe oraz sąsiadów na krawędziach 90° (podłoga <-> ściany <-> sufit) */
 	void GetAdjacentNeighbors(TArray<FSurfaceCellCoord>& OutNeighbors) const
 	{
@@ -167,163 +170,23 @@ struct MYPROJECT_API FSurfaceCellCoord
 		GetCoplanarNeighbors(OutNeighbors);
 
 		// 2. Dodajemy kandydatów z prostopadłych ścian/podłóg łączących się na krawędziach 90°
-		switch (Face)
+		constexpr ESurfaceFaceDirection AllFaces[] = {
+			ESurfaceFaceDirection::Up,
+			ESurfaceFaceDirection::Down,
+			ESurfaceFaceDirection::North,
+			ESurfaceFaceDirection::South,
+			ESurfaceFaceDirection::East,
+			ESurfaceFaceDirection::West
+		};
+
+		TArray<FSurfaceCellCoord, TInlineAllocator<4>> CornerCoords;
+		for (ESurfaceFaceDirection TargetFace : AllFaces)
 		{
-		case ESurfaceFaceDirection::Up:
-			// Krawędź +X (ściana South)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z + 1, ESurfaceFaceDirection::South));
-
-			// Krawędź -X (ściana North)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z + 1, ESurfaceFaceDirection::North));
-
-			// Krawędź +Y (ściana West)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z + 1, ESurfaceFaceDirection::West));
-
-			// Krawędź -Y (ściana East)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z + 1, ESurfaceFaceDirection::East));
-			break;
-
-		case ESurfaceFaceDirection::Down:
-			// Krawędź +X (ściana South)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z - 1, ESurfaceFaceDirection::South));
-
-			// Krawędź -X (ściana North)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z - 1, ESurfaceFaceDirection::North));
-
-			// Krawędź +Y (ściana West)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z - 1, ESurfaceFaceDirection::West));
-
-			// Krawędź -Y (ściana East)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z - 1, ESurfaceFaceDirection::East));
-			break;
-
-		case ESurfaceFaceDirection::North:
-			// Krawędź -Z (podłoga Up)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z - 1, ESurfaceFaceDirection::Up));
-
-			// Krawędź +Z (sufit Down)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z + 1, ESurfaceFaceDirection::Down));
-
-			// Krawędź +Y (ściana West)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y + 1, Z, ESurfaceFaceDirection::West));
-
-			// Krawędź -Y (ściana East)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y - 1, Z, ESurfaceFaceDirection::East));
-			break;
-
-		case ESurfaceFaceDirection::South:
-			// Krawędź -Z (podłoga Up)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z - 1, ESurfaceFaceDirection::Up));
-
-			// Krawędź +Z (sufit Down)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z + 1, ESurfaceFaceDirection::Down));
-
-			// Krawędź +Y (ściana West)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::West));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y + 1, Z, ESurfaceFaceDirection::West));
-
-			// Krawędź -Y (ściana East)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::East));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y - 1, Z, ESurfaceFaceDirection::East));
-			break;
-
-		case ESurfaceFaceDirection::East:
-			// Krawędź -Z (podłoga Up)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z - 1, ESurfaceFaceDirection::Up));
-
-			// Krawędź +Z (sufit Down)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z + 1, ESurfaceFaceDirection::Down));
-
-			// Krawędź +X (ściana South)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y + 1, Z, ESurfaceFaceDirection::South));
-
-			// Krawędź -X (ściana North)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y + 1, Z, ESurfaceFaceDirection::North));
-			break;
-
-		case ESurfaceFaceDirection::West:
-			// Krawędź -Z (podłoga Up)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z - 1, ESurfaceFaceDirection::Up));
-
-			// Krawędź +Z (sufit Down)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z + 1, ESurfaceFaceDirection::Down));
-
-			// Krawędź +X (ściana South)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::South));
-			OutNeighbors.Add(FSurfaceCellCoord(X + 1, Y - 1, Z, ESurfaceFaceDirection::South));
-
-			// Krawędź -X (ściana North)
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::North));
-			OutNeighbors.Add(FSurfaceCellCoord(X - 1, Y - 1, Z, ESurfaceFaceDirection::North));
-			break;
+			if (TargetFace != Face)
+			{
+				GetCornerCandidateCoords(TargetFace, CornerCoords);
+				OutNeighbors.Append(CornerCoords);
+			}
 		}
 	}
 
@@ -419,6 +282,207 @@ FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpr
 		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
 		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
 		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
+		break;
+	}
+}
+
+FORCEINLINE void FSurfaceCellCoord::GetCornerCandidateCoords(
+	ESurfaceFaceDirection CornerFace,
+	TArray<FSurfaceCellCoord, TInlineAllocator<4>>& OutCoords) const
+{
+	OutCoords.Reset(4);
+	switch (Face)
+	{
+	case ESurfaceFaceDirection::Up:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::South: // Krawędź +X (ściana South)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z + 1, ESurfaceFaceDirection::South));
+			break;
+		case ESurfaceFaceDirection::North: // Krawędź -X (ściana North)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z + 1, ESurfaceFaceDirection::North));
+			break;
+		case ESurfaceFaceDirection::West: // Krawędź +Y (ściana West)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z + 1, ESurfaceFaceDirection::West));
+			break;
+		case ESurfaceFaceDirection::East: // Krawędź -Y (ściana East)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z + 1, ESurfaceFaceDirection::East));
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case ESurfaceFaceDirection::Down:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::South: // Krawędź +X (ściana South)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z - 1, ESurfaceFaceDirection::South));
+			break;
+		case ESurfaceFaceDirection::North: // Krawędź -X (ściana North)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z - 1, ESurfaceFaceDirection::North));
+			break;
+		case ESurfaceFaceDirection::West: // Krawędź +Y (ściana West)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z - 1, ESurfaceFaceDirection::West));
+			break;
+		case ESurfaceFaceDirection::East: // Krawędź -Y (ściana East)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z - 1, ESurfaceFaceDirection::East));
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case ESurfaceFaceDirection::North:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::Up: // Krawędź -Z (podłoga Up)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z - 1, ESurfaceFaceDirection::Up));
+			break;
+		case ESurfaceFaceDirection::Down: // Krawędź +Z (sufit Down)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z + 1, ESurfaceFaceDirection::Down));
+			break;
+		case ESurfaceFaceDirection::West: // Krawędź +Y (ściana West)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y + 1, Z, ESurfaceFaceDirection::West));
+			break;
+		case ESurfaceFaceDirection::East: // Krawędź -Y (ściana East)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y - 1, Z, ESurfaceFaceDirection::East));
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case ESurfaceFaceDirection::South:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::Up: // Krawędź -Z (podłoga Up)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z - 1, ESurfaceFaceDirection::Up));
+			break;
+		case ESurfaceFaceDirection::Down: // Krawędź +Z (sufit Down)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z + 1, ESurfaceFaceDirection::Down));
+			break;
+		case ESurfaceFaceDirection::West: // Krawędź +Y (ściana West)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::West));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y + 1, Z, ESurfaceFaceDirection::West));
+			break;
+		case ESurfaceFaceDirection::East: // Krawędź -Y (ściana East)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::East));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y - 1, Z, ESurfaceFaceDirection::East));
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case ESurfaceFaceDirection::East:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::Up: // Krawędź -Z (podłoga Up)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z - 1, ESurfaceFaceDirection::Up));
+			break;
+		case ESurfaceFaceDirection::Down: // Krawędź +Z (sufit Down)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z + 1, ESurfaceFaceDirection::Down));
+			break;
+		case ESurfaceFaceDirection::South: // Krawędź +X (ściana South)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y + 1, Z, ESurfaceFaceDirection::South));
+			break;
+		case ESurfaceFaceDirection::North: // Krawędź -X (ściana North)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y + 1, Z, ESurfaceFaceDirection::North));
+			break;
+		default:
+			break;
+		}
+		break;
+
+	case ESurfaceFaceDirection::West:
+		switch (CornerFace)
+		{
+		case ESurfaceFaceDirection::Up: // Krawędź -Z (podłoga Up)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z - 1, ESurfaceFaceDirection::Up));
+			break;
+		case ESurfaceFaceDirection::Down: // Krawędź +Z (sufit Down)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z + 1, ESurfaceFaceDirection::Down));
+			break;
+		case ESurfaceFaceDirection::South: // Krawędź +X (ściana South)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::South));
+			OutCoords.Add(FSurfaceCellCoord(X + 1, Y - 1, Z, ESurfaceFaceDirection::South));
+			break;
+		case ESurfaceFaceDirection::North: // Krawędź -X (ściana North)
+			OutCoords.Add(FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::North));
+			OutCoords.Add(FSurfaceCellCoord(X - 1, Y - 1, Z, ESurfaceFaceDirection::North));
+			break;
+		default:
+			break;
+		}
 		break;
 	}
 }

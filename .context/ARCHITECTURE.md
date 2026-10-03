@@ -198,6 +198,8 @@ Environment/
 
     ├── Data/
 
+    ├── Managers/
+
     ├── Shapes/
 
     ├── Subsystems/
@@ -220,7 +222,7 @@ Important existing systems include:
 
 \* environmental effects,
 
-\* sparse 3D surface cell grid,
+\* sparse 3D surface cell grid (static and dynamic actor-attached),
 
 \* kinetic/physics-related functionality.
 
@@ -236,6 +238,10 @@ Important classes/libraries include:
 
 \* `UDungeonSurfaceSubsystem`
 
+\* `FStaticSurfaceGridManager`
+
+\* `FDynamicSurfaceGridManager`
+
 \* `UElementalReactionRules`
 
 \* `USurfaceCellTransitionUtils`
@@ -243,6 +249,10 @@ Important classes/libraries include:
 \* `SurfaceGridGeometryUtils`
 
 \* `SurfaceGridProjectionUtils`
+
+\* `SurfaceGridPropagationUtils`
+
+\* `SurfaceGridDamageUtils`
 
 \* `SurfaceActorInteractionUtils`
 
@@ -772,18 +782,22 @@ Environment/Zones/Shapes/
 
 Surface effects are handled by `UDungeonSurfaceSubsystem` (a `UWorldSubsystem`) as a sparse 3D surface cell grid (`TMap<FSurfaceCellCoord, FSurfaceCellData>`) with 6-face orientation awareness (`ESurfaceFaceDirection`). Active status zones (`AStatusZoneBase`) automatically register with the surface subsystem upon spawn, enabling continuous evaluation (`ProcessGridTick`) and instantaneous reactions when status is applied to surfaces under active volumetric zones (`ApplyStatusToCell`).
 
-The system uses a clean 3-tier architecture:
-- **`UDungeonSurfaceSubsystem` (Storage & Tick Orchestrator):** Manages `ActiveCells`, periodic tick (`ProcessGridTick`), structural damage aggregation (`ProcessSurfaceStructuralDamage`), and delegates spatial geometry to `SurfaceGridGeometryUtils` and chemical rules to `UElementalReactionRules`.
-- **`SurfaceGridGeometryUtils` (Spatial & Physical Topology):** Samples world geometry (`ProbeSurfaceAt`), calculates orthogonal spread paths (`FindSpreadCandidates` with `Coplanar` priority followed by concave `Corner 90°`), and enforces structural separation (`CornerActor != SourceActor`, preventing meshes from combusting their own side/bottom seams).
+The system uses a clean, decoupled manager and utility architecture:
+- **`UDungeonSurfaceSubsystem` (High-Level Orchestrator & Facade):** Central entry point and world subsystem managing subsystem lifecycle, registration of status zones and components, and delegating grid logic to dedicated managers.
+- **`FStaticSurfaceGridManager` (Static World Grid Manager):** Encapsulates static world cells (`ActiveCells`), periodic tick lifecycle, solid fuel combustion (`ProcessSolidFuelCombustion`), and cell application logic.
+- **`FDynamicSurfaceGridManager` (Dynamic Actor Grid Manager):** Encapsulates local grids attached to movable dungeon mechanisms, gates, and doors (`DynamicGrids`), computing rigid local-to-world transforms (`GetDynamicRigidTransform`).
+- **`FSurfaceGridPropagationUtils` (Propagation Engine):** Orchestrates elemental cellular-automata spread (`PropagateElementalSpreads`), electrical network conduction (`PropagateConductionNetworks`), and contact synchronization between static surfaces and dynamic actors.
+- **`FSurfaceGridDamageUtils` (Structural Damage Pipeline):** Manages environmental structural damage aggregation (`ProcessSurfaceStructuralDamage`) and DoT delivery to `UDamageableComponent`.
+- **`SurfaceGridGeometryUtils` (Spatial & Physical Topology):** Samples world geometry (`ProbeSurfaceAt`), resolves orthogonal spread paths (`FindSpreadCandidates` with `GetCornerCandidateCoords` 4-variant candidate resolution for 90° transitions between walls, floors, and ceilings, canonical voxel alignment via `FromWorldLocation`, and structural separation `CornerActor != SourceActor`).
 - **`UElementalReactionRules` (Chemical Rules & Tier Registry):** Single Source of Truth for element interactions, liquid mutual exclusivity, status duration adjustments, and tier specifications (`GetDamagePerSecond(Tier)`).
 
 The surface subsystem also governs solid fuel combustion (`ProcessSolidFuelCombustion`) and environmental structural damage (`ProcessSurfaceStructuralDamage`):
 - **Solid Fuel Combustion:** Materials configured with `bSelfSustainingFuel` (e.g. `Wood`) support continuous self-sustaining combustion (`IsPermanent() == true`). Burning cells spread to adjacent solid fuel neighbors at tuned intervals (`FuelSpreadInterval = 2.0s`) using `FindSpreadCandidates`. Fire naturally interacts with water via the chemical reaction registry (`Steam_Extinguish`), converting water into steam without artificial spread blocks.
 - **Independent Status Tiers & Aggregated Structural Damage:** Each active status on a cell (`FSurfaceCellStatusEntry`) maintains its own independent `uint8 Tier`. Damaging DoT entries calculate DPS dynamically from their tier (`Config.GetDamagePerSecond(StatusEntry.Tier)`) and aggregate damage per underlying structure (`SurfaceActor`) and damage type (`EDamageType::Fire`, `EDamageType::Lightning`), capped at `MaxStructuralDPS` to avoid instantaneous structure deletion. Obrażenia are delivered to the structure's `UDamageableComponent`, which automatically applies material resistances (e.g. `Stone` 100% immune, `Wood` 0% fire resistance and 50% lightning resistance). When the structure collapses, its native lifecycle invokes `ClearCellsInBounds`, extinguishing all attached cells.
 
-`AVolumetricStatusZone` provides 3D volumetric fields (such as gas clouds, energy spheres, or smoke) that interact with both overlapping actors and underlying surface cells.
+`AVolumetricStatusZone` provides 3D volumetric fields (such as gas clouds, energy spheres, or smoke) that act as immutable, continuous source emitters: they maintain constant elemental identity, ignore external status mutations, and continuously emit their status onto both overlapping actors (`ProcessActiveOverlaps`) and underlying surface cells (`ApplyElementalBurst`) throughout their lifetime.
 
-All elemental chemistry and state transitions are centralized in `UElementalReactionRules::CalculateElementalTransition` as the Single Source of Truth, shared by both `UStatusEffectComponent` (actors and targets) and `UDungeonSurfaceSubsystem` (surface grid cells). The rules engine enforces physical material traits, liquid displacement, and clearly distinguishes between `CanMaterialReceiveStatus` (ingress validation) and `CanMaterialSustainStatus` (continuous combustion vs parasitic conduction).
+All elemental chemistry and state transitions are centralized in `UElementalReactionRules::CalculateElementalTransition` as the Single Source of Truth, shared by both `UStatusEffectComponent` (actors and targets) and `UDungeonSurfaceSubsystem` (surface grid cells). The rules engine enforces physical material traits, liquid displacement, and clearly distinguishes between `CanMaterialReceiveStatus` (ingress validation) and `CanMaterialSustainStatus` (continuous combustion vs parasitic conduction). Status transfer and environmental ingress between actors and surface grid cells (`SurfaceActorInteractionUtils`) strictly delegate to `UElementalReactionRules`: status application ordering uses `SortByIngressPriority` (ensuring physical carrier liquids coat the target before dependent energies are evaluated), transfer rules use `CanStatusTransferToFloor` (`bCanTransferFromActorToFloor`), and reaction tags are centralized in `ElementalReactionTags`.
 
 The base zone architecture handles responsibilities such as:
 

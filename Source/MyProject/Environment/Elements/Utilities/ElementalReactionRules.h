@@ -67,6 +67,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
 	static bool CanStatusSpread(EStatusEffectType Status);
 
+	/** Sprawdza, czy status na ciele aktora może wchodzić w reakcję i brudzić komórki podłoża */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool CanStatusTransferToFloor(EStatusEffectType Status);
+
 	/** Zwraca wagę pierwszeństwa reakcji chemicznej dla danego statusu */
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
 	static int32 GetReactionPriority(EStatusEffectType Status);
@@ -74,6 +78,14 @@ public:
 	/** Sortuje listę statusów malejąco według priorytetu reakcji żywiołowych */
 	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
 	static void SortByReactionPriority(TArray<EStatusEffectType>& InOutStatuses);
+
+	/** Zwraca wagę pierwszeństwa wnikania statusu środowiskowego na cel (płyny/nośniki zawsze mają pierwszeństwo przed energiami) */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static int32 GetIngressPriority(EStatusEffectType Status);
+
+	/** Sortuje listę statusów środowiskowych według pierwszeństwa wnikania na cel */
+	UFUNCTION(BlueprintCallable, Category = "Custom|Elemental")
+	static void SortByIngressPriority(TArray<EStatusEffectType>& InOutStatuses);
 
 	/** Sprawdza, czy status zależny synchronizuje swój czas z nośnikiem (zgodnie z konfiguracją reguł w DataAsset) */
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")

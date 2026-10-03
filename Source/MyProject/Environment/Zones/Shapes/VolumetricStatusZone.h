@@ -25,7 +25,14 @@ public:
 		float InDuration,
 		AActor* InInstigator = nullptr);
 
+	/**
+	 * Strefa wolumetryczna jest trwałym emiterem pola żywiołowego o stałej tożsamości.
+	 * Ignoruje próby zmiany jej statusu przez inne żywioły.
+	 */
+	virtual void ApplyElementalHit(EStatusEffectType IncomingStatus, float InstantDamage = 0.0f, AActor* HitInstigator = nullptr) override;
+
 protected:
+	virtual void ProcessActiveOverlaps() override;
 	virtual bool IsActorWithinZoneGeometry(const FBoxSphereBounds& Bounds) const override;
 	virtual void DrawDebugVisuals() const override;
 };

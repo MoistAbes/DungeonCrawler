@@ -23,6 +23,12 @@ namespace SurfaceGridGeometryUtils
 	/** Kwalifikuje, czy dany aktor może być stabilnym podłożem pod komórki powierzchniowe */
 	MYPROJECT_API bool IsValidSurfaceTarget(const AActor* Actor);
 
+	/** Kwalifikuje, czy dany aktor jest dynamicznym mechanizmem z własną lokalną siatką powierzchni */
+	MYPROJECT_API bool IsDynamicSurfaceTarget(const AActor* Actor);
+
+	/** Pobiera pozycję kamery lub gracza na potrzeby optymalizacji rysowania debugowego */
+	MYPROJECT_API bool GetDebugViewerLocation(const UWorld* World, FVector& OutViewerLocation);
+
 	/** Rozpoznaje tożsamość materiałową aktora lochu z bezpiecznym fallbackiem do Stone */
 	MYPROJECT_API EPhysicalMaterialType GetMaterialFromActor(const AActor* Actor);
 

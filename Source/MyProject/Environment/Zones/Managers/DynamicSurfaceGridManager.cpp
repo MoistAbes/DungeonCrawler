@@ -103,6 +103,82 @@ int32 FDynamicSurfaceGridManager::ApplyStatusToDynamicSurface(
 	return AffectedCount;
 }
 
+int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
+	UWorld* World,
+	const FVector& Origin,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	AActor* Instigator,
+	uint8 Tier,
+	float SafeCellSize,
+	float CurrentTime,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+{
+	if (!World || Status == EStatusEffectType::None || Duration < 0.0f)
+	{
+		return 0;
+	}
+
+	struct FPendingDynBurstCell
+	{
+		TWeakObjectPtr<AActor> DynActor;
+		TWeakObjectPtr<USceneComponent> TransformComp;
+		FSurfaceCellCoord LocalCoord;
+		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
+	};
+	TArray<FPendingDynBurstCell> PendingDynBurstCells;
+
+	const float RadiusSq = FMath::Square(Radius);
+
+	for (const auto& GridPair : DynamicSurfaceGrids)
+	{
+		const FDynamicActorSurfaceGrid& DynGrid = GridPair.Value;
+		AActor* DynActor = DynGrid.OwnerActor.Get();
+		USceneComponent* TransformComp = DynGrid.TransformComponent.Get();
+		if (!DynActor || !TransformComp || DynGrid.LocalCells.IsEmpty())
+		{
+			continue;
+		}
+
+		const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
+		for (const auto& CellPair : DynGrid.LocalCells)
+		{
+			const FSurfaceCellCoord& LocalCoord = CellPair.Key;
+			const FVector LocalCenter = LocalCoord.ToWorldLocation(SafeCellSize);
+			const FVector WorldCenter = RigidTransform.TransformPosition(LocalCenter);
+
+			if (FVector::DistSquared(Origin, WorldCenter) > RadiusSq)
+			{
+				continue;
+			}
+
+			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(DynamicCellBurstLoS), false, Instigator);
+			LoSParams.AddIgnoredActor(DynActor);
+			FHitResult LoSHit;
+			const bool bBlocked = World->LineTraceSingleByChannel(LoSHit, Origin, WorldCenter, ECC_Visibility, LoSParams);
+			if (!bBlocked || LoSHit.GetActor() == DynActor)
+			{
+				PendingDynBurstCells.Add({ DynActor, TransformComp, LocalCoord, CellPair.Value.SurfaceMaterial });
+			}
+		}
+	}
+
+	int32 AffectedCount = 0;
+	for (const FPendingDynBurstCell& PendingCell : PendingDynBurstCells)
+	{
+		if (PendingCell.DynActor.IsValid() && PendingCell.TransformComp.IsValid())
+		{
+			if (ApplyStatusToDynamicCell(PendingCell.DynActor.Get(), PendingCell.TransformComp.Get(), PendingCell.LocalCoord, Status, Duration, Instigator, PendingCell.Material, Tier, SafeCellSize, CurrentTime, OnCellChanged))
+			{
+				AffectedCount++;
+			}
+		}
+	}
+
+	return AffectedCount;
+}
+
 bool FDynamicSurfaceGridManager::ApplyStatusToDynamicCell(
 	AActor* DynamicActor,
 	USceneComponent* TransformComp,
@@ -145,7 +221,10 @@ bool FDynamicSurfaceGridManager::ApplyStatusToDynamicCell(
 	return bModified;
 }
 
-int32 FDynamicSurfaceGridManager::ClearCellsInBounds(const FBox& BoundingBox, float SafeCellSize)
+int32 FDynamicSurfaceGridManager::ClearCellsInBounds(
+	const FBox& BoundingBox,
+	float SafeCellSize,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
 {
 	int32 RemovedCount = 0;
 	const FBox ExpandedBox = BoundingBox.ExpandBy(SafeCellSize * 0.5f);
@@ -166,6 +245,7 @@ int32 FDynamicSurfaceGridManager::ClearCellsInBounds(const FBox& BoundingBox, fl
 			const FVector WorldCenter = RigidTransform.TransformPosition(CellIt.Key().ToWorldLocation(SafeCellSize));
 			if (ExpandedBox.IsInsideOrOn(WorldCenter))
 			{
+				OnCellChanged(CellIt.Key(), EStatusEffectType::None, nullptr);
 				CellIt.RemoveCurrent();
 				RemovedCount++;
 			}
@@ -201,7 +281,12 @@ void FDynamicSurfaceGridManager::ExpireCells(
 	}
 }
 
-void FDynamicSurfaceGridManager::ProcessActorInteractions(AActor* Actor, UStatusEffectComponent* StatusComp, float SafeCellSize)
+void FDynamicSurfaceGridManager::ProcessActorInteractions(
+	AActor* Actor,
+	UStatusEffectComponent* StatusComp,
+	float SafeCellSize,
+	float CurrentTime,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
 {
 	if (!Actor || Actor->IsActorBeingDestroyed() || !StatusComp || DynamicSurfaceGrids.IsEmpty())
 	{
@@ -252,6 +337,39 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(AActor* Actor, UStatus
 			continue;
 		}
 
+		// Faza A: Aktor wpływa na stykające się komórki dynamiczne (np. płonący gracz zapala olej na bramie)
+		TArray<EStatusEffectType> ActorStatuses = StatusComp->GetActiveStatuses();
+		UElementalReactionRules::SortByReactionPriority(ActorStatuses);
+		const EPhysicalMaterialType DynMat = SurfaceGridGeometryUtils::GetMaterialFromActor(DynActor);
+
+		SurfaceActorInteractionUtils::ApplyActorEffectsToFloor(
+			Actor,
+			StatusComp,
+			TouchedLocalCoords,
+			Grid.LocalCells,
+			ActorStatuses,
+			[&](const FSurfaceCellCoord& LocalCoord, EStatusEffectType Status, float Duration, AActor* Instigator)
+			{
+				return ApplyStatusToDynamicCell(
+					DynActor,
+					TransformComp,
+					LocalCoord,
+					Status,
+					Duration,
+					Instigator,
+					DynMat,
+					0,
+					SafeCellSize,
+					CurrentTime,
+					OnCellChanged);
+			});
+
+		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+		{
+			return;
+		}
+
+		// Faza B: Komórki dynamiczne wpływają na aktora (np. zaolejona brama brudzi gracza)
 		SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 			Actor,
 			StatusComp,
@@ -272,20 +390,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 	// NOTE: TO BE REMOVED - ONLY FOR DEBUG AND PERFORMANCE TESTING PURPOSES
 	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
 	FVector ViewLocation = FVector::ZeroVector;
-	bool bHasViewLocation = false;
-	if (const APlayerController* PC = World->GetFirstPlayerController())
-	{
-		if (PC->PlayerCameraManager)
-		{
-			ViewLocation = PC->PlayerCameraManager->GetCameraLocation();
-			bHasViewLocation = true;
-		}
-		else if (const APawn* Pawn = PC->GetPawn())
-		{
-			ViewLocation = Pawn->GetActorLocation();
-			bHasViewLocation = true;
-		}
-	}
+	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
 	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
 
 	const float DebugLifeTime = 0.3f;

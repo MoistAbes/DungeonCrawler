@@ -1,7 +1,6 @@
 #include "SurfaceGridProjectionUtils.h"
 #include "SurfaceGridGeometryUtils.h"
 #include "Engine/World.h"
-#include "Engine/Engine.h"
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/Actor.h"
 #include "CollisionQueryParams.h"

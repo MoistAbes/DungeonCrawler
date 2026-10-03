@@ -46,6 +46,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|SurfaceGrid", meta = (ClampMin = "0.05", ClampMax = "1.0"))
 	float SubsystemTickInterval = 0.25f;
 
+	/** Maksymalny structural DPS aplikowany na pojedynczego aktora ze wszystkich komórek w danym ticku */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|SurfaceGrid", meta = (ClampMin = "1.0", ClampMax = "200.0"))
+	float MaxStructuralDPS = 25.0f;
+
 	/** Flaga włączająca debugowe rysowanie aktywnych komórek w edytorze i trybach deweloperskich */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Debug")
 	bool bDrawDebugGrid = true;
@@ -220,6 +224,12 @@ protected:
 private:
 	/** Ewaluuje dwukierunkową interakcję z zarejestrowanymi komponentami statusów */
 	void ProcessActorInteractions(float CurrentTime);
+
+	/** Aplikuje obrażenia strukturalne do aktorów na podstawie płonących/reagujących komórek w obu siatkach */
+	void ProcessSurfaceStructuralDamage(float DeltaTime);
+
+	/** Propaguje przewodzenie sieciowe żywiołów (np. elektryczności przez wodę), jeśli status i liczba komórek tego wymagają */
+	void PropagateConductionIfApplicable(EStatusEffectType Status, int32 AffectedCount);
 
 	/** Rejestr aktywnych komponentów statusów w świecie podlegających interakcji z podłożem */
 	UPROPERTY()

@@ -242,11 +242,9 @@ bool UStatusZoneLibrary::ApplyPointImpact(
 	if (AStatusZoneBase* Zone = Cast<AStatusZoneBase>(TargetActor))
 	{
 		Zone->ApplyElementalHit(StatusType, DirectDamage, InstigatorActor);
-		return true;
 	}
-
 	// 2. Bezpośrednie obrażenia i status na trafionym celu (postać, prop, struktura niszczalna)
-	if (TargetActor)
+	else if (TargetActor)
 	{
 		if (DirectDamage > 0.0f)
 		{

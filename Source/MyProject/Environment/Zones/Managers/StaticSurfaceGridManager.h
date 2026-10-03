@@ -7,7 +7,6 @@
 class AActor;
 class UWorld;
 class UStatusEffectComponent;
-class FDynamicSurfaceGridManager;
 
 /**
  * Menedżer statycznej siatki powierzchniowej lochu (ActiveCells).
@@ -39,7 +38,10 @@ public:
 	/**
 	 * Usuwa aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.
 	 */
-	int32 ClearCellsInBounds(const FBox& BoundingBox, TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+	int32 ClearCellsInBounds(
+		const FBox& BoundingBox,
+		float SafeCellSize,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/**
 	 * Wygasza przeterminowane statusy w komórkach statycznych.
@@ -54,14 +56,6 @@ public:
 		float SafeCellSize,
 		float CurrentTime,
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
-
-	/**
-	 * Aplikuje zagregowane obrażenia od aktywnych komórek żywiołów do fundamentów lochu.
-	 */
-	void ProcessSurfaceStructuralDamage(
-		UWorld* World,
-		const FDynamicSurfaceGridManager& DynamicGridManager,
-		float DeltaTime);
 
 	/**
 	 * Przetwarza interakcję pojedynczego aktora ze stykającymi się komórkami statycznymi.

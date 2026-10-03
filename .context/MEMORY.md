@@ -78,19 +78,25 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusEffectComponent` — status-effect state with Zero-Bandwidth networking, dynamic carrier/fuel duration syncing, and modular helpers (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`).
 
-\* `AStatusZoneBase` and derived status-zone actors — environmental status zones with automatic `UDungeonSurfaceSubsystem` registration and point geometry evaluation.
+\* `AStatusZoneBase` and `AVolumetricStatusZone` — 3D volumetric fields (clouds, energy spheres) acting as immutable continuous source emitters, projecting status onto overlapping actors and underlying surface cells throughout their lifetime.
 
 \* `UKineticForceLibrary` — shared kinetic/physics force operations and centralized kinetic impact/punch-through (`HandleKineticImpactAndPunchThrough` with breaker/victim resolution and flat horizontal penetration).
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
-\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid for elemental propagation on walls/floors, solid fuel combustion orchestration, and structural damage aggregation. Delegates spatial burst projections to `SurfaceGridProjectionUtils` and floor/actor transfers to `SurfaceActorInteractionUtils`.
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid orchestrator for elemental propagation on walls/floors, coordinating static and dynamic grids via dedicated managers (`FStaticSurfaceGridManager`, `FDynamicSurfaceGridManager`), propagation pipelines (`FSurfaceGridPropagationUtils`), damage aggregation (`FSurfaceGridDamageUtils`), and spatial utilities.
 
-\* `SurfaceGridGeometryUtils` — spatial sampling and physical topology engine (`ProbeSurfaceAt`, `FindSpreadCandidates` with `Coplanar`/`Corner` hierarchy and structural separation `CornerActor != SourceActor`).
+\* `FStaticSurfaceGridManager` & `FDynamicSurfaceGridManager` — decoupled management of static world surface cells and localized dynamic grids on movable actors (e.g. gates, doors, mechanisms) using rigid transforms.
+
+\* `FSurfaceGridPropagationUtils` — elemental cellular-automata spread, electrical conduction networks, and contact synchronization between static surfaces and dynamic actors.
+
+\* `FSurfaceGridDamageUtils` — environmental structural damage aggregation and DoT delivery to `UDamageableComponent`.
+
+\* `SurfaceGridGeometryUtils` — spatial sampling and physical topology engine (`ProbeSurfaceAt`, `FindSpreadCandidates` with 4-variant candidate resolution for 90° transitions via `GetCornerCandidateCoords`, canonical voxel alignment via `FromWorldLocation`, and structural separation `CornerActor != SourceActor`).
 
 \* `SurfaceGridProjectionUtils` — surface projection, 3D burst scans, edge drop-off line traces, and line-of-sight verification utilities.
 
-\* `SurfaceActorInteractionUtils` — bidirectional floor/actor elemental transfer calculations (Phase A Actor->Floor and Phase B Floor->Actor).
+\* `SurfaceActorInteractionUtils` — bidirectional floor/actor elemental transfer calculations delegating priority ordering (`SortByIngressPriority`) and transfer traits (`CanStatusTransferToFloor`) to `UElementalReactionRules`.
 
 \* `USurfaceCellTransitionUtils` — cell-level transition resolver (`CalculateCellTransition`), applying reaction rules to `FSurfaceCellData` and managing burning visual states.
 

@@ -29,9 +29,9 @@ void SurfaceActorInteractionUtils::ApplyActorEffectsToFloor(
 		for (int32 StatusIdx = 0; StatusIdx < InOutActorStatuses.Num(); ++StatusIdx)
 		{
 			const EStatusEffectType ActorStatus = InOutActorStatuses[StatusIdx];
-			if (ActorStatus == EStatusEffectType::None || ActorStatus == EStatusEffectType::Oiled)
+			if (ActorStatus == EStatusEffectType::None || !UElementalReactionRules::CanStatusTransferToFloor(ActorStatus))
 			{
-				continue; // Olej na ciele aktora jest pasywny - nie wylewa się na posadzkę
+				continue;
 			}
 
 			// Czy komórka nadal istnieje i ma z czym reagować?
@@ -44,7 +44,7 @@ void SurfaceActorInteractionUtils::ApplyActorEffectsToFloor(
 			if (Reaction.bReactionOccurred)
 			{
 				// Obiekt swoją obecnością NIE wypiera cieczy na posadzce
-				if (Reaction.ReactionTag == FName(TEXT("Liquid_Displaced")))
+				if (Reaction.ReactionTag == ElementalReactionTags::LiquidDisplaced())
 				{
 					continue;
 				}
@@ -93,7 +93,7 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 		TWeakObjectPtr<AActor> Instigator = nullptr;
 	};
 
-	TMap<EStatusEffectType, FFloorStatusCandidate> FloorStatusesToApply;
+	TMap<EStatusEffectType, FFloorStatusCandidate> StatusCandidates;
 	EStatusEffectType DominantLiquid = EStatusEffectType::None;
 	uint8 DominantLiquidTier = 0;
 	TWeakObjectPtr<AActor> DominantLiquidInstigator = nullptr;
@@ -113,7 +113,7 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 
 		for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)
 		{
-			// ZŁOTA ZASADA CHEMICZNA: Na styku komórek postać może w danym ticku przyjąć tylko JEDEN płyn (z najbliższej komórki)
+			// Geometryczne rozstrzygnięcie: Na styku wielu komórek postać przyjmuje płyn z najbliższej komórki
 			if (UElementalReactionRules::IsLiquidStatus(Entry.Status))
 			{
 				if (CellDistSq < MinLiquidDistSq)
@@ -126,7 +126,7 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 			}
 			else
 			{
-				FFloorStatusCandidate& Candidate = FloorStatusesToApply.FindOrAdd(Entry.Status);
+				FFloorStatusCandidate& Candidate = StatusCandidates.FindOrAdd(Entry.Status);
 				if (Entry.Tier > Candidate.Tier || !Candidate.Instigator.IsValid())
 				{
 					Candidate.Tier = Entry.Tier;
@@ -136,27 +136,37 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 		}
 	}
 
-	// 1. ZŁOTA ZASADA: NAJPIERW aplikujemy płyn podłoża (fizyczny nośnik otoczenia, np. woda zmywa olej)
+	// Dołączamy dominujący płyn wyłoniony na podstawie bliskości geometrycznej
 	if (DominantLiquid != EStatusEffectType::None)
 	{
-		// UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying dominant floor liquid %s (T%d) to %s"),
-		// 	*UEnum::GetValueAsString(DominantLiquid), DominantLiquidTier, *Actor->GetName());
-		StatusComp->ApplyStatus(DominantLiquid, DominantLiquidTier, -1.0f, DominantLiquidInstigator.Get());
-
-		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
-		{
-			return;
-		}
+		FFloorStatusCandidate& LiquidCandidate = StatusCandidates.FindOrAdd(DominantLiquid);
+		LiquidCandidate.Tier = DominantLiquidTier;
+		LiquidCandidate.Instigator = DominantLiquidInstigator;
 	}
 
-	// 2. NASTĘPNIE aplikujemy pozostałe statusy środowiskowe (energia: prąd, ogień)
-	for (const auto& StatusPair : FloorStatusesToApply)
+	if (StatusCandidates.IsEmpty())
 	{
-		if (StatusPair.Key != DominantLiquid)
+		return;
+	}
+
+	// Pobieramy listę statusów i sortujemy według reguł wnikania żywiołów (Single Source of Truth):
+	// Nośniki/płyny są gwarantowane na początku (by przygotować powłokę materiału),
+	// a następnie energie w kolejności priorytetu reakcji.
+	TArray<EStatusEffectType> SortedStatuses;
+	StatusCandidates.GetKeys(SortedStatuses);
+	UElementalReactionRules::SortByIngressPriority(SortedStatuses);
+
+	// Deterministyczna aplikacja statusów w kolejności podyktowanej przez silnik chemii
+	for (EStatusEffectType StatusToApply : SortedStatuses)
+	{
+		if (const FFloorStatusCandidate* Candidate = StatusCandidates.Find(StatusToApply))
 		{
-			// UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying secondary floor status %s (T%d) to %s"),
-			// 	*UEnum::GetValueAsString(StatusPair.Key), StatusPair.Value.Tier, *Actor->GetName());
-			StatusComp->ApplyStatus(StatusPair.Key, StatusPair.Value.Tier, -1.0f, StatusPair.Value.Instigator.Get());
+			StatusComp->ApplyStatus(StatusToApply, Candidate->Tier, -1.0f, Candidate->Instigator.Get());
+
+			if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
+			{
+				return;
+			}
 		}
 	}
 }

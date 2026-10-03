@@ -56,6 +56,22 @@ public:
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/**
+	 * Sprawdza komórki dynamiczne w sferze wybuchu i aplikuje status z testem widoczności Line-of-Sight.
+	 * @return Liczba zmodyfikowanych komórek dynamicznych.
+	 */
+	int32 ApplyElementalBurst(
+		UWorld* World,
+		const FVector& Origin,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator,
+		uint8 Tier,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
 	 * Nakłada status na komórkę w lokalnej siatce dynamicznego aktora.
 	 * @return true jeśli komórka została zmodyfikowana.
 	 */
@@ -73,13 +89,21 @@ public:
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/** Usuwa komórki dynamiczne przecinające zadany prostopadłościan AABB */
-	int32 ClearCellsInBounds(const FBox& BoundingBox, float SafeCellSize);
+	int32 ClearCellsInBounds(
+		const FBox& BoundingBox,
+		float SafeCellSize,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/** Wygasza przeterminowane statusy w komórkach dynamicznych oraz czyści niepoprawnych aktorów */
 	void ExpireCells(float CurrentTime, TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
-	/** Przetwarza interakcje postaci z komórkami dynamicznymi */
-	void ProcessActorInteractions(AActor* Actor, UStatusEffectComponent* StatusComp, float SafeCellSize);
+	/** Przetwarza dwukierunkowe interakcje postaci z komórkami dynamicznymi (Faza A: Postać -> Komórka, Faza B: Komórka -> Postać) */
+	void ProcessActorInteractions(
+		AActor* Actor,
+		UStatusEffectComponent* StatusComp,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/** Dostęp do siatek */
 	const TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetGrids() const { return DynamicSurfaceGrids; }

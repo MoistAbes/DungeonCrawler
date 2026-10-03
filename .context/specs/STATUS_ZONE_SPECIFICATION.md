@@ -75,8 +75,9 @@ classDiagram
     }
 
     class UDungeonSurfaceSubsystem {
-        <<WorldSubsystem>>
-        -TMap~FSurfaceCellCoord, FSurfaceCellData~ ActiveCells
+        <<WorldSubsystem Facade>>
+        -TUniquePtr~FStaticSurfaceGridManager~ StaticGridManager
+        -TUniquePtr~FDynamicSurfaceGridManager~ DynamicGridManager
         -TArray~TWeakObjectPtr~AStatusZoneBase~~ RegisteredStatusZones
         -TArray~TWeakObjectPtr~UStatusEffectComponent~~ RegisteredStatusComponents
         #float CellSize
@@ -84,7 +85,6 @@ classDiagram
         +IsValidSurfaceTarget(Actor) bool
         +ApplyStatusFromHit(Hit, Radius, Status, Duration, Instigator, Tier) int32
         +ApplyStatusToSurface(Location, Normal, Radius, Status, Duration, Instigator, Tier) int32
-        -ApplyStatusInArea(Location, Normal, Radius, Status, Duration, BurstOrigin, ProcessedCoords, Instigator, Tier) int32
         +ApplyStatusToCell(Coord, Status, Duration, Instigator, Material, SurfaceActor, Tier) bool
         +ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator, Tier) int32
         +ClearCellsInBounds(BoundingBox) int32
@@ -93,6 +93,30 @@ classDiagram
         +RegisterStatusComponent(Comp)
         +UnregisterStatusComponent(Comp)
         #ProcessGridTick()
+    }
+
+    class FStaticSurfaceGridManager {
+        -TMap~FSurfaceCellCoord, FSurfaceCellData~ ActiveCells
+        +TickStaticGrid(CurrentTime, SafeCellSize, World, ...)
+        +ApplyStatusToCell(...) bool
+        +ProcessSolidFuelCombustion(...)
+    }
+
+    class FDynamicSurfaceGridManager {
+        -TMap~TWeakObjectPtr~AActor~, FDynamicActorSurfaceGrid~ DynamicGrids
+        +RegisterDynamicActorSurface(Actor, TransformComp)
+        +UnregisterDynamicActorSurface(Actor)
+        +TickDynamicGrids(CurrentTime, SafeCellSize, World, ...)
+        +ApplyStatusToDynamicCell(...) bool
+    }
+
+    class FSurfaceGridPropagationUtils {
+        +PropagateElementalSpreads(...)
+        +PropagateConductionNetworks(...)
+    }
+
+    class FSurfaceGridDamageUtils {
+        +ProcessSurfaceStructuralDamage(...)
     }
 
     class UStatusZoneLibrary {
@@ -126,6 +150,10 @@ classDiagram
     AStatusZoneBase <|-- AVolumetricStatusZone
     AStatusZoneBase ..> UDungeonSurfaceSubsystem : Rejestracja w BeginPlay / EndPlay
     UDungeonSurfaceSubsystem o-- AStatusZoneBase : Ciągła ewaluacja stref z komórkami
+    UDungeonSurfaceSubsystem *-- FStaticSurfaceGridManager : Zarządzanie siatką świata
+    UDungeonSurfaceSubsystem *-- FDynamicSurfaceGridManager : Zarządzanie siatkami aktorów
+    UDungeonSurfaceSubsystem ..> FSurfaceGridPropagationUtils : Propagacja komórkowa
+    UDungeonSurfaceSubsystem ..> FSurfaceGridDamageUtils : Agregacja obrażeń struktur
     UStatusZoneLibrary ..> AVolumetricStatusZone : Fabryka
     UStatusZoneLibrary ..> UDungeonSurfaceSubsystem : Projekcja wybuchów i uderzeń
     UDungeonSurfaceSubsystem ..> UElementalReactionRules : CalculateElementalTransition
@@ -141,15 +169,26 @@ classDiagram
   Implementacja przestrzennej bryły sferycznej (chmury gazu, kule energii, mgła). Obsługuje scalanie nakładających się stref tego samego żywiołu (`MergeWithZone`) oraz rzutowanie geometrii na cele i podłoże.
 
 - **`UDungeonSurfaceSubsystem` (`Source/MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h`):**
-  Podsystem świata (`UWorldSubsystem`) zarządzający rzadką siatką komórek powierzchniowych (`ActiveCells`). Odpowiada za:
-  - Przechowywanie aktywnych komórek i orkiestrację cyklu życia siatki.
-  - Atomową aplikację statusów przez `ApplyStatusToCell` z automatyczną natychmiastową reakcją z wiszącymi strefami (`bCheckOverlappingZones`).
-  - Cykliczną pętlę serwera `ProcessGridTick` (0.25 s): wygaszanie statusów, propagację żywiołów (Cellular Automata), interakcję z aktorami oraz ciągłą ewaluację z zarejestrowanymi strefami `RegisteredStatusZones`.
-  - Błyskawiczne czyszczenie komórek ze zniszczonych struktur (`ClearCellsInBounds`).
-  - Delegację skanowania geometrii do `SurfaceGridProjectionUtils`, interakcji aktorów do `SurfaceActorInteractionUtils`, a tranzycji komórek do `USurfaceCellTransitionUtils`.
+  Podsystem świata (`UWorldSubsystem`) i fasada orkiestrująca działanie siatki powierzchniowej w lochu. Deleguje zadania do dedykowanych zarządców i bibliotek:
+  - Przechowuje i koordynuje `FStaticSurfaceGridManager` oraz `FDynamicSurfaceGridManager`.
+  - Prowadzi rejestr stref przestrzennych `RegisteredStatusZones` i komponentów aktorów `RegisteredStatusComponents`.
+  - Pętla serwera `ProcessGridTick` (0.25 s) wywołuje cykle zarządców, propagację (`FSurfaceGridPropagationUtils`), interakcję aktorów (`SurfaceActorInteractionUtils`) oraz agregację obrażeń (`FSurfaceGridDamageUtils`).
+  - Udostępnia publiczne, atomowe API: `ApplyStatusFromHit`, `ApplyStatusToSurface`, `ApplyStatusToCell`, `ApplyElementalBurst`, `ClearCellsInBounds`.
+
+- **`FStaticSurfaceGridManager` (`Source/MyProject/Environment/Zones/Managers/StaticSurfaceGridManager.h`):**
+  Zarządca statycznej siatki świata: rzadka mapa `ActiveCells`, cykl życia statusów (wygaszanie, DoT), spalanie paliw stałych (`ProcessSolidFuelCombustion`) oraz aplikacja komórkowa na architekturze.
+
+- **`FDynamicSurfaceGridManager` (`Source/MyProject/Environment/Zones/Managers/DynamicSurfaceGridManager.h`):**
+  Zarządca lokalnych siatek powierzchniowych przypiętych do ruchomych obiektów i mechanizmów lochu (bramy, platformy, skrzynie). Przelicza pozycje w lokalnych układach współrzędnych za pomocą transformacji sztywnej `GetDynamicRigidTransform`.
+
+- **`FSurfaceGridPropagationUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridPropagationUtils.h`):**
+  Silnik rozprzestrzeniania żywiołów: propagacja komórkowa w czasie (`PropagateElementalSpreads`), łańcuchowe sieci przewodzenia elektrycznego (`PropagateConductionNetworks`) oraz synchronizacja punktów styku między siatką statyczną i ruchomymi aktorami.
+
+- **`FSurfaceGridDamageUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridDamageUtils.h`):**
+  Pipeline obrażeń środowiskowych: agregacja DoT komórek per aktor i typ obrażeń, ograniczenie `MaxStructuralDPS` i przekazywanie obrażeń do `UDamageableComponent`.
 
 - **`SurfaceGridGeometryUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h`):**
-  Narzędzia topologii fizycznej i próbkowania przestrzennego (`ProbeSurfaceAt`, `FindSpreadCandidates` z hierarchią `Coplanar`/`Corner` i separacją strukturalną `CornerActor != SourceActor`).
+  Narzędzia topologii fizycznej i próbkowania przestrzennego (`ProbeSurfaceAt`, `FindSpreadCandidates` z 4-wariantowym rozwiązywaniem narożników 90° `GetCornerCandidateCoords`, kanonizacją woksela `FromWorldLocation`, weryfikacją LoS i separacją strukturalną `CornerActor != SourceActor`).
 
 - **`SurfaceGridProjectionUtils` (`Source/MyProject/Environment/Zones/Utilities/SurfaceGridProjectionUtils.h`):**
   Narzędzia rzutowania wybuchów 3D, próbkowania dysków powierzchniowych, testów krawędzi (drop-off line traces) i weryfikacji linii wzroku (Line-of-Sight).
@@ -174,9 +213,10 @@ classDiagram
 
 ### 3.1. Typy Danych (`SurfaceGridTypes.h`)
 - `ESurfaceFaceDirection` — 6 kierunków normalnej fundamentu: `Up` (posadzka), `Down` (sufit), `North`, `South`, `East`, `West` (ściany pionowe). Zapewnia niezależność przeciwnych stron ścian.
-- `FSurfaceCellCoord` — trójwymiarowy klucz siatki: `(X, Y, Z, Face)`. Posiada metody mapowania `FromWorldLocation` (z 2 cm marginesem w głąb kafelka), `ToWorldLocation`, `GetCoplanarNeighbors` oraz `GetAdjacentNeighbors` (w tym krawędzie 90°).
-- `FSurfaceCellStatusEntry` — pojedynczy status aktywny na komórce: `Status`, `ServerEndTime`, `Instigator`.
-- `FSurfaceCellData` — kontener komórki: lista statusów `ActiveStatuses` (`TArray<FSurfaceCellStatusEntry, TInlineAllocator<2>>`), tożsamość materiału `SurfaceMaterial` (`EPhysicalMaterialType`), metody pomocnicze (`HasStatus`, `FindStatus`, `RemoveStatus`, `GetDominantStatus`).
+- `FSurfaceCellCoord` — trójwymiarowy klucz siatki: `(X, Y, Z, Face)`. Posiada metody mapowania `FromWorldLocation` (z 2 cm marginesem w głąb kafelka), `ToWorldLocation`, `GetCoplanarNeighbors`, `GetDirectionalSpreadPaths`, `GetCornerCandidateCoords` (wyznacza 4 warianty brzegowe wokseli na krawędziach 90°) oraz `GetAdjacentNeighbors`.
+- `FSurfaceCellStatusEntry` — pojedynczy status aktywny na komórce: `Status`, `Tier`, `ServerEndTime`, `Instigator`.
+- `FSurfaceCellData` — kontener komórki: lista statusów `ActiveStatuses` (`TArray<FSurfaceCellStatusEntry, TInlineAllocator<2>>`), tożsamość materiału `SurfaceMaterial` (`EPhysicalMaterialType`), wskaźnik na aktora `SurfaceActor`, metody pomocnicze (`HasStatus`, `FindStatus`, `RemoveStatus`, `GetDominantStatus`).
+- `FDynamicActorSurfaceGrid` — lokalna rzadka siatka wokseli przypięta do komponentu `USceneComponent` aktora ruchomego (`OwnerActor`, `LocalCells`). Przeliczana do świata za pomocą transformacji sztywnej `GetDynamicRigidTransform`.
 
 ### 3.2. Konfiguracja Subsystemu
 
@@ -307,9 +347,12 @@ System realizuje model fizycznego spalania palnych materiałów konstrukcyjnych 
 1. **Paliwo Samoistne (`bSelfSustainingFuel`):**
    Materiały z cechą `bSelfSustainingFuel = true` traktują ogień jako proces ciągły (`IsPermanent() == true`). Płomień nie wygasa z upływem czasu, lecz pali się do momentu fizycznego zniszczenia struktury lub ugaszenia cieczą chłodzącą (`Wet`).
 2. **Ortogonalna Topologia Rozprzestrzeniania (`SurfaceGridGeometryUtils::FindSpreadCandidates`):**
-   - **`Coplanar` (Priorytet 1):** Ogień rozchodzi się w płaszczyźnie tej samej ściany lub podłogi (kierunki $\pm U, \pm V$). Jeśli ściany stoją w szeregu, płomień płynnie przechodzi między nimi.
-   - **`Corner` (Priorytet 2):** Na fizycznym końcu płaszczyzny (brak kontynuacji w linii prostej) badany jest wewnętrzny narożnik wklęsły 90° (np. ściana $\leftrightarrow$ podłoga, sufit lub ściana prostopadła).
-   - **Zasada Separacji Struktur:** `CornerActor != SourceActor` — obiekt architektury nie podpala bocznych szczelin ani spodu samego siebie.
+   - **`Coplanar`:** Ogień i płyny rozchodzą się w płaszczyźnie tej samej ściany lub podłogi (kierunki $\pm U, \pm V$). Jeśli ściany stoją w szeregu, płomień płynnie przechodzi między nimi.
+   - **`Corner 90°` (Wielowariantowe dopasowanie krawędzi):** Na styku dwóch prostopadłych płaszczyzn metoda `GetCornerCandidateCoords` zwraca 4 legalne warianty wokseli brzegowych: $(X, Y, Z)$, $(X \pm 1, Y, Z)$, $(X, Y, Z \pm 1)$, $(X \pm 1, Y, Z \pm 1)$.
+     - **Priorytet 1 (ActiveCells):** Przeszukanie 4 wariantów w `ActiveCells`. Jeśli na suficie, posadzce lub ścianie istnieje już aktywna komórka (np. rozlany olej na suficie w $Z=18$), zostaje natychmiast wybrana i zapalona bez potrzeby rzucania promieni.
+     - **Priorytet 2 (Sondowanie świata):** W przypadku surowego podłoża (np. drewniany strop) promienie `QuerySurface` sondują architekturę, a funkcja `FromWorldLocation(Hit.ImpactPoint)` precyzyjnie kanonizuje pozycję do właściwego woksela.
+     - **Filtrowanie ścian płaskich (`bIsWallToWall`):** Zapobieganie fałszywemu skręcaniu prostej ściany pod kątem 90° w puste powietrze działa tylko dla pionowych szwów ściennych (ściana $\leftrightarrow$ ściana), nie blokując naturalnych narożników ze stropem (`Down`) czy posadzką (`Up`).
+   - **Zasada Separacji Struktur:** `CornerActor != SourceActor` — obiekt architektury nie podpala bocznych szczelin ani spodu samego siebie (chyba że w tym miejscu gracz celowo nałożył już ciecz).
    - **Brak Sztucznych Blokad na Wodę:** Komórki `Wet` nie blokują spreadu sztucznym `if`, lecz uczestniczą w reakcji `Steam_Extinguish`, odparowując wodę i generując parę wodną.
 3. **Niezależne Poziomy Mocy (Multi-Tier Cell Statuses):**
    Każdy wpis w komórce (`FSurfaceCellStatusEntry`) przechowuje własny `uint8 Tier`. Pozwala to na precyzyjne rozliczanie obrażeń z różnych żywiołów koegzystujących na jednym kafelku:
@@ -351,6 +394,8 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | Zadanie | Status | Opis i Cel |
 | :--- | :---: | :--- |
 | **Surface Grid Subsystem (`UDungeonSurfaceSubsystem`)** | **[ZREALIZOWANE]** | Rzadka siatka komórek 3D na posadzkach i ścianach z obsługą 6 kierunków ścian. |
+| **Dekonstrukcja Subsystemu na Zarządcy (`StaticSurfaceGridManager`, `DynamicSurfaceGridManager`)** | **[ZREALIZOWANE]** | Pełna enkapsulacja siatki statycznej i dynamicznej, wyodrębnienie `FSurfaceGridPropagationUtils` i `FSurfaceGridDamageUtils`. |
+| **Globalna Propagacja Narożna 90° (`GetCornerCandidateCoords`)** | **[ZREALIZOWANE]** | Rozwiązanie problemu asymetrii sufitu/podłogi dzięki 4-wariantowemu dopasowaniu wokseli brzegowych i kanonizacji pozycji `FromWorldLocation`. |
 | **Single Source of Truth (`CalculateElementalTransition`)** | **[ZREALIZOWANE]** | Centralizacja logiki chemicznej, wypierania płynów i czyszczenia statusów w jednej funkcji. |
 | **Rozróżnienie Receive vs Sustain (`CanMaterialSustainStatus`)** | **[ZREALIZOWANE]** | Płomień po spaleniu oleju trwa przez pełny czas spalania paliwa na posadzce; prąd zanika bez wody. |
 | **Ciągła Integracja Stref z Siatką (`RegisteredStatusZones`)** | **[ZREALIZOWANE]** | Automatyczna rejestracja stref wolumetrycznych w subsystemie; natychmiastowy zapłon plam pod chmurami oraz obsługa ruchomych stref i aur. |

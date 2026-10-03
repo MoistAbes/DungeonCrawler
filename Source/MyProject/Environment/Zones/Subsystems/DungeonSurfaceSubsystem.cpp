@@ -1,14 +1,15 @@
 #include "DungeonSurfaceSubsystem.h"
 
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "TimerManager.h"
+#include "Kismet/GameplayStatics.h"
 
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridProjectionUtils.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridPropagationUtils.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Interfaces/SurfaceGridTargetInterface.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 
@@ -107,7 +108,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusFromHit(
 	const FVector SurfaceNormal = HitResult.ImpactNormal.IsNearlyZero() ? FVector::UpVector : HitResult.ImpactNormal.GetSafeNormal();
 
 	// Jeśli cel to dynamiczny mechanizm (np. brama, winda), kierujemy do siatki lokalnej mesha
-	if (HitActor && HitActor->Implements<USurfaceGridTargetInterface>() && ISurfaceGridTargetInterface::Execute_IsDynamicSurface(HitActor))
+	if (SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(HitActor))
 	{
 		USceneComponent* TransformComp = GetDynamicActorTransformComponent(HitActor);
 		if (TransformComp)
@@ -241,8 +242,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	}
 
 	// Jeśli cel to dynamiczny mechanizm (np. brama, winda), kierujemy do siatki lokalnej mesha
-	if (ResolvedSurfaceActor && ResolvedSurfaceActor->Implements<USurfaceGridTargetInterface>()
-		&& ISurfaceGridTargetInterface::Execute_IsDynamicSurface(ResolvedSurfaceActor))
+	if (SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(ResolvedSurfaceActor))
 	{
 		USceneComponent* TransformComp = GetDynamicActorTransformComponent(ResolvedSurfaceActor);
 		if (TransformComp)
@@ -309,19 +309,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
 			}
 		});
 
-	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
-	{
-		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
-			World,
-			StaticGridManager,
-			DynamicGridManager,
-			SafeCellSize,
-			World->GetTimeSeconds(),
-			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
-			{
-				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
-			});
-	}
+	PropagateConductionIfApplicable(Status, AffectedCount);
 
 	return AffectedCount;
 }
@@ -363,19 +351,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
 			}
 		});
 
-	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
-	{
-		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
-			World,
-			StaticGridManager,
-			DynamicGridManager,
-			SafeCellSize,
-			World->GetTimeSeconds(),
-			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
-			{
-				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
-			});
-	}
+	PropagateConductionIfApplicable(Status, AffectedCount);
 
 	return AffectedCount;
 }
@@ -394,8 +370,8 @@ int32 UDungeonSurfaceSubsystem::ClearCellsInBounds(const FBox& BoundingBox)
 		OnSurfaceCellChanged.Broadcast(Coord, NewStatus, Instigator);
 	};
 
-	int32 RemovedCount = StaticGridManager.ClearCellsInBounds(BoundingBox, BroadcastCellCleared);
-	RemovedCount += DynamicGridManager.ClearCellsInBounds(BoundingBox, SafeCellSize);
+	int32 RemovedCount = StaticGridManager.ClearCellsInBounds(BoundingBox, SafeCellSize, BroadcastCellCleared);
+	RemovedCount += DynamicGridManager.ClearCellsInBounds(BoundingBox, SafeCellSize, BroadcastCellCleared);
 
 	if (RemovedCount > 0)
 	{
@@ -413,21 +389,21 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	AActor* Instigator,
 	uint8 Tier)
 {
-	if (!GetWorld() || Status == EStatusEffectType::None || Radius <= 0.0f)
+	UWorld* World = GetWorld();
+	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f)
 	{
 		return 0;
 	}
 
-	// UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyElementalBurst START -> Origin: %s, Radius: %.1f, Status: %s (Tier: %d)"),
-	// 	*Origin.ToString(), Radius, *UEnum::GetValueAsString(Status), Tier);
-
 	int32 AffectedCount = 0;
 	TSet<FSurfaceCellCoord> ProcessedCoords;
+	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	const float CurrentTime = World->GetTimeSeconds();
 
 	// 1. Bezpośrednia ewaluacja istniejących aktywnych komórek w sferze wybuchu z Line-of-Sight
 	TArray<FSurfaceCellCoord> CellsInRadius;
 	SurfaceGridProjectionUtils::FilterCellsInBurstRadius(
-		GetWorld(),
+		World,
 		Origin,
 		Radius,
 		CellSize,
@@ -450,58 +426,20 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	}
 
 	// 1b. Bezpośrednia ewaluacja istniejących komórek dynamicznych w sferze wybuchu
-	struct FPendingDynBurstCell
-	{
-		TWeakObjectPtr<AActor> DynActor;
-		TWeakObjectPtr<USceneComponent> TransformComp;
-		FSurfaceCellCoord LocalCoord;
-		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
-	};
-	TArray<FPendingDynBurstCell> PendingDynBurstCells;
-
-	for (const auto& GridPair : DynamicGridManager.GetGrids())
-	{
-		const FDynamicActorSurfaceGrid& DynGrid = GridPair.Value;
-		AActor* DynActor = DynGrid.OwnerActor.Get();
-		USceneComponent* TransformComp = DynGrid.TransformComponent.Get();
-		if (!DynActor || !TransformComp || DynGrid.LocalCells.IsEmpty())
+	AffectedCount += DynamicGridManager.ApplyElementalBurst(
+		World,
+		Origin,
+		Radius,
+		Status,
+		Duration,
+		Instigator,
+		Tier,
+		SafeCellSize,
+		CurrentTime,
+		[this](const FSurfaceCellCoord& CellCoord, EStatusEffectType NewStatus, AActor* InInstigator)
 		{
-			continue;
-		}
-
-		const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
-		for (const auto& CellPair : DynGrid.LocalCells)
-		{
-			const FSurfaceCellCoord& LocalCoord = CellPair.Key;
-			const FVector LocalCenter = LocalCoord.ToWorldLocation(CellSize);
-			const FVector WorldCenter = RigidTransform.TransformPosition(LocalCenter);
-
-			if (FVector::DistSquared(Origin, WorldCenter) > FMath::Square(Radius))
-			{
-				continue;
-			}
-
-			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(DynamicCellBurstLoS), false, Instigator);
-			LoSParams.AddIgnoredActor(DynActor);
-			FHitResult LoSHit;
-			const bool bBlocked = GetWorld()->LineTraceSingleByChannel(LoSHit, Origin, WorldCenter, ECC_Visibility, LoSParams);
-			if (!bBlocked || LoSHit.GetActor() == DynActor)
-			{
-				PendingDynBurstCells.Add({ DynActor, TransformComp, LocalCoord, CellPair.Value.SurfaceMaterial });
-			}
-		}
-	}
-
-	for (const FPendingDynBurstCell& PendingCell : PendingDynBurstCells)
-	{
-		if (PendingCell.DynActor.IsValid() && PendingCell.TransformComp.IsValid())
-		{
-			if (ApplyStatusToDynamicCell(PendingCell.DynActor.Get(), PendingCell.TransformComp.Get(), PendingCell.LocalCoord, Status, Duration, Instigator, PendingCell.Material, Tier))
-			{
-				AffectedCount++;
-			}
-		}
-	}
+			OnSurfaceCellChanged.Broadcast(CellCoord, NewStatus, InInstigator);
+		});
 
 	// 2. Projekcja wybuchu na otaczające powierzchnie lochu
 	SurfaceGridProjectionUtils::ScanBurstSurfaces(
@@ -524,22 +462,8 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 				Tier);
 		});
 
-	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
-	{
-		const float SafeCellSize = FMath::Max(10.0f, CellSize);
-		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
-			GetWorld(),
-			StaticGridManager,
-			DynamicGridManager,
-			SafeCellSize,
-			GetWorld()->GetTimeSeconds(),
-			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
-			{
-				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
-			});
-	}
+	PropagateConductionIfApplicable(Status, AffectedCount);
 
-	// UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyElementalBurst FINISH -> AffectedCount: %d"), AffectedCount);
 	return AffectedCount;
 }
 
@@ -598,7 +522,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 
 	// 3. Rozprzestrzenianie stałego ognia (np. drewno) oraz niszczenie fundamentów lochu
 	StaticGridManager.ProcessSolidFuelCombustion(World, SafeCellSize, CurrentTime, BroadcastCellChanged);
-	StaticGridManager.ProcessSurfaceStructuralDamage(World, DynamicGridManager, SubsystemTickInterval);
+	ProcessSurfaceStructuralDamage(SubsystemTickInterval);
 
 	// 4. Interakcje z zarejestrowanymi postaciami
 	ProcessActorInteractions(CurrentTime);
@@ -645,7 +569,15 @@ void UDungeonSurfaceSubsystem::ProcessActorInteractions(float CurrentTime)
 				return ApplyStatusToCell(Coord, Status, Duration, Instigator);
 			});
 
-		DynamicGridManager.ProcessActorInteractions(OwnerActor, StatusComp, SafeCellSize);
+		DynamicGridManager.ProcessActorInteractions(
+			OwnerActor,
+			StatusComp,
+			SafeCellSize,
+			CurrentTime,
+			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+			{
+				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+			});
 	}
 
 	// Czyszczenie martwych wskaźników z rejestru
@@ -656,6 +588,121 @@ void UDungeonSurfaceSubsystem::ProcessActorInteractions(float CurrentTime)
 			RegisteredStatusComponents.RemoveAt(Idx);
 		}
 	}
+}
+
+void UDungeonSurfaceSubsystem::ProcessSurfaceStructuralDamage(float DeltaTime)
+{
+	if (DeltaTime <= 0.0f)
+	{
+		return;
+	}
+
+	struct FDamageAggregate
+	{
+		float TotalDPS = 0.0f;
+		TWeakObjectPtr<AActor> LastInstigator = nullptr;
+	};
+
+	TMap<TPair<TWeakObjectPtr<AActor>, EDamageType>, FDamageAggregate> AggregatedDamage;
+
+	auto AggregateCellDamage = [&](const FSurfaceCellData& Cell)
+	{
+		if (Cell.IsEmpty() || !Cell.SurfaceActor.IsValid())
+		{
+			return;
+		}
+
+		for (const FSurfaceCellStatusEntry& StatusEntry : Cell.ActiveStatuses)
+		{
+			const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(StatusEntry.Status);
+			if (Config.bIsDoTType)
+			{
+				const EDamageType DmgType = PhysicalMaterialUtils::StatusToDamageType(StatusEntry.Status);
+				const float BaseDPS = Config.GetDamagePerSecond(StatusEntry.Tier);
+				if (BaseDPS > 0.0f)
+				{
+					const TPair<TWeakObjectPtr<AActor>, EDamageType> Key(Cell.SurfaceActor, DmgType);
+					FDamageAggregate& Agg = AggregatedDamage.FindOrAdd(Key);
+					Agg.TotalDPS += BaseDPS;
+					if (StatusEntry.Instigator.IsValid())
+					{
+						Agg.LastInstigator = StatusEntry.Instigator;
+					}
+				}
+			}
+		}
+	};
+
+	// 1. Agregacja ze statycznych komórek
+	for (const auto& CellPair : StaticGridManager.GetActiveCells())
+	{
+		AggregateCellDamage(CellPair.Value);
+	}
+
+	// 2. Agregacja z dynamicznych komórek
+	for (const auto& GridPair : DynamicGridManager.GetGrids())
+	{
+		for (const auto& CellPair : GridPair.Value.LocalCells)
+		{
+			AggregateCellDamage(CellPair.Value);
+		}
+	}
+
+	// 3. Aplikujemy zagregowane pakiety obrażeń do UDamageableComponent fundamentów
+	for (const auto& AggPair : AggregatedDamage)
+	{
+		AActor* StructureActor = AggPair.Key.Key.Get();
+		if (!StructureActor || !IsValid(StructureActor) || StructureActor->IsActorBeingDestroyed())
+		{
+			continue;
+		}
+
+		const EDamageType DmgType = AggPair.Key.Value;
+		const FDamageAggregate& Agg = AggPair.Value;
+
+		if (Agg.TotalDPS <= 0.0f)
+		{
+			continue;
+		}
+
+		UDamageableComponent* DmgComp = StructureActor->FindComponentByClass<UDamageableComponent>();
+		if (!DmgComp || DmgComp->IsDestroyed() || DmgComp->IsInvulnerable())
+		{
+			continue;
+		}
+
+		const float ClampedDPS = FMath::Min(Agg.TotalDPS, MaxStructuralDPS);
+		const float DamageAmount = ClampedDPS * DeltaTime;
+
+		// UDamageableComponent automatycznie uwzględnia TotalResistance (np. 100% dla kamienia, 0% dla drewna na ogień)
+		DmgComp->ApplyDamage(DamageAmount, DmgType, Agg.LastInstigator.Get());
+	}
+}
+
+void UDungeonSurfaceSubsystem::PropagateConductionIfApplicable(EStatusEffectType Status, int32 AffectedCount)
+{
+	if (AffectedCount <= 0 || !UElementalReactionRules::IsInstantConduction(Status))
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	FSurfaceGridPropagationUtils::PropagateConductionNetworks(
+		World,
+		StaticGridManager,
+		DynamicGridManager,
+		SafeCellSize,
+		World->GetTimeSeconds(),
+		[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+		{
+			OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+		});
 }
 
 void UDungeonSurfaceSubsystem::DrawDebugVisuals() const

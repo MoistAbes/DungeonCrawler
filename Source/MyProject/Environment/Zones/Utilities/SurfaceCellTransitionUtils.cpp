@@ -69,8 +69,6 @@ bool USurfaceCellTransitionUtils::CleanOrphanedStatuses(FSurfaceCellData& InOutC
 
 		if (!UElementalReactionRules::CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, RemainingStatus, ActiveBefore))
 		{
-			// UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceCellTransitionUtils] CleanOrphanedStatuses: Evicted orphaned status %s on material %s (carrier expired)"),
-			// 	*UEnum::GetValueAsString(RemainingStatus), *UEnum::GetValueAsString(InOutCellData.SurfaceMaterial));
 			InOutCellData.ActiveStatuses.RemoveAt(Index);
 			bEvictedAny = true;
 		}

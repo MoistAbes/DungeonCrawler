@@ -14,17 +14,31 @@ void AVolumetricStatusZone::InitializeVolumetricZone(
 	float InDuration,
 	AActor* InInstigator)
 {
+	// Czysta inicjalizacja strefy bazowej bez jednorazowego efektu wybuchu radialnego.
+	// Emisja statusu na obiekty i komórki odbywa się naturalnie w ProcessActiveOverlaps.
 	InitializeZoneBase(InConfig, InRadius, InDuration, InInstigator);
+}
 
-	// Wolumetryczna strefa żywiołowa (np. kula prądu, chmura ognia) projektuje swój status
-	// na siatkę powierzchniową lochu (posadzkę / ściany) w swoim geometrycznym zasięgu
-	if (InConfig.AppliedStatus != EStatusEffectType::None)
+void AVolumetricStatusZone::ApplyElementalHit(EStatusEffectType IncomingStatus, float InstantDamage, AActor* HitInstigator)
+{
+	// Strefa wolumetryczna jest trwałym, niezmiennym emiterem pola żywiołowego.
+	// Nie przyjmuje obcych statusów, nie ulega mutacji ani nie dokłada statusów do swojej definicji.
+}
+
+void AVolumetricStatusZone::ProcessActiveOverlaps()
+{
+	Super::ProcessActiveOverlaps();
+
+	// Ciągła emisja statusu strefy na komórki powierzchniowe lochu w jej geometrycznym zasięgu 3D i Line of Sight
+	if (EffectConfig.AppliedStatus != EStatusEffectType::None)
 	{
 		if (UWorld* World = GetWorld())
 		{
 			if (UDungeonSurfaceSubsystem* SurfaceSubsystem = World->GetSubsystem<UDungeonSurfaceSubsystem>())
 			{
-				SurfaceSubsystem->ApplyElementalBurst(GetActorLocation(), Radius, InConfig.AppliedStatus, InDuration, InInstigator);
+				const float CurrentTime = World->GetTimeSeconds();
+				const float RemainingTime = (ServerEndTime > 0.0f) ? FMath::Max(ZoneTickInterval * 2.0f, ServerEndTime - CurrentTime) : 5.0f;
+				SurfaceSubsystem->ApplyElementalBurst(GetActorLocation(), Radius, EffectConfig.AppliedStatus, RemainingTime, ZoneInstigator.Get(), EffectConfig.StatusTier);
 			}
 		}
 	}

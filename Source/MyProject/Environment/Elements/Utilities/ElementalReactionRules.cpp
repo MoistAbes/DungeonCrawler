@@ -20,6 +20,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Burning.bRequiresFlammable = true;
 			Burning.BypassTraitsIfActive = { EStatusEffectType::Oiled };
 			Burning.ReactionPriority = 100; // Ogień: najwyższy priorytet (anihilacja z wodą lub zapłon oleju)
+			Burning.bCanTransferFromActorToFloor = true;
 
 			// Tiery ognia: Tier 0 = bazowy (5 dps / 5s), Tier 1 = silny (10 dps / 6s), Tier 2 = piekielny (15 dps / 8s)
 			Burning.Tiers = {
@@ -32,7 +33,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Burning.Reactions.Add(EStatusEffectType::Wet, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ true,
-				/* ReactionTag             */ FName(TEXT("Steam_Extinguish")),
+				/* ReactionTag             */ ElementalReactionTags::SteamExtinguish(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 0.0f,
@@ -44,7 +45,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Burning.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* ReactionTag             */ FName(TEXT("Oil_Ignition")),
+				/* ReactionTag             */ ElementalReactionTags::OilIgnition(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ true,
 				/* ResultingDuration       */ 6.0f,
@@ -65,6 +66,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Wet.bRequiresFlammable = false;
 			Wet.bRequiresConductive = false;
 			Wet.ReactionPriority = 80; // Woda: gasi ogień lub przewodzi prąd
+			Wet.bCanTransferFromActorToFloor = true;
 
 			// Tier 0 dla wody: brak DoT, trwa bazowo 6s
 			Wet.Tiers = {
@@ -75,7 +77,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Wet.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ true,
-				/* ReactionTag             */ FName(TEXT("Fire_Extinguished")),
+				/* ReactionTag             */ ElementalReactionTags::FireExtinguished(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 0.0f,
@@ -87,7 +89,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Wet.Reactions.Add(EStatusEffectType::Electrified, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* ReactionTag             */ FName(TEXT("Conductive_Shock")),
+				/* ReactionTag             */ ElementalReactionTags::ConductiveShock(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 4.0f,
@@ -108,6 +110,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.bRequiresFlammable = false;
 			Oiled.bRequiresConductive = false;
 			Oiled.ReactionPriority = 60; // Olej: paliwo podtrzymujące płomień
+			Oiled.bCanTransferFromActorToFloor = false; // Olej na ciele aktora jest pasywny - nie wylewa się na posadzkę
 
 			// Tier 0 dla oleju: brak DoT, trwa bazowo 6s
 			Oiled.Tiers = {
@@ -119,7 +122,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* ReactionTag             */ FName(TEXT("Oil_Ignition")),
+				/* ReactionTag             */ ElementalReactionTags::OilIgnition(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 6.0f,
@@ -130,7 +133,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.Reactions.Add(EStatusEffectType::Electrified, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ true,
-				/* ReactionTag             */ FName(TEXT("Oil_Electric_Ignition")),
+				/* ReactionTag             */ ElementalReactionTags::OilElectricIgnition(),
 				/* ResultingStatus         */ EStatusEffectType::Burning,
 				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 6.0f,
@@ -152,6 +155,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.bInstantConductionNetwork = true;
 			Electrified.BypassTraitsIfActive = { EStatusEffectType::Wet };
 			Electrified.ReactionPriority = 40; // Prąd: energia pasożytnicza / przewodzenie
+			Electrified.bCanTransferFromActorToFloor = true;
 
 			// Tiery prądu: Tier 0 = szok elektryczny (4 dps / 4s), Tier 1 = wyładowanie łukowe (8 dps / 5s)
 			Electrified.Tiers = {
@@ -164,7 +168,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.Reactions.Add(EStatusEffectType::Wet, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
-				/* ReactionTag             */ FName(TEXT("Conductive_Shock")),
+				/* ReactionTag             */ ElementalReactionTags::ConductiveShock(),
 				/* ResultingStatus         */ EStatusEffectType::None,
 				/* bCanSpreadToNeighbor    */ true,
 				/* ResultingDuration       */ 4.0f,
@@ -175,7 +179,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ false,
-				/* ReactionTag             */ FName(TEXT("Oil_Electric_Ignition")),
+				/* ReactionTag             */ ElementalReactionTags::OilElectricIgnition(),
 				/* ResultingStatus         */ EStatusEffectType::Burning,
 				/* bCanSpreadToNeighbor    */ true,
 				/* ResultingDuration       */ 6.0f,
@@ -358,7 +362,7 @@ FElementalReactionResult UElementalReactionRules::EvaluateReaction(
 				Result.ResultingStatus = IncomingStatus;
 				Result.bCanSpreadToNeighbor = false;
 				Result.ResultingDuration = 0.0f;
-				Result.ReactionTag = FName(TEXT("Liquid_Displaced"));
+				Result.ReactionTag = ElementalReactionTags::LiquidDisplaced();
 				return Result;
 			}
 		}
@@ -401,6 +405,15 @@ bool UElementalReactionRules::CanStatusSpread(EStatusEffectType Status)
 	return false;
 }
 
+bool UElementalReactionRules::CanStatusTransferToFloor(EStatusEffectType Status)
+{
+	if (Status == EStatusEffectType::None)
+	{
+		return false;
+	}
+	return GetEffectConfig(Status).bCanTransferFromActorToFloor;
+}
+
 int32 UElementalReactionRules::GetReactionPriority(EStatusEffectType Status)
 {
 	return GetEffectConfig(Status).ReactionPriority;
@@ -411,6 +424,30 @@ void UElementalReactionRules::SortByReactionPriority(TArray<EStatusEffectType>& 
 	InOutStatuses.Sort([](EStatusEffectType A, EStatusEffectType B)
 	{
 		return GetReactionPriority(A) > GetReactionPriority(B);
+	});
+}
+
+int32 UElementalReactionRules::GetIngressPriority(EStatusEffectType Status)
+{
+	if (Status == EStatusEffectType::None)
+	{
+		return 0;
+	}
+
+	const FStatusEffectConfig& Config = GetEffectConfig(Status);
+
+	// Płyny i nośniki (np. Wet, Oiled) otrzymują bazowy bonus +1000,
+	// gwarantując że zawsze zostaną zaaplikowane jako pierwsze,
+	// przygotowując powłokę aktora (BypassTraitsIfActive) dla energii (np. Electrified, Burning).
+	const int32 LiquidBonus = Config.bIsLiquid ? 1000 : 0;
+	return LiquidBonus + Config.ReactionPriority;
+}
+
+void UElementalReactionRules::SortByIngressPriority(TArray<EStatusEffectType>& InOutStatuses)
+{
+	InOutStatuses.Sort([](EStatusEffectType A, EStatusEffectType B)
+	{
+		return GetIngressPriority(A) > GetIngressPriority(B);
 	});
 }
 

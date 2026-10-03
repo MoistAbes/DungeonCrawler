@@ -1,6 +1,5 @@
 #include "StaticSurfaceGridManager.h"
 
-#include "DynamicSurfaceGridManager.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -74,7 +73,7 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 			ResolvedLocation = FVector::ZeroVector;
 		}
 
-		if (!ResolvedSurfaceActor || ResolvedLocation.IsNearlyZero())
+		if (!ResolvedSurfaceActor)
 		{
 			AActor* ProbedActor = nullptr;
 			FVector ProbedLocation = FVector::ZeroVector;
@@ -91,6 +90,10 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 			SurfaceMat = ProbedMat;
 			ResolvedLocation = ProbedLocation;
 		}
+		else if (ResolvedLocation.IsNearlyZero())
+		{
+			ResolvedLocation = SurfaceGridUtils::GetFaceCenter(Coord, SafeCellSize);
+		}
 	}
 	else
 	{
@@ -105,8 +108,7 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 		}
 	}
 	// Dynamic Surface Safety Guard: komórki na ruchomych obiektach (np. bramach) NIE MOGĄ trafić do siatki statycznej!
-	if (ResolvedSurfaceActor && ResolvedSurfaceActor->Implements<USurfaceGridTargetInterface>()
-		&& ISurfaceGridTargetInterface::Execute_IsDynamicSurface(ResolvedSurfaceActor))
+	if (SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(ResolvedSurfaceActor))
 	{
 		if (Existing)
 		{
@@ -131,6 +133,7 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 
 int32 FStaticSurfaceGridManager::ClearCellsInBounds(
 	const FBox& BoundingBox,
+	float SafeCellSize,
 	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
 {
 	if (!BoundingBox.IsValid || ActiveCells.IsEmpty())
@@ -142,7 +145,7 @@ int32 FStaticSurfaceGridManager::ClearCellsInBounds(
 	for (auto It = ActiveCells.CreateIterator(); It; ++It)
 	{
 		const FSurfaceCellCoord& Coord = It.Key();
-		const FVector CellWorldCenter = Coord.ToWorldLocation(50.0f); // Standard grid center probe
+		const FVector CellWorldCenter = Coord.ToWorldLocation(SafeCellSize);
 
 		if (BoundingBox.IsInsideOrOn(CellWorldCenter))
 		{
@@ -248,95 +251,6 @@ void FStaticSurfaceGridManager::ProcessSolidFuelCombustion(
 	}
 }
 
-void FStaticSurfaceGridManager::ProcessSurfaceStructuralDamage(
-	UWorld* World,
-	const FDynamicSurfaceGridManager& DynamicGridManager,
-	float DeltaTime)
-{
-	if (!World || (ActiveCells.IsEmpty() && DynamicGridManager.GetGrids().IsEmpty()) || DeltaTime <= 0.0f)
-	{
-		return;
-	}
-
-	struct FDamageAggregate
-	{
-		float TotalDPS = 0.0f;
-		TWeakObjectPtr<AActor> LastInstigator = nullptr;
-	};
-
-	TMap<TPair<TWeakObjectPtr<AActor>, EDamageType>, FDamageAggregate> AggregatedDamage;
-	constexpr float MaxStructuralDPS = 25.0f;
-
-	auto CollectDamageFromCell = [&](const FSurfaceCellData& Cell)
-	{
-		if (Cell.IsEmpty() || !Cell.SurfaceActor.IsValid())
-		{
-			return;
-		}
-
-		for (const FSurfaceCellStatusEntry& StatusEntry : Cell.ActiveStatuses)
-		{
-			const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(StatusEntry.Status);
-			if (Config.bIsDoTType)
-			{
-				const EDamageType DmgType = PhysicalMaterialUtils::StatusToDamageType(StatusEntry.Status);
-				const float BaseDPS = Config.GetDamagePerSecond(StatusEntry.Tier);
-				if (BaseDPS > 0.0f)
-				{
-					const TPair<TWeakObjectPtr<AActor>, EDamageType> Key(Cell.SurfaceActor, DmgType);
-					FDamageAggregate& Agg = AggregatedDamage.FindOrAdd(Key);
-					Agg.TotalDPS += BaseDPS;
-					if (StatusEntry.Instigator.IsValid())
-					{
-						Agg.LastInstigator = StatusEntry.Instigator;
-					}
-				}
-			}
-		}
-	};
-
-	for (const auto& Pair : ActiveCells)
-	{
-		CollectDamageFromCell(Pair.Value);
-	}
-
-	for (const auto& GridPair : DynamicGridManager.GetGrids())
-	{
-		for (const auto& CellPair : GridPair.Value.LocalCells)
-		{
-			CollectDamageFromCell(CellPair.Value);
-		}
-	}
-
-	for (const auto& AggPair : AggregatedDamage)
-	{
-		AActor* StructureActor = AggPair.Key.Key.Get();
-		if (!StructureActor || !IsValid(StructureActor) || StructureActor->IsActorBeingDestroyed())
-		{
-			continue;
-		}
-
-		const EDamageType DmgType = AggPair.Key.Value;
-		const FDamageAggregate& Agg = AggPair.Value;
-
-		if (Agg.TotalDPS <= 0.0f)
-		{
-			continue;
-		}
-
-		UDamageableComponent* DmgComp = StructureActor->FindComponentByClass<UDamageableComponent>();
-		if (!DmgComp || DmgComp->IsDestroyed() || DmgComp->IsInvulnerable())
-		{
-			continue;
-		}
-
-		const float ClampedDPS = FMath::Min(Agg.TotalDPS, MaxStructuralDPS);
-		const float DamageAmount = ClampedDPS * DeltaTime;
-
-		DmgComp->ApplyDamage(DamageAmount, DmgType, Agg.LastInstigator.Get());
-	}
-}
-
 void FStaticSurfaceGridManager::ProcessActorInteraction(
 	AActor* Actor,
 	UStatusEffectComponent* StatusComp,
@@ -385,20 +299,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 	// NOTE: TO BE REMOVED - ONLY FOR DEBUG AND PERFORMANCE TESTING PURPOSES
 	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
 	FVector ViewLocation = FVector::ZeroVector;
-	bool bHasViewLocation = false;
-	if (const APlayerController* PC = World->GetFirstPlayerController())
-	{
-		if (PC->PlayerCameraManager)
-		{
-			ViewLocation = PC->PlayerCameraManager->GetCameraLocation();
-			bHasViewLocation = true;
-		}
-		else if (const APawn* Pawn = PC->GetPawn())
-		{
-			ViewLocation = Pawn->GetActorLocation();
-			bHasViewLocation = true;
-		}
-	}
+	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
 	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
 
 	const float DebugLifeTime = 0.3f;

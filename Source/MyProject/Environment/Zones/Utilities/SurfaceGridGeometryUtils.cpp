@@ -3,6 +3,8 @@
 #include "Engine/World.h"
 #include "Engine/Brush.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "MyProject/Dungeon/Structure/DungeonStructureBase.h"
 #include "MyProject/Dungeon/Props/InteractivePropBase.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
@@ -52,6 +54,35 @@ namespace SurfaceGridGeometryUtils
 			return true;
 		}
 
+		return false;
+	}
+
+	bool IsDynamicSurfaceTarget(const AActor* Actor)
+	{
+		return Actor && Actor->Implements<USurfaceGridTargetInterface>()
+			&& ISurfaceGridTargetInterface::Execute_IsDynamicSurface(Actor);
+	}
+
+	bool GetDebugViewerLocation(const UWorld* World, FVector& OutViewerLocation)
+	{
+		if (!World)
+		{
+			return false;
+		}
+
+		if (const APlayerController* PC = World->GetFirstPlayerController())
+		{
+			if (PC->PlayerCameraManager)
+			{
+				OutViewerLocation = PC->PlayerCameraManager->GetCameraLocation();
+				return true;
+			}
+			if (const APawn* Pawn = PC->GetPawn())
+			{
+				OutViewerLocation = Pawn->GetActorLocation();
+				return true;
+			}
+		}
 		return false;
 	}
 
@@ -393,13 +424,18 @@ namespace SurfaceGridGeometryUtils
 			const FSurfaceCellCoord& Coord,
 			EPhysicalMaterialType& OutMat,
 			AActor*& OutActor,
-			TArray<EStatusEffectType>& OutStatuses) -> bool
+			TArray<EStatusEffectType>& OutStatuses,
+			FSurfaceCellCoord* OutResolvedCoord = nullptr) -> bool
 		{
 			OutStatuses.Reset();
 			if (const FSurfaceCellData* Existing = ActiveCells.Find(Coord))
 			{
 				if (!Existing->IsEmpty())
 				{
+					if (OutResolvedCoord)
+					{
+						*OutResolvedCoord = Coord;
+					}
 					OutMat = Existing->SurfaceMaterial;
 					OutActor = Existing->SurfaceActor.Get();
 					OutStatuses = Existing->GetStatusTypes();
@@ -414,7 +450,24 @@ namespace SurfaceGridGeometryUtils
 			if (bHit)
 			{
 				OutActor = Hit.GetActor();
-				if (OutActor && !HasSufficientSurfaceCoverage(OutActor, Coord, CellSize))
+				const FSurfaceCellCoord HitCoord = FSurfaceCellCoord::FromWorldLocation(Hit.ImpactPoint, Normal, CellSize);
+				if (OutResolvedCoord)
+				{
+					*OutResolvedCoord = HitCoord;
+				}
+
+				if (const FSurfaceCellData* ExistingHit = ActiveCells.Find(HitCoord))
+				{
+					if (!ExistingHit->IsEmpty())
+					{
+						OutMat = ExistingHit->SurfaceMaterial;
+						OutActor = ExistingHit->SurfaceActor.Get();
+						OutStatuses = ExistingHit->GetStatusTypes();
+						return true;
+					}
+				}
+
+				if (OutActor && !HasSufficientSurfaceCoverage(OutActor, HitCoord, CellSize))
 				{
 					return false;
 				}
@@ -429,39 +482,123 @@ namespace SurfaceGridGeometryUtils
 			AActor* CoplanarActor = nullptr;
 			TArray<EStatusEffectType> CoplanarStatuses;
 
-			if (QuerySurface(Path.Coplanar, CoplanarMat, CoplanarActor, CoplanarStatuses))
+			const bool bCoplanarHit = QuerySurface(Path.Coplanar, CoplanarMat, CoplanarActor, CoplanarStatuses);
+			if (bCoplanarHit)
 			{
 				OutCandidates.Add({ Path.Coplanar, CoplanarMat, CoplanarActor, MoveTemp(CoplanarStatuses), false });
+			}
 
-				// Jeśli w punkcie narożnika nie ma już aktywnej komórki w siatce (np. wylanego wcześniej płynu),
-				// a płaszczyzna kontynuuje się w linii prostej na wprost, ściana NIE zagina się w tym miejscu pod kątem 90°.
-				// Dotyczy to wyłącznie pionowych szwów ściennych (North/South/East/West), a nie poziomych krawędzi sufitu (Down) i posadzki (Up)!
-				if (Path.Corner.Face != ESurfaceFaceDirection::Up && Path.Corner.Face != ESurfaceFaceDirection::Down)
+			// Pobieramy wszystkich potencjalnych kandydatów wokseli na krawędzi narożnika 90°
+			TArray<FSurfaceCellCoord, TInlineAllocator<4>> CornerVariants;
+			SourceCoord.GetCornerCandidateCoords(Path.Corner.Face, CornerVariants);
+			if (CornerVariants.IsEmpty())
+			{
+				CornerVariants.Add(Path.Corner);
+			}
+
+			// Jeśli płaszczyzna kontynuuje się w linii prostej na wprost (bCoplanarHit == true),
+			// ściana pionowa NIE zagina się w tym miejscu pod kątem 90° w kolejną ścianę pionową,
+			// CHYBA ŻE w siatce ActiveCells istnieje już aktywna komórka na którymkolwiek wariancie narożnika.
+			// Nie dotyczy to poziomych krawędzi stropu (Down) i posadzki (Up), gdzie narożnik 90° istnieje naturalnie.
+			const bool bIsWallToWall = (SourceCoord.Face != ESurfaceFaceDirection::Up && SourceCoord.Face != ESurfaceFaceDirection::Down)
+									&& (Path.Corner.Face != ESurfaceFaceDirection::Up && Path.Corner.Face != ESurfaceFaceDirection::Down);
+
+			if (bCoplanarHit && bIsWallToWall)
+			{
+				bool bHasActiveCornerCell = false;
+				for (const FSurfaceCellCoord& Variant : CornerVariants)
 				{
-					const FSurfaceCellData* ExistingCorner = ActiveCells.Find(Path.Corner);
-					if (!ExistingCorner || ExistingCorner->IsEmpty())
+					if (const FSurfaceCellData* ExistingCorner = ActiveCells.Find(Variant))
 					{
-						continue;
+						if (!ExistingCorner->IsEmpty())
+						{
+							bHasActiveCornerCell = true;
+							break;
+						}
+					}
+				}
+				if (!bHasActiveCornerCell)
+				{
+					continue;
+				}
+			}
+
+			// 2. Rozwiązujemy narożnik wklęsły 90° (Corner) spośród dostępnych wariantów CornerVariants:
+			// Priorytet A: Szukamy komórki, która już istnieje i jest aktywna w ActiveCells (np. wylany olej, woda na suficie/ścianie).
+			// Wybieramy tę leżącą najbliżej środka komórki źródłowej.
+			const FSurfaceCellCoord* BestActiveCoord = nullptr;
+			const FSurfaceCellData* BestActiveData = nullptr;
+			float BestDistSq = MAX_flt;
+			const FVector SourceCenter = SourceCoord.ToWorldLocation(CellSize);
+
+			for (const FSurfaceCellCoord& Variant : CornerVariants)
+			{
+				if (const FSurfaceCellData* Existing = ActiveCells.Find(Variant))
+				{
+					if (!Existing->IsEmpty())
+					{
+						const float DistSq = FVector::DistSquared(SourceCenter, Variant.ToWorldLocation(CellSize));
+						if (DistSq < BestDistSq)
+						{
+							BestDistSq = DistSq;
+							BestActiveCoord = &Variant;
+							BestActiveData = Existing;
+						}
 					}
 				}
 			}
 
-			// 2. Sprawdzamy narożnik wklęsły 90° (Corner)
-			EPhysicalMaterialType CornerMat = EPhysicalMaterialType::Stone;
-			AActor* CornerActor = nullptr;
-			TArray<EStatusEffectType> CornerStatuses;
+			if (BestActiveCoord && BestActiveData)
+			{
+				AActor* CornerActor = BestActiveData->SurfaceActor.Get();
+				// Ponieważ komórka jest już aktywna w siatce, gracz lub system celowo nałożył tam ciecz/efekt,
+				// więc nie blokujemy własnej struktury.
+				OutCandidates.Add({ *BestActiveCoord, BestActiveData->SurfaceMaterial, CornerActor, BestActiveData->GetStatusTypes(), true });
+				continue;
+			}
 
-			if (QuerySurface(Path.Corner, CornerMat, CornerActor, CornerStatuses))
+			// Priorytet B: Jeśli brak aktywnej komórki w siatce, sondujemy geometrię świata (QuerySurface)
+			// dla wariantów narożnika, aby odnaleźć surową architekturę (np. drewniany sufit / drewnianą podłogę).
+			bool bFoundCornerProbe = false;
+			FSurfaceCellCoord ResolvedProbeCoord;
+			EPhysicalMaterialType ResolvedMat = EPhysicalMaterialType::Stone;
+			AActor* ResolvedActor = nullptr;
+			TArray<EStatusEffectType> ResolvedStatuses;
+			float BestProbeDistSq = MAX_flt;
+
+			for (const FSurfaceCellCoord& Variant : CornerVariants)
+			{
+				FSurfaceCellCoord HitCoord;
+				EPhysicalMaterialType TestMat = EPhysicalMaterialType::Stone;
+				AActor* TestActor = nullptr;
+				TArray<EStatusEffectType> TestStatuses;
+
+				if (QuerySurface(Variant, TestMat, TestActor, TestStatuses, &HitCoord))
+				{
+					const float DistSq = FVector::DistSquared(SourceCenter, HitCoord.ToWorldLocation(CellSize));
+					if (DistSq < BestProbeDistSq)
+					{
+						BestProbeDistSq = DistSq;
+						ResolvedProbeCoord = HitCoord;
+						ResolvedMat = TestMat;
+						ResolvedActor = TestActor;
+						ResolvedStatuses = MoveTemp(TestStatuses);
+						bFoundCornerProbe = true;
+					}
+				}
+			}
+
+			if (bFoundCornerProbe)
 			{
 				// ZASADA SEPARACJI STRUKTUR: Obiekt nie może podpalać/razić prostopadłych krawędzi samego siebie,
-				// CHYBA ŻE w siatce istnieje już aktywna komórka w tym miejscu (np. gracz rozlał tam ciecz)
-				const bool bAlreadyActive = !CornerStatuses.IsEmpty();
-				if (!bAlreadyActive && CornerActor && CornerActor == SourceActor)
+				// CHYBA ŻE w siatce istnieje już aktywna komórka w tym miejscu
+				const bool bAlreadyActive = !ResolvedStatuses.IsEmpty();
+				if (!bAlreadyActive && ResolvedActor && ResolvedActor == SourceActor)
 				{
 					continue;
 				}
 
-				OutCandidates.Add({ Path.Corner, CornerMat, CornerActor, MoveTemp(CornerStatuses), true });
+				OutCandidates.Add({ ResolvedProbeCoord, ResolvedMat, ResolvedActor, MoveTemp(ResolvedStatuses), true });
 			}
 		}
 	}

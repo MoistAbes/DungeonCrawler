@@ -600,9 +600,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 
 			auto ProcessCandidate = [&](const FSurfaceCellCoord& NeighborCoord, EPhysicalMaterialType NeighborMat, AActor* NeighborSurfaceActor, const TArray<EStatusEffectType>& NeighborActiveStatuses)
 			{
-				const bool bIsNeighborDynamic = NeighborSurfaceActor
-					&& NeighborSurfaceActor->Implements<USurfaceGridTargetInterface>()
-					&& ISurfaceGridTargetInterface::Execute_IsDynamicSurface(NeighborSurfaceActor);
+				const bool bIsNeighborDynamic = SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(NeighborSurfaceActor);
 
 				if (bIsNeighborDynamic)
 				{
@@ -808,8 +806,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 					// Nie rozprzestrzeniaj z powrotem na tego samego aktora dynamicznego w siatce statycznej
 					if (NeighborSurfaceActor != DynActor)
 					{
-						const bool bIsStaticNeighborDynamic = NeighborSurfaceActor && NeighborSurfaceActor->Implements<USurfaceGridTargetInterface>()
-							&& ISurfaceGridTargetInterface::Execute_IsDynamicSurface(NeighborSurfaceActor);
+						const bool bIsStaticNeighborDynamic = SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(NeighborSurfaceActor);
 
 						if (!bIsStaticNeighborDynamic)
 						{

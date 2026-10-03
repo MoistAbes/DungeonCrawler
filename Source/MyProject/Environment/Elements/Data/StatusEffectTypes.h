@@ -6,6 +6,19 @@
 #include "StatusEffectTypes.generated.h"
 
 /**
+ * Zunifikowane identyfikatory unikalnych reakcji żywiołowych (VFX, SFX, audio, filtry fizyczne).
+ */
+namespace ElementalReactionTags
+{
+	inline const FName& SteamExtinguish() { static const FName Tag(TEXT("Steam_Extinguish")); return Tag; }
+	inline const FName& OilIgnition() { static const FName Tag(TEXT("Oil_Ignition")); return Tag; }
+	inline const FName& FireExtinguished() { static const FName Tag(TEXT("Fire_Extinguished")); return Tag; }
+	inline const FName& ConductiveShock() { static const FName Tag(TEXT("Conductive_Shock")); return Tag; }
+	inline const FName& OilElectricIgnition() { static const FName Tag(TEXT("Oil_Electric_Ignition")); return Tag; }
+	inline const FName& LiquidDisplaced() { static const FName Tag(TEXT("Liquid_Displaced")); return Tag; }
+}
+
+/**
  * Reguła reakcji żywiołowej.
  * Definiuje co się dzieje, gdy przychodzący status uderza w aktywny status celu/komórki.
  */
@@ -144,6 +157,10 @@ struct FStatusEffectConfig
 	/** Priorytet ewaluacji reakcji (im wyższy, tym wcześniej status wchodzi w reakcje fazowe/anihilacji) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	int32 ReactionPriority = 0;
+
+	/** Czy status obecny na ciele aktora wchodzi w reakcję i brudzi komórki podłoża (np. Burning/Wet = true, Oiled = false) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	bool bCanTransferFromActorToFloor = true;
 
 	/** Poziomy/tiery statusu (Tier 0 = bazowy, Tier 1 = silny, Tier 2 = potężny) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")

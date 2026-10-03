@@ -336,18 +336,10 @@ void AStatusZoneBase::ApplyElementalHit(EStatusEffectType IncomingStatus, float 
 			return;
 		}
 
-		// 3. Reakcja współistnienia / nie-konsumpcji (np. Conductive Shock: prąd elektryzuje całą strefę wody)
-		if (!Reaction.bConsumeIncomingStatus && IncomingStatus != EStatusEffectType::None)
+		// 3. Reakcja współistnienia / nie-konsumpcji (np. Conductive Shock)
+		if (!Reaction.bConsumeIncomingStatus && Reaction.ReactionTag != NAME_None)
 		{
-			EffectConfig.AppliedStatus = IncomingStatus;
-			const FStatusEffectConfig& IncomingConfig = UElementalReactionRules::GetEffectConfig(IncomingStatus);
-			const float EffectDuration = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : IncomingConfig.GetBaseDuration();
-			ServerEndTime = GetWorld()->GetTimeSeconds() + EffectDuration;
-			EffectConfig.ContinuousDamagePerSec = IncomingConfig.GetDamagePerSecond();
-
-			OnZoneReaction.Broadcast(OldStatus, EffectConfig.AppliedStatus);
-			FlushNetDormancy();
-			ForceNetUpdate();
+			OnZoneReaction.Broadcast(OldStatus, OldStatus);
 		}
 
 		ProcessActiveOverlaps();
