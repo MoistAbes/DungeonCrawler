@@ -1,6 +1,7 @@
 #include "SurfaceGridProjectionUtils.h"
 #include "SurfaceGridGeometryUtils.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Components/PrimitiveComponent.h"
 #include "GameFramework/Actor.h"
 #include "CollisionQueryParams.h"
@@ -66,9 +67,17 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 			}
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
+
+			// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
+			// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
+			if (!SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(SurfaceHit.GetActor(), Coord, SafeCellSize))
+			{
+				continue;
+			}
+
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
 
-			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor());
+			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor(), SurfaceHit.ImpactPoint);
 		}
 	}
 }
@@ -134,6 +143,13 @@ void SurfaceGridProjectionUtils::ProjectStatusInArea(
 
 			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
 
+			// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
+			// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
+			if (!SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(SurfaceHit.GetActor(), Coord, SafeCellSize))
+			{
+				continue;
+			}
+
 			// Pomijamy koordynaty już przetworzone w ramach tego samego zdarzenia
 			if (InOutProcessedCoords.Contains(Coord))
 			{
@@ -143,7 +159,7 @@ void SurfaceGridProjectionUtils::ProjectStatusInArea(
 
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
 
-			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor());
+			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor(), SurfaceHit.ImpactPoint);
 		}
 	}
 }
@@ -218,7 +234,7 @@ void SurfaceGridProjectionUtils::ScanBurstSurfaces(
 
 	for (const FVector& RayDir : ScanDirections)
 	{
-		const float TraceDist = (RayDir.Z < -0.9f) ? (Radius + 100.0f) : Radius;
+		const float TraceDist = (FMath::Abs(RayDir.Z) > 0.9f) ? (Radius + 100.0f) : Radius;
 		const FVector TraceEnd = Origin + RayDir * TraceDist;
 
 		FHitResult SurfaceHit;
@@ -226,9 +242,15 @@ void SurfaceGridProjectionUtils::ScanBurstSurfaces(
 		{
 			if (SurfaceHit.GetActor() && SurfaceGridGeometryUtils::IsValidSurfaceTarget(SurfaceHit.GetActor()))
 			{
+				// Zapewniamy, że ImpactNormal zawsze przeciwstawia się kierunkowi promienia (ochrona przed odwróconymi normalnymi mesha/Chaos)
+				if (FVector::DotProduct(SurfaceHit.ImpactNormal, RayDir) > 0.0f)
+				{
+					SurfaceHit.ImpactNormal = -SurfaceHit.ImpactNormal;
+				}
+
 				const float DistToSurface = FMath::Clamp(SurfaceHit.Distance, 0.0f, Radius);
 				const float BaseDiscRadius = FMath::Sqrt(FMath::Max(0.0f, RadiusSq - FMath::Square(DistToSurface)));
-				const float SplashRadius = (RayDir.Z < -0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
+				const float SplashRadius = (FMath::Abs(RayDir.Z) > 0.9f) ? (Radius * 0.75f) : FMath::Clamp(BaseDiscRadius * 0.75f, SafeCellSize * 0.5f, Radius);
 
 				OnSurfaceHit(SurfaceHit, SplashRadius);
 			}

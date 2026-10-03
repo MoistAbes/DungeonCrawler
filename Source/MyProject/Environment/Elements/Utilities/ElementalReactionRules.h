@@ -27,6 +27,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
 	static bool IsLiquidStatus(EStatusEffectType Status);
 
+	/** Sprawdza, czy status rozchodzi się błyskawicznie po całej połączonej sieci przewodników (np. Electrified) */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool IsInstantConduction(EStatusEffectType Status);
+
 	/**
 	 * Sprawdza, czy obiekt o danym materiale fizycznym może przyjąć przychodzący status,
 	 * odpytując cechy fizyczne materiału (bFlammable, bConductive) oraz obecne powłoki celu (np. Oiled, Wet).

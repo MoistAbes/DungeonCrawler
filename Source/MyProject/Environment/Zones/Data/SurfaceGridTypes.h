@@ -55,6 +55,9 @@ namespace SurfaceGridUtils
 		default:                           return FVector(0.0f, 0.0f, 1.0f);
 		}
 	}
+
+	/** Zwraca środek płaszczyzny styku z architekturą dla danego woksela komórki */
+	FORCEINLINE FVector GetFaceCenter(const struct FSurfaceCellCoord& Coord, float CellSize);
 }
 
 /**
@@ -339,6 +342,16 @@ struct MYPROJECT_API FSurfaceCellCoord
 	}
 };
 
+namespace SurfaceGridUtils
+{
+	FORCEINLINE FVector GetFaceCenter(const FSurfaceCellCoord& Coord, float CellSize)
+	{
+		const FVector VoxelCenter = Coord.ToWorldLocation(CellSize);
+		const FVector Normal = FaceDirectionToNormal(Coord.Face);
+		return VoxelCenter - Normal * (CellSize * 0.5f);
+	}
+}
+
 /**
  * Pojedyncza ortogonalna ścieżka rozprzestrzeniania z hierarchią: najpierw płaszczyzna, potem narożnik.
  */
@@ -367,45 +380,45 @@ FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpr
 	switch (Face)
 	{
 	case ESurfaceFaceDirection::Up:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
 		break;
 
 	case ESurfaceFaceDirection::Down:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
 		break;
 
 	case ESurfaceFaceDirection::North:
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
 		break;
 
 	case ESurfaceFaceDirection::South:
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y + 1, Z, ESurfaceFaceDirection::West));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y - 1, Z, ESurfaceFaceDirection::East));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::West));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::East));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
 		break;
 
 	case ESurfaceFaceDirection::East:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
 		break;
 
 	case ESurfaceFaceDirection::West:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X + 1, Y, Z, ESurfaceFaceDirection::South));
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X - 1, Y, Z, ESurfaceFaceDirection::North));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z + 1, ESurfaceFaceDirection::Down));
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z - 1, ESurfaceFaceDirection::Up));
+		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::South));
+		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::North));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Down));
+		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), FSurfaceCellCoord(X, Y, Z, ESurfaceFaceDirection::Up));
 		break;
 	}
 }
@@ -476,6 +489,10 @@ struct MYPROJECT_API FSurfaceCellData
 	/** Aktor fundamentu/struktury lochu, na którym znajduje się ta komórka */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
 	TWeakObjectPtr<AActor> SurfaceActor = nullptr;
+
+	/** Fizyczna pozycja komórki na powierzchni architektury lochu (z testu kolizji) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")
+	FVector SurfaceLocation = FVector::ZeroVector;
 
 	/** Czas serwera (GetTimeSeconds), w którym komórka spróbuje rozprzestrzenić stały ogień na sąsiadów */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|SurfaceGrid")

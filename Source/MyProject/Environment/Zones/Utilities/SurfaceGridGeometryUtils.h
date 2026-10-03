@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/HitResult.h"
 #include "CollisionQueryParams.h"
+#include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
 #include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
 
@@ -24,6 +25,17 @@ namespace SurfaceGridGeometryUtils
 
 	/** Rozpoznaje tożsamość materiałową aktora lochu z bezpiecznym fallbackiem do Stone */
 	MYPROJECT_API EPhysicalMaterialType GetMaterialFromActor(const AActor* Actor);
+
+	/**
+	 * Weryfikuje, czy bryła geometryczna aktora architektury pokrywa wystarczającą część komórki w płaszczyźnie stycznej.
+	 * Zapobiega tworzeniu pełnowymiarowych komórek 50x50 cm z powodu milimetrowego muśnięcia krawędzi obiektu,
+	 * stosując zasadę większości (min. 50% szerokości komórki / 25 cm) dla odrzucania komórek wiszących poza obiektem.
+	 */
+	MYPROJECT_API bool HasSufficientSurfaceCoverage(
+		const AActor* Actor,
+		const FSurfaceCellCoord& Coord,
+		float CellSize,
+		float MinAxisCoverageFraction = 0.50f);
 
 	/** Uniwersalny próbnik powierzchni: weryfikuje geometrię architektury i zwraca materiał */
 	MYPROJECT_API bool ProbeSurfaceAt(
@@ -66,12 +78,13 @@ namespace SurfaceGridGeometryUtils
 	/** Zwraca prekomputowane 18 kierunków skanowania wybuchu żywiołowego w 3D */
 	MYPROJECT_API const TArray<FVector>& GetBurstScanDirections();
 
-	/** Kandydat na rozprzestrzenienie statusu (komórka, materiał, aktor, flaga narożnika) */
+	/** Kandydat na rozprzestrzenienie statusu (komórka, materiał, aktor, aktywne statusy, flaga narożnika) */
 	struct FSurfaceSpreadCandidate
 	{
 		FSurfaceCellCoord Coord;
 		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
 		AActor* SurfaceActor = nullptr;
+		TArray<EStatusEffectType> ActiveStatuses;
 		bool bIsCorner = false;
 	};
 

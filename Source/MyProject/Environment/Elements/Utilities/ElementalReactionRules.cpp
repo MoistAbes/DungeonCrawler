@@ -149,6 +149,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.bIsDoTType = true;
 			Electrified.bIsLiquid = false;
 			Electrified.bRequiresConductive = true;
+			Electrified.bInstantConductionNetwork = true;
 			Electrified.BypassTraitsIfActive = { EStatusEffectType::Wet };
 			Electrified.ReactionPriority = 40; // Prąd: energia pasożytnicza / przewodzenie
 
@@ -236,6 +237,11 @@ const FStatusEffectConfig& UElementalReactionRules::GetEffectConfig(EStatusEffec
 bool UElementalReactionRules::IsLiquidStatus(EStatusEffectType Status)
 {
 	return GetEffectConfig(Status).bIsLiquid;
+}
+
+bool UElementalReactionRules::IsInstantConduction(EStatusEffectType Status)
+{
+	return GetEffectConfig(Status).bInstantConductionNetwork;
 }
 
 bool UElementalReactionRules::CanMaterialReceiveStatus(

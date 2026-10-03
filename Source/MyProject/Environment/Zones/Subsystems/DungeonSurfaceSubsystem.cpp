@@ -215,7 +215,8 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 	AActor* Instigator,
 	EPhysicalMaterialType ExplicitMaterial,
 	AActor* SurfaceActor,
-	uint8 Tier)
+	uint8 Tier,
+	const FVector& SurfaceLocation)
 {
 	UWorld* World = GetWorld();
 	if (!World || IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
@@ -271,7 +272,8 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		[this](const FSurfaceCellCoord& InCoord, EStatusEffectType NewStatus, AActor* InInstigator)
 		{
 			OnSurfaceCellChanged.Broadcast(InCoord, NewStatus, InInstigator);
-		});
+		},
+		SurfaceLocation);
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
@@ -299,13 +301,27 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
 		Radius,
 		SafeCellSize,
 		Instigator,
-		[&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMat, AActor* SurfaceActor)
+		[&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMat, AActor* SurfaceActor, const FVector& ImpactPoint)
 		{
-			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceActor, Tier))
+			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceActor, Tier, ImpactPoint))
 			{
 				AffectedCount++;
 			}
 		});
+
+	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
+	{
+		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
+			World,
+			StaticGridManager,
+			DynamicGridManager,
+			SafeCellSize,
+			World->GetTimeSeconds(),
+			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+			{
+				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+			});
+	}
 
 	return AffectedCount;
 }
@@ -339,13 +355,27 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
 		SafeCellSize,
 		ProcessedCoords,
 		Instigator,
-		[&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMat, AActor* SurfaceActor)
+		[&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMat, AActor* SurfaceActor, const FVector& ImpactPoint)
 		{
-			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceActor, Tier))
+			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceActor, Tier, ImpactPoint))
 			{
 				AffectedCount++;
 			}
 		});
+
+	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
+	{
+		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
+			World,
+			StaticGridManager,
+			DynamicGridManager,
+			SafeCellSize,
+			World->GetTimeSeconds(),
+			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+			{
+				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+			});
+	}
 
 	return AffectedCount;
 }
@@ -388,8 +418,8 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 		return 0;
 	}
 
-	UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyElementalBurst START -> Origin: %s, Radius: %.1f, Status: %s (Tier: %d)"),
-		*Origin.ToString(), Radius, *UEnum::GetValueAsString(Status), Tier);
+	// UE_LOG(LogDungeonElements, Warning, TEXT("[SurfaceGrid] ApplyElementalBurst START -> Origin: %s, Radius: %.1f, Status: %s (Tier: %d)"),
+	// 	*Origin.ToString(), Radius, *UEnum::GetValueAsString(Status), Tier);
 
 	int32 AffectedCount = 0;
 	TSet<FSurfaceCellCoord> ProcessedCoords;
@@ -494,7 +524,22 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 				Tier);
 		});
 
-	UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyElementalBurst FINISH -> AffectedCount: %d"), AffectedCount);
+	if (AffectedCount > 0 && UElementalReactionRules::IsInstantConduction(Status))
+	{
+		const float SafeCellSize = FMath::Max(10.0f, CellSize);
+		FSurfaceGridPropagationUtils::PropagateConductionNetworks(
+			GetWorld(),
+			StaticGridManager,
+			DynamicGridManager,
+			SafeCellSize,
+			GetWorld()->GetTimeSeconds(),
+			[this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+			{
+				OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+			});
+	}
+
+	// UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceGrid] ApplyElementalBurst FINISH -> AffectedCount: %d"), AffectedCount);
 	return AffectedCount;
 }
 

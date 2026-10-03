@@ -3,6 +3,9 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/Pawn.h"
 #include "Components/SceneComponent.h"
 
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
@@ -266,6 +269,25 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 		return;
 	}
 
+	// NOTE: TO BE REMOVED - ONLY FOR DEBUG AND PERFORMANCE TESTING PURPOSES
+	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
+	FVector ViewLocation = FVector::ZeroVector;
+	bool bHasViewLocation = false;
+	if (const APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			ViewLocation = PC->PlayerCameraManager->GetCameraLocation();
+			bHasViewLocation = true;
+		}
+		else if (const APawn* Pawn = PC->GetPawn())
+		{
+			ViewLocation = Pawn->GetActorLocation();
+			bHasViewLocation = true;
+		}
+	}
+	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
+
 	const float DebugLifeTime = 0.3f;
 
 	for (const auto& GridPair : DynamicSurfaceGrids)
@@ -290,16 +312,35 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 				continue;
 			}
 
-			const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
-
 			const FVector LocalCenter = LocalCoord.ToWorldLocation(SafeCellSize);
 			const FVector LocalNormal = SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face);
-			const FVector LocalVisualCenter = LocalCenter + LocalNormal * 3.0f;
+
+			// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
+			const FVector LocalHalfExtent = FVector(SafeCellSize * 0.45f);
+
+			FVector LocalBasePos;
+			if (!Data.SurfaceLocation.IsNearlyZero())
+			{
+				const float SurfacePlaneDist = FVector::DotProduct(Data.SurfaceLocation, LocalNormal);
+				const float GridPlaneDist = FVector::DotProduct(LocalCenter, LocalNormal);
+				LocalBasePos = LocalCenter + LocalNormal * (SurfacePlaneDist - GridPlaneDist);
+			}
+			else
+			{
+				LocalBasePos = SurfaceGridUtils::GetFaceCenter(LocalCoord, SafeCellSize);
+			}
+
+			const FVector LocalVisualCenter = LocalBasePos + LocalNormal * (SafeCellSize * 0.5f);
 
 			const FVector WorldVisualCenter = RigidTransform.TransformPosition(LocalVisualCenter);
-			const FVector HalfExtent = FVector(SafeCellSize * 0.42f);
+			if (bHasViewLocation && FVector::DistSquared(WorldVisualCenter, ViewLocation) > MaxDebugDrawDistSq)
+			{
+				continue;
+			}
 
-			DrawDebugBox(World, WorldVisualCenter, HalfExtent, CompRot, Color, false, DebugLifeTime, 0, 2.0f);
+			const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
+
+			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent, CompRot, Color, false, DebugLifeTime, 0, 2.0f);
 		}
 	}
 #endif

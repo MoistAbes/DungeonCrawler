@@ -4,6 +4,9 @@
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/Pawn.h"
 
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h"
@@ -20,9 +23,11 @@ bool FStaticSurfaceGridManager::GetSurfaceMaterialAtCoord(
 	float SafeCellSize,
 	const FSurfaceCellCoord& Coord,
 	EPhysicalMaterialType& OutMaterial,
-	AActor*& OutSurfaceActor)
+	AActor*& OutSurfaceActor,
+	FVector& OutSurfaceLocation)
 {
 	OutSurfaceActor = nullptr;
+	OutSurfaceLocation = FVector::ZeroVector;
 	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 	const FVector Center = Coord.ToWorldLocation(SafeCellSize);
 	FHitResult Hit;
@@ -30,6 +35,7 @@ bool FStaticSurfaceGridManager::GetSurfaceMaterialAtCoord(
 	if (bHit)
 	{
 		OutSurfaceActor = Hit.GetActor();
+		OutSurfaceLocation = Hit.ImpactPoint;
 	}
 	return bHit;
 }
@@ -45,7 +51,8 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 	uint8 Tier,
 	float SafeCellSize,
 	float CurrentTime,
-	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+	const FVector& SurfaceLocation)
 {
 	if (!World || IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
 	{
@@ -55,19 +62,34 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 	FSurfaceCellData* Existing = ActiveCells.Find(Coord);
 	EPhysicalMaterialType SurfaceMat = ExplicitMaterial;
 	AActor* ResolvedSurfaceActor = SurfaceActor;
+	FVector ResolvedLocation = SurfaceLocation;
 
 	if (!Existing)
 	{
-		AActor* ProbedActor = nullptr;
-		if (!GetSurfaceMaterialAtCoord(World, SafeCellSize, Coord, SurfaceMat, ProbedActor))
+		// Weryfikacja minimalnego pokrycia: jeśli przekazany aktor ma <50% pokrycia komórki (zasada większości),
+		// reprobujemy w centrum, aby sprawdzić właściwego aktora pod spodem (np. kamień zamiast metalu).
+		if (ResolvedSurfaceActor && !SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(ResolvedSurfaceActor, Coord, SafeCellSize))
 		{
-			UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceGrid] ApplyStatusToCell Coord(%d,%d,%d Face:%d) rejected: No valid surface geometry!"),
-				Coord.X, Coord.Y, Coord.Z, static_cast<int32>(Coord.Face));
-			return false;
+			ResolvedSurfaceActor = nullptr;
+			ResolvedLocation = FVector::ZeroVector;
 		}
-		if (!ResolvedSurfaceActor)
+
+		if (!ResolvedSurfaceActor || ResolvedLocation.IsNearlyZero())
 		{
+			AActor* ProbedActor = nullptr;
+			FVector ProbedLocation = FVector::ZeroVector;
+			EPhysicalMaterialType ProbedMat = EPhysicalMaterialType::Stone;
+			if (!GetSurfaceMaterialAtCoord(World, SafeCellSize, Coord, ProbedMat, ProbedActor, ProbedLocation))
+			{
+				return false;
+			}
+			if (ProbedActor && !SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(ProbedActor, Coord, SafeCellSize))
+			{
+				return false;
+			}
 			ResolvedSurfaceActor = ProbedActor;
+			SurfaceMat = ProbedMat;
+			ResolvedLocation = ProbedLocation;
 		}
 	}
 	else
@@ -76,6 +98,10 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 		if (!ResolvedSurfaceActor)
 		{
 			ResolvedSurfaceActor = Existing->SurfaceActor.Get();
+		}
+		if (ResolvedLocation.IsNearlyZero())
+		{
+			ResolvedLocation = Existing->SurfaceLocation;
 		}
 	}
 	// Dynamic Surface Safety Guard: komórki na ruchomych obiektach (np. bramach) NIE MOGĄ trafić do siatki statycznej!
@@ -99,7 +125,8 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 		ResolvedSurfaceActor,
 		Tier,
 		CurrentTime,
-		OnCellChanged);
+		OnCellChanged,
+		ResolvedLocation);
 }
 
 int32 FStaticSurfaceGridManager::ClearCellsInBounds(
@@ -355,6 +382,25 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 		return;
 	}
 
+	// NOTE: TO BE REMOVED - ONLY FOR DEBUG AND PERFORMANCE TESTING PURPOSES
+	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
+	FVector ViewLocation = FVector::ZeroVector;
+	bool bHasViewLocation = false;
+	if (const APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (PC->PlayerCameraManager)
+		{
+			ViewLocation = PC->PlayerCameraManager->GetCameraLocation();
+			bHasViewLocation = true;
+		}
+		else if (const APawn* Pawn = PC->GetPawn())
+		{
+			ViewLocation = Pawn->GetActorLocation();
+			bHasViewLocation = true;
+		}
+	}
+	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
+
 	const float DebugLifeTime = 0.3f;
 
 	for (const auto& Pair : ActiveCells)
@@ -367,12 +413,34 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 			continue;
 		}
 
-		const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
-
 		const FVector Center = Coord.ToWorldLocation(SafeCellSize);
+		if (bHasViewLocation && FVector::DistSquared(Center, ViewLocation) > MaxDebugDrawDistSq)
+		{
+			continue;
+		}
+
+		const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
 		const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
-		const FVector VisualCenter = Center + Normal * 3.0f;
-		const FVector HalfExtent = FVector(SafeCellSize * 0.42f);
+
+		// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
+		const FVector HalfExtent = FVector(SafeCellSize * 0.45f);
+
+		FVector BasePos;
+		if (!Data.SurfaceLocation.IsNearlyZero())
+		{
+			// Płaszczyzna z fizycznej kolizji na architekturze lochu (zapobiega chowaniu się komórek w suficie/ścianie)
+			const float SurfacePlaneDist = FVector::DotProduct(Data.SurfaceLocation, Normal);
+			const float GridPlaneDist = FVector::DotProduct(Center, Normal);
+			BasePos = Center + Normal * (SurfacePlaneDist - GridPlaneDist);
+		}
+		else
+		{
+			// Fallback: środek zewnętrznej ściany woksela
+			BasePos = SurfaceGridUtils::GetFaceCenter(Coord, SafeCellSize);
+		}
+
+		// Środek sześcianu 3D umieszczony w powietrzu przed powierzchnią architektury
+		const FVector VisualCenter = BasePos + Normal * (SafeCellSize * 0.5f);
 
 		DrawDebugBox(World, VisualCenter, HalfExtent, Color, false, DebugLifeTime, 0, 2.0f);
 	}

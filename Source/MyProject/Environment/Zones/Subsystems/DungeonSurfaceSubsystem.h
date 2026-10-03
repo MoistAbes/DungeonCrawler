@@ -104,7 +104,8 @@ public:
 		AActor* Instigator = nullptr,
 		EPhysicalMaterialType ExplicitMaterial = EPhysicalMaterialType::Stone,
 		AActor* SurfaceActor = nullptr,
-		uint8 Tier = 0);
+		uint8 Tier = 0,
+		const FVector& SurfaceLocation = FVector::ZeroVector);
 
 	/**
 	 * Nakłada status na komórki w obszarze 3D wokół źródła wybuchu (RadialBurst).

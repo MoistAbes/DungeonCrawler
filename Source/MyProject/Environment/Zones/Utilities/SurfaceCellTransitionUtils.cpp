@@ -69,8 +69,8 @@ bool USurfaceCellTransitionUtils::CleanOrphanedStatuses(FSurfaceCellData& InOutC
 
 		if (!UElementalReactionRules::CanMaterialReceiveStatus(InOutCellData.SurfaceMaterial, RemainingStatus, ActiveBefore))
 		{
-			UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceCellTransitionUtils] CleanOrphanedStatuses: Evicted orphaned status %s on material %s (carrier expired)"),
-				*UEnum::GetValueAsString(RemainingStatus), *UEnum::GetValueAsString(InOutCellData.SurfaceMaterial));
+			// UE_LOG(LogDungeonElements, Log, TEXT("[SurfaceCellTransitionUtils] CleanOrphanedStatuses: Evicted orphaned status %s on material %s (carrier expired)"),
+			// 	*UEnum::GetValueAsString(RemainingStatus), *UEnum::GetValueAsString(InOutCellData.SurfaceMaterial));
 			InOutCellData.ActiveStatuses.RemoveAt(Index);
 			bEvictedAny = true;
 		}
@@ -154,7 +154,8 @@ bool USurfaceCellTransitionUtils::ApplyStatusToCellInMap(
 	AActor* SurfaceActor,
 	uint8 Tier,
 	float CurrentTime,
-	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+	const FVector& SurfaceLocation)
 {
 	if (IncomingStatus == EStatusEffectType::None || Duration < 0.0f)
 	{
@@ -166,11 +167,16 @@ bool USurfaceCellTransitionUtils::ApplyStatusToCellInMap(
 	if (Existing)
 	{
 		CellData = *Existing;
+		if (CellData.SurfaceLocation.IsNearlyZero() && !SurfaceLocation.IsNearlyZero())
+		{
+			CellData.SurfaceLocation = SurfaceLocation;
+		}
 	}
 	else
 	{
 		CellData.SurfaceMaterial = ExplicitMaterial;
 		CellData.SurfaceActor = SurfaceActor;
+		CellData.SurfaceLocation = SurfaceLocation;
 	}
 
 	const FSurfaceCellTransitionResult Result = CalculateCellTransition(

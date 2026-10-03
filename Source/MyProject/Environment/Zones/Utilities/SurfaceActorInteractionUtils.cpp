@@ -139,8 +139,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 	// 1. ZŁOTA ZASADA: NAJPIERW aplikujemy płyn podłoża (fizyczny nośnik otoczenia, np. woda zmywa olej)
 	if (DominantLiquid != EStatusEffectType::None)
 	{
-		UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying dominant floor liquid %s (T%d) to %s"),
-			*UEnum::GetValueAsString(DominantLiquid), DominantLiquidTier, *Actor->GetName());
+		// UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying dominant floor liquid %s (T%d) to %s"),
+		// 	*UEnum::GetValueAsString(DominantLiquid), DominantLiquidTier, *Actor->GetName());
 		StatusComp->ApplyStatus(DominantLiquid, DominantLiquidTier, -1.0f, DominantLiquidInstigator.Get());
 
 		if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
@@ -154,8 +154,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 	{
 		if (StatusPair.Key != DominantLiquid)
 		{
-			UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying secondary floor status %s (T%d) to %s"),
-				*UEnum::GetValueAsString(StatusPair.Key), StatusPair.Value.Tier, *Actor->GetName());
+			// UE_LOG(LogDungeonElements, Verbose, TEXT("[SurfaceActorInteractionUtils] Applying secondary floor status %s (T%d) to %s"),
+			// 	*UEnum::GetValueAsString(StatusPair.Key), StatusPair.Value.Tier, *Actor->GetName());
 			StatusComp->ApplyStatus(StatusPair.Key, StatusPair.Value.Tier, -1.0f, StatusPair.Value.Instigator.Get());
 		}
 	}

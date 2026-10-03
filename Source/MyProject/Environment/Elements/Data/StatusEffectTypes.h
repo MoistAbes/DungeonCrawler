@@ -133,6 +133,10 @@ struct FStatusEffectConfig
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	bool bRequiresConductive = false;
 
+	/** Czy status rozchodzi się błyskawicznie po całej połączonej sieci przewodników (np. Prąd po metalu i wodzie) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	bool bInstantConductionNetwork = false;
+
 	/** Statusy na celu omijające restrykcję materiałową (np. Oiled omija bRequiresFlammable, Wet omija bRequiresConductive) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	TArray<EStatusEffectType> BypassTraitsIfActive;

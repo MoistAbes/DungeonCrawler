@@ -19,7 +19,7 @@ class AActor;
  */
 namespace SurfaceGridProjectionUtils
 {
-	using FSurfaceCellCandidateCallback = TFunctionRef<void(const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMaterial, AActor* HitActor)>;
+	using FSurfaceCellCandidateCallback = TFunctionRef<void(const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMaterial, AActor* HitActor, const FVector& SurfaceLocation)>;
 	using FBurstSurfaceHitCallback = TFunctionRef<void(const FHitResult& SurfaceHit, float SplashRadius)>;
 
 	/**

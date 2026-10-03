@@ -32,4 +32,18 @@ public:
 		float SafeCellSize,
 		float CurrentTime,
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+
+	/**
+	 * Błyskawiczna propagacja sieci przewodzącej (Instant Conduction Network / Flood-Fill).
+	 * Rozprzestrzenia statusy o fladze bInstantConductionNetwork (np. Electrified)
+	 * natychmiastowo po wszystkich połączonych komórkach przewodzących (woda, metal)
+	 * ze zsynchronizowanym wspólnym ServerEndTime.
+	 */
+	static void PropagateConductionNetworks(
+		UWorld* World,
+		FStaticSurfaceGridManager& StaticGrid,
+		FDynamicSurfaceGridManager& DynamicGrid,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 };

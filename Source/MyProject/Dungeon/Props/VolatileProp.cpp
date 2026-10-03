@@ -137,7 +137,18 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
         MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     }
 
-    const FVector DetonationCenter = GetActorLocation();
+    FVector DetonationCenter = GetActorLocation();
+    if (LastImpactHit.bBlockingHit)
+    {
+        FVector PushDir = LastImpactHit.ImpactNormal;
+        // Odsuwamy punkt wybuchu o 15 cm od uderzonej powierzchni w stronę wolnej przestrzeni lochu.
+        // Jeśli ImpactNormal z fizyki Chaos przypadkowo skierowany jest w tę samą stronę co ruch bomby (odwrócona normalna mesha), odwracamy go.
+        if (MeshComponent && FVector::DotProduct(PushDir, MeshComponent->GetComponentVelocity()) > 0.0f)
+        {
+            PushDir = -PushDir;
+        }
+        DetonationCenter = LastImpactHit.ImpactPoint + PushDir.GetSafeNormal() * 15.0f;
+    }
 
     // 1. Rozsyłamy powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich graczy
     Multicast_PlayExplosionEffects(DetonationCenter);

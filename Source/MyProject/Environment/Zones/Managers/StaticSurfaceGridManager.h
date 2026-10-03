@@ -32,7 +32,8 @@ public:
 		uint8 Tier,
 		float SafeCellSize,
 		float CurrentTime,
-		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+		const FVector& SurfaceLocation = FVector::ZeroVector);
 
 
 	/**
@@ -73,14 +74,26 @@ public:
 		TFunctionRef<bool(const FSurfaceCellCoord&, EStatusEffectType, float, AActor*)> ApplyToCellCallback);
 
 	/**
-	 * Pobiera materiał fizyczny oraz aktora lochu pod daną komórką powierzchniową.
+	 * Pobiera materiał fizyczny, aktora lochu oraz dokładną pozycję uderzenia pod daną komórką powierzchniową.
 	 */
 	static bool GetSurfaceMaterialAtCoord(
 		const UWorld* World,
 		float SafeCellSize,
 		const FSurfaceCellCoord& Coord,
 		EPhysicalMaterialType& OutMaterial,
-		AActor*& OutSurfaceActor);
+		AActor*& OutSurfaceActor,
+		FVector& OutSurfaceLocation);
+
+	static bool GetSurfaceMaterialAtCoord(
+		const UWorld* World,
+		float SafeCellSize,
+		const FSurfaceCellCoord& Coord,
+		EPhysicalMaterialType& OutMaterial,
+		AActor*& OutSurfaceActor)
+	{
+		FVector DummyLocation;
+		return GetSurfaceMaterialAtCoord(World, SafeCellSize, Coord, OutMaterial, OutSurfaceActor, DummyLocation);
+	}
 
 	/** Dostęp do mapy komórek */
 	const TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCells() const { return ActiveCells; }

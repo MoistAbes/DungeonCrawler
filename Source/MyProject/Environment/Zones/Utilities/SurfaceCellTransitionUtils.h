@@ -56,7 +56,8 @@ public:
 		AActor* SurfaceActor,
 		uint8 Tier,
 		float CurrentTime,
-		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+		const FVector& SurfaceLocation = FVector::ZeroVector);
 
 	/**
 	 * Uniwersalna pętla wygaszania komórek w dowolnej rzadkiej mapie komórek (statycznej lub dynamicznej).

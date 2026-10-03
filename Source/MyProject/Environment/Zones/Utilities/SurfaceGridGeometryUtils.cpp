@@ -64,6 +64,78 @@ namespace SurfaceGridGeometryUtils
 		return EPhysicalMaterialType::Stone;
 	}
 
+	bool HasSufficientSurfaceCoverage(
+		const AActor* Actor,
+		const FSurfaceCellCoord& Coord,
+		float CellSize,
+		float MinAxisCoverageFraction)
+	{
+		if (!Actor || !IsValid(Actor) || Actor->IsActorBeingDestroyed())
+		{
+			return false;
+		}
+
+		FBox ActorBox = Actor->GetComponentsBoundingBox(false);
+		if (!ActorBox.IsValid)
+		{
+			ActorBox = Actor->GetComponentsBoundingBox(true);
+		}
+
+		if (!ActorBox.IsValid)
+		{
+			return true;
+		}
+
+		const float SafeCellSize = FMath::Max(1.0f, CellSize);
+		const float SafeMinCoverage = FMath::Clamp(MinAxisCoverageFraction, 0.01f, 0.99f);
+
+		// Granice woksela komórki w przestrzeni świata
+		const float CellMinX = static_cast<float>(Coord.X) * SafeCellSize;
+		const float CellMaxX = static_cast<float>(Coord.X + 1) * SafeCellSize;
+		const float CellMinY = static_cast<float>(Coord.Y) * SafeCellSize;
+		const float CellMaxY = static_cast<float>(Coord.Y + 1) * SafeCellSize;
+		const float CellMinZ = static_cast<float>(Coord.Z) * SafeCellSize;
+		const float CellMaxZ = static_cast<float>(Coord.Z + 1) * SafeCellSize;
+
+		float OverlapU = 0.0f;
+		float OverlapV = 0.0f;
+
+		switch (Coord.Face)
+		{
+		case ESurfaceFaceDirection::Up:
+		case ESurfaceFaceDirection::Down:
+			// Płaszczyzna XY (Podłoga / Sufit)
+			OverlapU = FMath::Max(0.0f, FMath::Min(CellMaxX, ActorBox.Max.X) - FMath::Max(CellMinX, ActorBox.Min.X));
+			OverlapV = FMath::Max(0.0f, FMath::Min(CellMaxY, ActorBox.Max.Y) - FMath::Max(CellMinY, ActorBox.Min.Y));
+			break;
+
+		case ESurfaceFaceDirection::North:
+		case ESurfaceFaceDirection::South:
+			// Płaszczyzna YZ (Ściany North / South)
+			OverlapU = FMath::Max(0.0f, FMath::Min(CellMaxY, ActorBox.Max.Y) - FMath::Max(CellMinY, ActorBox.Min.Y));
+			OverlapV = FMath::Max(0.0f, FMath::Min(CellMaxZ, ActorBox.Max.Z) - FMath::Max(CellMinZ, ActorBox.Min.Z));
+			break;
+
+		case ESurfaceFaceDirection::East:
+		case ESurfaceFaceDirection::West:
+			// Płaszczyzna XZ (Ściany East / West)
+			OverlapU = FMath::Max(0.0f, FMath::Min(CellMaxX, ActorBox.Max.X) - FMath::Max(CellMinX, ActorBox.Min.X));
+			OverlapV = FMath::Max(0.0f, FMath::Min(CellMaxZ, ActorBox.Max.Z) - FMath::Max(CellMinZ, ActorBox.Min.Z));
+			break;
+		}
+
+		const float FractionU = OverlapU / SafeCellSize;
+		const float FractionV = OverlapV / SafeCellSize;
+
+		// Wymagamy, aby aktor pokrywał co najmniej SafeMinCoverage komórki wzdłuż każdej z dwóch osi stycznych
+		if (FractionU < SafeMinCoverage || FractionV < SafeMinCoverage)
+		{
+			return false;
+		}
+
+		return true;
+	}
+
 	bool ProbeSurfaceAt(
 		const UWorld* World,
 		const FVector& ProbeLocation,
@@ -93,9 +165,13 @@ namespace SurfaceGridGeometryUtils
 				AActor* HitActor = Hit.GetActor();
 				if (HitActor && IsValidSurfaceTarget(HitActor))
 				{
-					if (FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal) > 0.4f)
+					if (FMath::Abs(FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal)) > 0.4f)
 					{
 						OutHit = Hit;
+						if (FVector::DotProduct(OutHit.ImpactNormal, SurfaceNormal) < 0.0f)
+						{
+							OutHit.ImpactNormal = -OutHit.ImpactNormal;
+						}
 						OutMaterial = GetMaterialFromActor(HitActor);
 						return true;
 					}
@@ -177,9 +253,11 @@ namespace SurfaceGridGeometryUtils
 		const float Dist = FMath::Sqrt(DistSq);
 		const FVector DirToOrigin = ToOrigin / Dist;
 
-		// 1. Sprawdzenie orientacji normalnej (Backface Culling):
-		// Powierzchnia odwrócona tyłem do punktu wybuchu (Dot <= 0) fizycznie nie ma bezpośredniej linii wzroku.
-		if (FVector::DotProduct(SurfaceNormal, DirToOrigin) <= 0.0f)
+		// 1. Sprawdzenie orientacji normalnej (Backface Culling z tolerancją na płaszczyznę wybuchu):
+		// Prawdziwa przeciwna strona ściany/podłogi/sufitu ma DotProduct bliski -1.0 (kąt > 107°).
+		// Na samej płaszczyźnie wybuchu (zwłaszcza sufitu) wektor do źródła leży w płaszczyźnie (Dot wokół 0),
+		// więc próg -0.3f chroni przed fałszywym odrzuceniem komórek na tej samej powierzchni.
+		if (FVector::DotProduct(SurfaceNormal, DirToOrigin) < -0.3f)
 		{
 			return false;
 		}
@@ -211,9 +289,9 @@ namespace SurfaceGridGeometryUtils
 					continue;
 				}
 
-				// Sprawdzamy czy to nie jest płaskie muśnięcie tej samej, współpłaszczyznowej podłogi/ściany
+				// Sprawdzamy czy to nie jest płaskie muśnięcie tej samej, współpłaszczyznowej podłogi/ściany/sufitu
 				// (np. sąsiednie moduły posadzki 300x300 cm lub drobny występ na tej samej powierzchni)
-				const bool bIsParallelNormal = FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal) > 0.7f;
+				const bool bIsParallelNormal = FMath::Abs(FVector::DotProduct(Hit.ImpactNormal, SurfaceNormal)) > 0.7f;
 				const float PlaneDist = FMath::Abs(FVector::DotProduct(Hit.ImpactPoint - TargetSurfacePoint, SurfaceNormal));
 				if (bIsParallelNormal && PlaneDist < 8.0f)
 				{
@@ -311,14 +389,22 @@ namespace SurfaceGridGeometryUtils
 		TArray<FSurfaceSpreadPath, TInlineAllocator<4>> SpreadPaths;
 		SourceCoord.GetDirectionalSpreadPaths(SpreadPaths);
 
-		auto QuerySurface = [World, &ActiveCells, CellSize](const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMat, AActor*& OutActor) -> bool
+		auto QuerySurface = [World, &ActiveCells, CellSize](
+			const FSurfaceCellCoord& Coord,
+			EPhysicalMaterialType& OutMat,
+			AActor*& OutActor,
+			TArray<EStatusEffectType>& OutStatuses) -> bool
 		{
-			const FSurfaceCellData* Existing = ActiveCells.Find(Coord);
-			if (Existing)
+			OutStatuses.Reset();
+			if (const FSurfaceCellData* Existing = ActiveCells.Find(Coord))
 			{
-				OutMat = Existing->SurfaceMaterial;
-				OutActor = Existing->SurfaceActor.Get();
-				return true;
+				if (!Existing->IsEmpty())
+				{
+					OutMat = Existing->SurfaceMaterial;
+					OutActor = Existing->SurfaceActor.Get();
+					OutStatuses = Existing->GetStatusTypes();
+					return true;
+				}
 			}
 
 			const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
@@ -328,6 +414,10 @@ namespace SurfaceGridGeometryUtils
 			if (bHit)
 			{
 				OutActor = Hit.GetActor();
+				if (OutActor && !HasSufficientSurfaceCoverage(OutActor, Coord, CellSize))
+				{
+					return false;
+				}
 			}
 			return bHit;
 		};
@@ -337,27 +427,41 @@ namespace SurfaceGridGeometryUtils
 			// 1. Sprawdzamy kandydata współpłaszczyznowego (Coplanar)
 			EPhysicalMaterialType CoplanarMat = EPhysicalMaterialType::Stone;
 			AActor* CoplanarActor = nullptr;
+			TArray<EStatusEffectType> CoplanarStatuses;
 
-			if (QuerySurface(Path.Coplanar, CoplanarMat, CoplanarActor))
+			if (QuerySurface(Path.Coplanar, CoplanarMat, CoplanarActor, CoplanarStatuses))
 			{
-				OutCandidates.Add({ Path.Coplanar, CoplanarMat, CoplanarActor, false });
-				// ZŁOTA ZASADA: Skoro płaszczyzna kontynuuje się w linii prostej, ściana nie zagina się w tym miejscu pod kątem 90°
-				continue;
+				OutCandidates.Add({ Path.Coplanar, CoplanarMat, CoplanarActor, MoveTemp(CoplanarStatuses), false });
+
+				// Jeśli w punkcie narożnika nie ma już aktywnej komórki w siatce (np. wylanego wcześniej płynu),
+				// a płaszczyzna kontynuuje się w linii prostej na wprost, ściana NIE zagina się w tym miejscu pod kątem 90°.
+				// Dotyczy to wyłącznie pionowych szwów ściennych (North/South/East/West), a nie poziomych krawędzi sufitu (Down) i posadzki (Up)!
+				if (Path.Corner.Face != ESurfaceFaceDirection::Up && Path.Corner.Face != ESurfaceFaceDirection::Down)
+				{
+					const FSurfaceCellData* ExistingCorner = ActiveCells.Find(Path.Corner);
+					if (!ExistingCorner || ExistingCorner->IsEmpty())
+					{
+						continue;
+					}
+				}
 			}
 
-			// 2. Skoro płaszczyzna się skończyła, sprawdzamy narożnik wklęsły 90° (Corner)
+			// 2. Sprawdzamy narożnik wklęsły 90° (Corner)
 			EPhysicalMaterialType CornerMat = EPhysicalMaterialType::Stone;
 			AActor* CornerActor = nullptr;
+			TArray<EStatusEffectType> CornerStatuses;
 
-			if (QuerySurface(Path.Corner, CornerMat, CornerActor))
+			if (QuerySurface(Path.Corner, CornerMat, CornerActor, CornerStatuses))
 			{
-				// ZASADA SEPARACJI STRUKTUR: Obiekt nie może podpalać prostopadłych krawędzi samego siebie
-				if (CornerActor && CornerActor == SourceActor)
+				// ZASADA SEPARACJI STRUKTUR: Obiekt nie może podpalać/razić prostopadłych krawędzi samego siebie,
+				// CHYBA ŻE w siatce istnieje już aktywna komórka w tym miejscu (np. gracz rozlał tam ciecz)
+				const bool bAlreadyActive = !CornerStatuses.IsEmpty();
+				if (!bAlreadyActive && CornerActor && CornerActor == SourceActor)
 				{
 					continue;
 				}
 
-				OutCandidates.Add({ Path.Corner, CornerMat, CornerActor, true });
+				OutCandidates.Add({ Path.Corner, CornerMat, CornerActor, MoveTemp(CornerStatuses), true });
 			}
 		}
 	}
