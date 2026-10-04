@@ -262,7 +262,7 @@ bool UStatusEffectComponent::ApplyStatus(EStatusEffectType NewStatus, uint8 Tier
             const FVector ReactionPos = GetOwner()->GetActorLocation() + FVector(0.0f, 0.0f, 60.0f);
             DrawDebugString(GetWorld(), ReactionPos, FString::Printf(TEXT("💥 REACTION: %s!"), *ReactionTag.ToString()), nullptr, FColor::Magenta, 2.5f, true, 1.4f);
         }
-        if (GEngine && GetOwner())
+        if (bShowDebugOnScreen && GEngine && GetOwner())
         {
             GEngine->AddOnScreenDebugMessage(-1, 2.5f, FColor::Magenta,
                 FString::Printf(TEXT("[%s] REACTION: %s!"), *GetOwner()->GetName(), *ReactionTag.ToString()));
@@ -319,16 +319,8 @@ void UStatusEffectComponent::RefreshExistingStatus(FActiveStatusEffectInstance& 
     // Synchronizacja czasu dla statusów zależnych od tego nośnika (np. prąd na mokrej postaci)
     SyncDependentStatusesWithCarrier(Existing.EffectType, Existing.ServerEndTime);
 
-    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s refreshed status %s (Tier %d, Remaining: %.1fs)"),
+    UE_LOG(LogDungeonElements, Verbose, TEXT("[StatusEffect]%s %s refreshed status %s (Tier %d, Remaining: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), Existing.Tier, GetRemainingDuration(Existing.EffectType));
-
-#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-    if (GEngine && GetOwner())
-    {
-        GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green,
-            FString::Printf(TEXT("[%s] REFRESHED: %s T%d (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(Existing.EffectType), Existing.Tier, GetRemainingDuration(Existing.EffectType)));
-    }
-#endif
 
     OnStatusEffectApplied.Broadcast(Existing.EffectType, GetRemainingDuration(Existing.EffectType));
 }
@@ -357,11 +349,11 @@ void UStatusEffectComponent::AddNewStatusInstance(EStatusEffectType NewStatus, u
     // synchronizujemy czas trwania istniejących statusów zależnych od tego nośnika!
     SyncDependentStatusesWithCarrier(NewStatus, NewEndTime);
 
-    UE_LOG(LogDungeonElements, Warning, TEXT("[StatusEffect]%s %s GAINED status: %s (Tier %d, Duration: %.1fs)"),
+    UE_LOG(LogDungeonElements, Log, TEXT("[StatusEffect]%s %s GAINED status: %s (Tier %d, Duration: %.1fs)"),
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Tier, Duration);
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-    if (GEngine && GetOwner())
+    if (bShowDebugOnScreen && GEngine && GetOwner())
     {
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
             FString::Printf(TEXT("[%s] GAINED: %s T%d (%.1fs)"), *GetOwner()->GetName(), *UEnum::GetValueAsString(NewStatus), Tier, Duration));
@@ -401,7 +393,7 @@ bool UStatusEffectComponent::RemoveStatus(EStatusEffectType StatusToRemove)
         *NetUtils::GetNetRolePrefix(this), *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove));
 
 #if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
-    if (GEngine && GetOwner())
+    if (bShowDebugOnScreen && GEngine && GetOwner())
     {
         GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Orange,
             FString::Printf(TEXT("[%s] LOST: %s"), *GetOwner()->GetName(), *UEnum::GetValueAsString(StatusToRemove)));

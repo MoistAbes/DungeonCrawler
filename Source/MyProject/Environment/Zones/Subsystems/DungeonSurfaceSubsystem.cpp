@@ -192,7 +192,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToDynamicCell(
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 
-	return DynamicGridManager.ApplyStatusToDynamicCell(
+	const bool bApplied = DynamicGridManager.ApplyStatusToDynamicCell(
 		DynamicActor,
 		TransformComp,
 		LocalCoord,
@@ -207,6 +207,13 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToDynamicCell(
 		{
 			OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
 		});
+
+	if (bApplied)
+	{
+		bConductionNetworkDirty = true;
+	}
+
+	return bApplied;
 }
 
 bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
@@ -258,7 +265,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		}
 	}
 
-	return StaticGridManager.ApplyStatusToCell(
+	const bool bApplied = StaticGridManager.ApplyStatusToCell(
 		World,
 		Coord,
 		IncomingStatus,
@@ -274,6 +281,13 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 			OnSurfaceCellChanged.Broadcast(InCoord, NewStatus, InInstigator);
 		},
 		SurfaceLocation);
+
+	if (bApplied)
+	{
+		bConductionNetworkDirty = true;
+	}
+
+	return bApplied;
 }
 
 int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
@@ -323,7 +337,8 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
 	const FVector& BurstOrigin,
 	TSet<FSurfaceCellCoord>& ProcessedCoords,
 	AActor* Instigator,
-	uint8 Tier)
+	uint8 Tier,
+	int32* OutNewlyCreatedCount)
 {
 	UWorld* World = GetWorld();
 	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
@@ -345,13 +360,22 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
 		Instigator,
 		[&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType HitMat, AActor* SurfaceActor, const FVector& ImpactPoint)
 		{
+			const bool bIsNew = !StaticGridManager.GetActiveCells().Contains(Coord);
 			if (ApplyStatusToCell(Coord, Status, Duration, Instigator, HitMat, SurfaceActor, Tier, ImpactPoint))
 			{
 				AffectedCount++;
+				if (bIsNew && OutNewlyCreatedCount)
+				{
+					(*OutNewlyCreatedCount)++;
+				}
 			}
 		});
 
-	PropagateConductionIfApplicable(Status, AffectedCount);
+	// Jeśli wywołane samodzielnie (poza ApplyElementalBurst), odpalamy propagację
+	if (!OutNewlyCreatedCount)
+	{
+		PropagateConductionIfApplicable(Status, AffectedCount);
+	}
 
 	return AffectedCount;
 }
@@ -375,6 +399,7 @@ int32 UDungeonSurfaceSubsystem::ClearCellsInBounds(const FBox& BoundingBox)
 
 	if (RemovedCount > 0)
 	{
+		bConductionNetworkDirty = true;
 		UE_LOG(LogDungeonElements, Log, TEXT("[DungeonSurfaceSubsystem] Cleared %d cells in destroyed structure bounds"), RemovedCount);
 	}
 
@@ -396,6 +421,7 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 	}
 
 	int32 AffectedCount = 0;
+	int32 NewlyCreatedCount = 0;
 	TSet<FSurfaceCellCoord> ProcessedCoords;
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const float CurrentTime = World->GetTimeSeconds();
@@ -459,10 +485,127 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 				Origin,
 				ProcessedCoords,
 				Instigator,
-				Tier);
+				Tier,
+				&NewlyCreatedCount);
 		});
 
-	PropagateConductionIfApplicable(Status, AffectedCount);
+	// Jeśli wybuch zaaplikował wyłącznie nośnik płynny (np. Wet) i nie powstała ani jedna nowa komórka w świecie
+	// (wszystkie istniały już wcześniej i zostały tylko odświeżone czasowo), sieć nie uległa rozszerzeniu i pomijamy BFS!
+	const bool bIsCarrierOnly = UElementalReactionRules::IsLiquidStatus(Status) && !UElementalReactionRules::IsInstantConduction(Status);
+	if (!bIsCarrierOnly || NewlyCreatedCount > 0)
+	{
+		PropagateConductionIfApplicable(Status, AffectedCount);
+	}
+
+	return AffectedCount;
+}
+
+int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
+	const FVector& Origin,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	AActor* Instigator,
+	uint8 Tier)
+{
+	UWorld* World = GetWorld();
+	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f)
+	{
+		return 0;
+	}
+
+	int32 AffectedCount = 0;
+	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	const float CurrentTime = World->GetTimeSeconds();
+	const float RadiusSq = FMath::Square(Radius);
+
+	// Bezpieczny próg bufora wyprzedzenia: jeśli komórka już posiada ten status i ma bezpieczny zapas czasu (> 1.5s),
+	// to w tym ticku strefa ją ignoruje (zero trace'ów LoS, zero zapytań fizyki, zero broadcastów eventów, zero BFS).
+	const float MinRemainingToSkip = FMath::Max(1.5f, Duration * 0.4f);
+
+	FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(ZoneContinuousCellLoS), false, Instigator);
+	if (Instigator)
+	{
+		LoSParams.AddIgnoredActor(Instigator);
+	}
+
+	struct FPendingZoneStaticCell
+	{
+		FSurfaceCellCoord Coord;
+		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
+		TWeakObjectPtr<AActor> SurfaceActor = nullptr;
+		FVector SurfaceLocation = FVector::ZeroVector;
+	};
+	TArray<FPendingZoneStaticCell> PendingCells;
+
+	// KROK 1: Bezpieczne zebranie kandydatów w trybie Read-Only (brak modyfikacji TMap w pętli)
+	for (const auto& Pair : StaticGridManager.GetActiveCells())
+	{
+		const FSurfaceCellCoord& Coord = Pair.Key;
+		const FSurfaceCellData& Data = Pair.Value;
+
+		if (Data.IsEmpty())
+		{
+			continue;
+		}
+
+		const FVector CellWorldPos = Coord.ToWorldLocation(SafeCellSize);
+		if (FVector::DistSquared(Origin, CellWorldPos) > RadiusSq)
+		{
+			continue;
+		}
+
+		// KROK A: Jeśli komórka ma już ten status i nie wygasa w najbliższym czasie, pomijamy!
+		const FSurfaceCellStatusEntry* ExistingEntry = Data.FindStatus(Status);
+		if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip))
+		{
+			continue;
+		}
+
+		// KROK B: Test Line-of-Sight wykonujemy wyłącznie dla komórek realnie wymagających nałożenia/odświeżenia
+		const FVector CellNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
+		const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * 0.45f);
+
+		if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(World, Origin, CellSurfacePos, CellNormal, Data.SurfaceActor.Get(), LoSParams))
+		{
+			continue;
+		}
+
+		PendingCells.Add({ Coord, Data.SurfaceMaterial, Data.SurfaceActor.Get(), Data.SurfaceLocation });
+	}
+
+	// KROK 2: Aplikacja statusu po lokalnym TArray (bezpieczne przed reallokacją TMapy)
+	for (const FPendingZoneStaticCell& Pending : PendingCells)
+	{
+		if (ApplyStatusToCell(Pending.Coord, Status, Duration, Instigator, Pending.Material, Pending.SurfaceActor.Get(), Tier, Pending.SurfaceLocation))
+		{
+			AffectedCount++;
+		}
+	}
+
+	// 2. Bezpośrednia ewaluacja istniejących komórek dynamicznych w sferze strefy
+	if (DynamicGridManager.GetGrids().Num() > 0)
+	{
+		AffectedCount += DynamicGridManager.ApplyElementalBurst(
+			World,
+			Origin,
+			Radius,
+			Status,
+			Duration,
+			Instigator,
+			Tier,
+			SafeCellSize,
+			CurrentTime,
+			[this](const FSurfaceCellCoord& CellCoord, EStatusEffectType NewStatus, AActor* InInstigator)
+			{
+				OnSurfaceCellChanged.Broadcast(CellCoord, NewStatus, InInstigator);
+			});
+	}
+
+	if (AffectedCount > 0)
+	{
+		PropagateConductionIfApplicable(Status, AffectedCount);
+	}
 
 	return AffectedCount;
 }
@@ -502,14 +645,21 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 	const float CurrentTime = World->GetTimeSeconds();
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 
-	auto BroadcastCellChanged = [this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* Instigator)
+	bool bCellsChangedInTick = false;
+	auto BroadcastCellChanged = [this, &bCellsChangedInTick](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* Instigator)
 	{
+		bCellsChangedInTick = true;
 		OnSurfaceCellChanged.Broadcast(Coord, NewStatus, Instigator);
 	};
 
 	// 1. Wygaszanie przeterminowanych statusów w komórkach obu siatek
 	StaticGridManager.ExpireCells(CurrentTime, BroadcastCellChanged);
 	DynamicGridManager.ExpireCells(CurrentTime, BroadcastCellChanged);
+
+	if (bCellsChangedInTick)
+	{
+		bConductionNetworkDirty = true;
+	}
 
 	// 2. Data-driven automat komórkowy (dwukierunkowa propagacja żywiołów)
 	FSurfaceGridPropagationUtils::PropagateElementalSpreads(
@@ -518,7 +668,11 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 		DynamicGridManager,
 		SafeCellSize,
 		CurrentTime,
+		bConductionNetworkDirty,
 		BroadcastCellChanged);
+
+	// Po wykonaniu propagacji sieć osiąga stan stabilny
+	bConductionNetworkDirty = false;
 
 	// 3. Rozprzestrzenianie stałego ognia (np. drewno) oraz niszczenie fundamentów lochu
 	StaticGridManager.ProcessSolidFuelCombustion(World, SafeCellSize, CurrentTime, BroadcastCellChanged);
@@ -681,7 +835,17 @@ void UDungeonSurfaceSubsystem::ProcessSurfaceStructuralDamage(float DeltaTime)
 
 void UDungeonSurfaceSubsystem::PropagateConductionIfApplicable(EStatusEffectType Status, int32 AffectedCount)
 {
-	if (AffectedCount <= 0 || !UElementalReactionRules::IsInstantConduction(Status))
+	if (AffectedCount <= 0)
+	{
+		return;
+	}
+
+	// Propagujemy przewodzenie jeśli nałożono status przewodzący (np. prąd)
+	// LUB nałożono płynny nośnik przewodzenia (np. wodę), który może połączyć się z istniejącym prądem!
+	const bool bIsConductor = UElementalReactionRules::IsInstantConduction(Status);
+	const bool bIsCarrier = UElementalReactionRules::IsLiquidStatus(Status);
+
+	if (!bIsConductor && !bIsCarrier)
 	{
 		return;
 	}
@@ -703,6 +867,9 @@ void UDungeonSurfaceSubsystem::PropagateConductionIfApplicable(EStatusEffectType
 		{
 			OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
 		});
+
+	// Po wykonaniu propagacji sieć osiąga stan stabilny
+	bConductionNetworkDirty = false;
 }
 
 void UDungeonSurfaceSubsystem::DrawDebugVisuals() const

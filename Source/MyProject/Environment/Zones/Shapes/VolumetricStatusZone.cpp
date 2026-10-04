@@ -38,7 +38,7 @@ void AVolumetricStatusZone::ProcessActiveOverlaps()
 			{
 				const float CurrentTime = World->GetTimeSeconds();
 				const float RemainingTime = (ServerEndTime > 0.0f) ? FMath::Max(ZoneTickInterval * 2.0f, ServerEndTime - CurrentTime) : 5.0f;
-				SurfaceSubsystem->ApplyElementalBurst(GetActorLocation(), Radius, EffectConfig.AppliedStatus, RemainingTime, ZoneInstigator.Get(), EffectConfig.StatusTier);
+				SurfaceSubsystem->ApplyContinuousZoneToCells(GetActorLocation(), Radius, EffectConfig.AppliedStatus, RemainingTime, ZoneInstigator.Get(), EffectConfig.StatusTier);
 			}
 		}
 	}
@@ -64,7 +64,7 @@ void AVolumetricStatusZone::DrawDebugVisuals() const
 	const FString StatusName = GetStatusDebugName();
 	const FVector Center = GetActorLocation();
 	const float DebugLifeTime = ZoneTickInterval + 0.05f;
-	DrawDebugSphere(GetWorld(), Center, Radius, 16, ZoneColor, false, DebugLifeTime, 0, 2.0f);
+	DrawDebugSphere(GetWorld(), Center, Radius, 16, ZoneColor, false, DebugLifeTime, 0, 0.0f);
 	const FVector TextPos = Center + FVector(0.0f, 0.0f, 30.0f);
 	DrawDebugString(GetWorld(), TextPos, FString::Printf(TEXT("[%s: %.1fs | R: %.0f cm]"), *StatusName, Remaining, Radius), nullptr, ZoneColor, DebugLifeTime, true, 1.2f);
 #endif

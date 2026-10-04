@@ -153,6 +153,13 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 				continue;
 			}
 
+			// KROK A: Jeśli komórka dynamiczna ma już ten status i nie wygasa w najbliższym czasie, pomijamy!
+			const FSurfaceCellStatusEntry* ExistingEntry = CellPair.Value.FindStatus(Status);
+			if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > FMath::Max(1.5f, Duration * 0.4f)))
+			{
+				continue;
+			}
+
 			FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(DynamicCellBurstLoS), false, Instigator);
 			LoSParams.AddIgnoredActor(DynActor);
 			FHitResult LoSHit;
@@ -393,7 +400,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
 	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
 
-	const float DebugLifeTime = 0.3f;
+	const float DebugLifeTime = 0.25f;
 
 	for (const auto& GridPair : DynamicSurfaceGrids)
 	{
@@ -445,7 +452,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 
 			const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
 
-			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent, CompRot, Color, false, DebugLifeTime, 0, 2.0f);
+			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent, CompRot, Color, false, DebugLifeTime, 0, 0.0f);
 		}
 	}
 #endif

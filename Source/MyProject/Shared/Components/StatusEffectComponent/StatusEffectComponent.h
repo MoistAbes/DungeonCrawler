@@ -141,6 +141,10 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Status Effects|Debug")
     bool bShowDebugInWorld = true;
 
+    /** Czy wyświetlać komunikaty debugowe na ekranie (domyślnie false, aby nie zaśmiecać widoku gry) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Status Effects|Debug")
+    bool bShowDebugOnScreen = false;
+
 private:
     /** 
      * Replikowana lista aktywnych instancji statusów.

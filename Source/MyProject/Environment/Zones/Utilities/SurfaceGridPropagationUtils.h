@@ -31,6 +31,7 @@ public:
 		FDynamicSurfaceGridManager& DynamicGrid,
 		float SafeCellSize,
 		float CurrentTime,
+		bool bConductionNetworkDirty,
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
 	/**

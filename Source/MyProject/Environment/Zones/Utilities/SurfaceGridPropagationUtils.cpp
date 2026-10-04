@@ -94,6 +94,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 	FDynamicSurfaceGridManager& DynamicGrid,
 	float SafeCellSize,
 	float CurrentTime,
+	bool bConductionNetworkDirty,
 	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
 {
 	const TMap<FSurfaceCellCoord, FSurfaceCellData>& ActiveCells = StaticGrid.GetActiveCells();
@@ -104,8 +105,11 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 		return;
 	}
 
-	// 0. Błyskawiczna propagacja sieci przewodzącej (np. prąd po wodzie i metalu ze zsynchronizowanym czasem)
-	PropagateConductionNetworks(World, StaticGrid, DynamicGrid, SafeCellSize, CurrentTime, OnCellChanged);
+	// 0. Błyskawiczna propagacja sieci przewodzącej (wykonywana tylko gdy stan sieci uległ zmianie lub istnieją ruchome obiekty dynamiczne)
+	if (bConductionNetworkDirty || !DynamicGrids.IsEmpty())
+	{
+		PropagateConductionNetworks(World, StaticGrid, DynamicGrid, SafeCellSize, CurrentTime, OnCellChanged);
+	}
 
 	struct FPendingDynamicSpread
 	{
@@ -158,6 +162,66 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 		const FSurfaceCellData& SourceData = Pair.Value;
 
 		if (SourceData.IsEmpty() || !HasSpreadingStatus(SourceData))
+		{
+			continue;
+		}
+
+		// Globalna optymalizacja aktywnego frontiera (Active Frontier Optimization):
+		// Sprawdzamy czy komórka ma przynajmniej jednego sąsiada, który realnie może przyjąć rozprzestrzenienie.
+		// Wnętrze nasyconej plamy (np. ogień na oleju, gdzie wszyscy sąsiedzi już płoną) jest w równowadze i zostaje pominięte bez raycastów.
+		bool bCanPotentiallySpread = false;
+		TArray<FSurfaceCellCoord> CoplanarNeighbors;
+		SourceCoord.GetCoplanarNeighbors(CoplanarNeighbors);
+
+		for (const FSurfaceCellCoord& NeighborCoord : CoplanarNeighbors)
+		{
+			const FSurfaceCellData* NeighborData = ActiveCells.Find(NeighborCoord);
+			if (!NeighborData || NeighborData->IsEmpty())
+			{
+				// Sąsiad poza ActiveCells może być granicą z dynamicznym obiektem (np. brama)
+				if (!DynamicGrids.IsEmpty())
+				{
+					bCanPotentiallySpread = true;
+					break;
+				}
+				continue;
+			}
+
+			// Sprawdzamy czy sąsiad w ActiveCells może wejść w reakcję z którymkolwiek rozprzestrzeniającym się statusem źródła
+			for (const FSurfaceCellStatusEntry& SrcEntry : SourceData.ActiveStatuses)
+			{
+				if (!UElementalReactionRules::CanStatusSpread(SrcEntry.Status))
+				{
+					continue;
+				}
+
+				for (const FSurfaceCellStatusEntry& DstEntry : NeighborData->ActiveStatuses)
+				{
+					FElementalReactionResult SpreadReaction;
+					if (UElementalReactionRules::CanSpreadToNeighbor(SrcEntry.Status, DstEntry.Status, SpreadReaction))
+					{
+						const EStatusEffectType TargetStatus = (SpreadReaction.ResultingStatus != EStatusEffectType::None) ? SpreadReaction.ResultingStatus : SrcEntry.Status;
+						if (!NeighborData->HasStatus(TargetStatus))
+						{
+							bCanPotentiallySpread = true;
+							break;
+						}
+					}
+				}
+
+				if (bCanPotentiallySpread)
+				{
+					break;
+				}
+			}
+
+			if (bCanPotentiallySpread)
+			{
+				break;
+			}
+		}
+
+		if (!bCanPotentiallySpread)
 		{
 			continue;
 		}
@@ -412,7 +476,35 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 			if (UElementalReactionRules::IsInstantConduction(Entry.Status) && (Entry.IsPermanent() || Entry.GetRemainingDuration(CurrentTime) > 0.05f))
 			{
 				StaticVisitedEndTime.Add(Coord, Entry.ServerEndTime);
-				Queue.Add({ false, Coord, nullptr, nullptr, Entry.Status, Entry.ServerEndTime, Entry.Tier, Entry.Instigator });
+
+				// Globalna optymalizacja ziaren BFS (Frontier BFS Seeding):
+				// Jeśli komórka znajduje się głęboko we wnętrzu nasyconej sieci (wszyscy jej 4 sąsiedzi w ActiveCells
+				// mają już ten sam status ze zsynchronizowanym czasem), to nie ma dokąd popłynąć i nie dodajemy jej do kolejki BFS.
+				bool bIsSaturatedInterior = true;
+				TArray<FSurfaceCellCoord> CoplanarNeighbors;
+				Coord.GetCoplanarNeighbors(CoplanarNeighbors);
+
+				for (const FSurfaceCellCoord& NeighborCoord : CoplanarNeighbors)
+				{
+					const FSurfaceCellData* NeighborData = ActiveCells.Find(NeighborCoord);
+					if (!NeighborData || NeighborData->IsEmpty())
+					{
+						bIsSaturatedInterior = false;
+						break;
+					}
+
+					const FSurfaceCellStatusEntry* NeighborStatus = NeighborData->FindStatus(Entry.Status);
+					if (!NeighborStatus || (!NeighborStatus->IsPermanent() && NeighborStatus->ServerEndTime < Entry.ServerEndTime - 0.05f))
+					{
+						bIsSaturatedInterior = false;
+						break;
+					}
+				}
+
+				if (!bIsSaturatedInterior || !DynamicGrids.IsEmpty())
+				{
+					Queue.Add({ false, Coord, nullptr, nullptr, Entry.Status, Entry.ServerEndTime, Entry.Tier, Entry.Instigator });
+				}
 			}
 		}
 	}

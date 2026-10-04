@@ -302,7 +302,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
 	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
 
-	const float DebugLifeTime = 0.3f;
+	const float DebugLifeTime = 0.25f;
 
 	for (const auto& Pair : ActiveCells)
 	{
@@ -343,7 +343,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 		// Środek sześcianu 3D umieszczony w powietrzu przed powierzchnią architektury
 		const FVector VisualCenter = BasePos + Normal * (SafeCellSize * 0.5f);
 
-		DrawDebugBox(World, VisualCenter, HalfExtent, Color, false, DebugLifeTime, 0, 2.0f);
+		DrawDebugBox(World, VisualCenter, HalfExtent, Color, false, DebugLifeTime, 0, 0.0f);
 	}
 #endif
 }

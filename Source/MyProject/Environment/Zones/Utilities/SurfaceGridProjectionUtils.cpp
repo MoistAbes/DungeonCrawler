@@ -37,6 +37,7 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 		TraceParams.AddIgnoredActor(Instigator);
 	}
 
+	TSet<FSurfaceCellCoord> ProcessedCoords;
 	for (int32 du = -StepRadius; du <= StepRadius; ++du)
 	{
 		for (int32 dv = -StepRadius; dv <= StepRadius; ++dv)
@@ -48,6 +49,13 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 			}
 
 			const FVector SamplePoint = HitLocation + Offset;
+
+			// Szybki pre-check współrzędnej w pamięci: pomijamy zduplikowane próbki bez odpalania raycastów
+			const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
+			if (ProcessedCoords.Contains(FastCoord))
+			{
+				continue;
+			}
 
 			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
 			FHitResult SurfaceHit;
@@ -73,6 +81,13 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 			{
 				continue;
 			}
+
+			if (ProcessedCoords.Contains(Coord))
+			{
+				continue;
+			}
+			ProcessedCoords.Add(Coord);
+			ProcessedCoords.Add(FastCoord);
 
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
 
@@ -127,6 +142,14 @@ void SurfaceGridProjectionUtils::ProjectStatusInArea(
 
 			const FVector SamplePoint = HitLocation + Offset;
 
+			// Szybki pre-check współrzędnej w pamięci: jeśli komórka została już zbadana w Step 1 (z ActiveCells)
+			// lub przez nachodzący na siebie promień wybuchu, pomijamy ją BEZ ODPALANIA JAKICHKOLWIEK RAYCASTÓW!
+			const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
+			if (InOutProcessedCoords.Contains(FastCoord))
+			{
+				continue;
+			}
+
 			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
 			FHitResult SurfaceHit;
 			if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, Normal, SurfaceHit, TraceParams))
@@ -155,6 +178,7 @@ void SurfaceGridProjectionUtils::ProjectStatusInArea(
 				continue;
 			}
 			InOutProcessedCoords.Add(Coord);
+			InOutProcessedCoords.Add(FastCoord);
 
 			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
 

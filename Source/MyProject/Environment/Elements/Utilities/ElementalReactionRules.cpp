@@ -165,17 +165,19 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 
 			// Reakcja: Prąd trafia w Mokry cel (Conductive Shock)
 			// bSyncWithCarrierDuration = true: prąd elektryzuje całą kałużę i trwa tak długo jak woda!
+			// bCanSpreadToNeighbor = false: prąd rozchodzi się po nośniku błyskawiczną siecią (bInstantConductionNetwork), nie powolnym automatem krokowym
 			Electrified.Reactions.Add(EStatusEffectType::Wet, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ false,
 				/* bRemoveExistingStatus   */ false,
 				/* ReactionTag             */ ElementalReactionTags::ConductiveShock(),
 				/* ResultingStatus         */ EStatusEffectType::None,
-				/* bCanSpreadToNeighbor    */ true,
+				/* bCanSpreadToNeighbor    */ false,
 				/* ResultingDuration       */ 4.0f,
 				/* bSyncWithCarrierDuration */ true
 			});
 
 			// Reakcja: Prąd trafia w Naoliwiony cel (Iskra elektryczna zapala olej)
+			// bCanSpreadToNeighbor = true: iskra przeskakuje na sąsiadującą komórkę oleju i wywołuje na niej zapłon (tworzy Burning)
 			Electrified.Reactions.Add(EStatusEffectType::Oiled, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
 				/* bRemoveExistingStatus   */ false,

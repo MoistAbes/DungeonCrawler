@@ -123,7 +123,8 @@ public:
 		const FVector& BurstOrigin,
 		TSet<FSurfaceCellCoord>& ProcessedCoords,
 		AActor* Instigator = nullptr,
-		uint8 Tier = 0);
+		uint8 Tier = 0,
+		int32* OutNewlyCreatedCount = nullptr);
 
 	/**
 	 * Nakłada status na powierzchnię pojedynczego dynamicznego aktora w jego przestrzeni lokalnej.
@@ -189,6 +190,24 @@ public:
 		AActor* Instigator = nullptr,
 		uint8 Tier = 0);
 
+	/**
+	 * Ciągła emisja statusu ze stref wolumetrycznych (AVolumetricStatusZone) na istniejące komórki powierzchniowe.
+	 * 
+	 * W przeciwieństwie do ApplyElementalBurst:
+	 * - NIE wykonuje ciężkiego skanowania otaczających powierzchni (ScanBurstSurfaces / 26 raycastów).
+	 * - Ewaluuje wyłącznie komórki, które już fizycznie istnieją w zasięgu sfery i mają Line of Sight.
+	 * 
+	 * @return Liczba zmodyfikowanych lub odświeżonych komórek.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	int32 ApplyContinuousZoneToCells(
+		const FVector& Origin,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration = 5.0f,
+		AActor* Instigator = nullptr,
+		uint8 Tier = 0);
+
 	/** Zdarzenie wywoływane przy zmianie stanu komórki (podstawa dla systemów VFX/SFX) */
 	UPROPERTY(BlueprintAssignable, Category = "Custom|Events")
 	FOnSurfaceCellChanged OnSurfaceCellChanged;
@@ -243,4 +262,7 @@ private:
 
 	/** Uchwyt timera serwerowego */
 	FTimerHandle GridTickTimerHandle;
+
+	/** Flaga wskazująca, czy sieć uległa zmianie (dodanie/usunięcie komórki) i wymaga przeliczenia przewodnictwa */
+	bool bConductionNetworkDirty = true;
 };
