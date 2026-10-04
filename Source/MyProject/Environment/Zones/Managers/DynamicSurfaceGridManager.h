@@ -37,6 +37,38 @@ public:
 	/** Zwraca sztywną transformację komponentu sceny (translacja + rotacja, skala 1.0) */
 	static FTransform GetDynamicRigidTransform(const USceneComponent* Comp);
 
+	/** Konwertuje współrzędne i normalną świata na lokalną komórkę FSurfaceCellCoord komponentu */
+	static FSurfaceCellCoord WorldToLocalCoord(
+		const USceneComponent* Comp,
+		const FVector& WorldLocation,
+		const FVector& WorldNormal,
+		float SafeCellSize);
+
+	/** Konwertuje światową komórkę FSurfaceCellCoord na lokalną komórkę FSurfaceCellCoord komponentu */
+	FORCEINLINE static FSurfaceCellCoord WorldToLocalCoord(
+		const USceneComponent* Comp,
+		const FSurfaceCellCoord& WorldCoord,
+		float SafeCellSize)
+	{
+		return WorldToLocalCoord(
+			Comp,
+			WorldCoord.ToWorldLocation(SafeCellSize),
+			SurfaceGridUtils::FaceDirectionToNormal(WorldCoord.Face),
+			SafeCellSize);
+	}
+
+	/** Konwertuje lokalną komórkę FSurfaceCellCoord na środek woksela w przestrzeni świata */
+	static FVector LocalToWorldLocation(
+		const USceneComponent* Comp,
+		const FSurfaceCellCoord& LocalCoord,
+		float SafeCellSize);
+
+	/** Konwertuje lokalną komórkę FSurfaceCellCoord na punkt styku powierzchni w przestrzeni świata */
+	static FVector LocalToWorldSurfaceContact(
+		const USceneComponent* Comp,
+		const FSurfaceCellCoord& LocalCoord,
+		float SafeCellSize);
+
 	/**
 	 * Nakłada status na powierzchnię pojedynczego dynamicznego aktora w jego przestrzeni lokalnej.
 	 * @return Liczba zmodyfikowanych komórek.

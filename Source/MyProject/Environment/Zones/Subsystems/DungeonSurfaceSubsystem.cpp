@@ -254,13 +254,7 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 		USceneComponent* TransformComp = GetDynamicActorTransformComponent(ResolvedSurfaceActor);
 		if (TransformComp)
 		{
-			const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
-			const FVector WorldCellPos = Coord.ToWorldLocation(SafeCellSize);
-			const FVector LocalPos = RigidTransform.InverseTransformPosition(WorldCellPos);
-			const FVector WorldNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
-			const FVector LocalNorm = RigidTransform.InverseTransformVector(WorldNormal);
-			const FSurfaceCellCoord LocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalPos, LocalNorm, SafeCellSize);
-
+			const FSurfaceCellCoord LocalCoord = FDynamicSurfaceGridManager::WorldToLocalCoord(TransformComp, Coord, SafeCellSize);
 			return ApplyStatusToDynamicCell(ResolvedSurfaceActor, TransformComp, LocalCoord, IncomingStatus, Duration, Instigator, SurfaceMat, Tier);
 		}
 	}

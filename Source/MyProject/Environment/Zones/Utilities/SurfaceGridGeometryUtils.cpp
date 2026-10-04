@@ -490,10 +490,10 @@ namespace SurfaceGridGeometryUtils
 
 			// Pobieramy wszystkich potencjalnych kandydatów wokseli na krawędzi narożnika 90°
 			TArray<FSurfaceCellCoord, TInlineAllocator<4>> CornerVariants;
-			SourceCoord.GetCornerCandidateCoords(Path.Corner.Face, CornerVariants);
+			SourceCoord.GetCornerCandidateCoords(Path.CornerFace, CornerVariants);
 			if (CornerVariants.IsEmpty())
 			{
-				CornerVariants.Add(Path.Corner);
+				CornerVariants.Add(FSurfaceCellCoord(SourceCoord.X, SourceCoord.Y, SourceCoord.Z, Path.CornerFace));
 			}
 
 			// Jeśli płaszczyzna kontynuuje się w linii prostej na wprost (bCoplanarHit == true),
@@ -501,7 +501,7 @@ namespace SurfaceGridGeometryUtils
 			// CHYBA ŻE w siatce ActiveCells istnieje już aktywna komórka na którymkolwiek wariancie narożnika.
 			// Nie dotyczy to poziomych krawędzi stropu (Down) i posadzki (Up), gdzie narożnik 90° istnieje naturalnie.
 			const bool bIsWallToWall = (SourceCoord.Face != ESurfaceFaceDirection::Up && SourceCoord.Face != ESurfaceFaceDirection::Down)
-									&& (Path.Corner.Face != ESurfaceFaceDirection::Up && Path.Corner.Face != ESurfaceFaceDirection::Down);
+									&& (Path.CornerFace != ESurfaceFaceDirection::Up && Path.CornerFace != ESurfaceFaceDirection::Down);
 
 			if (bCoplanarHit && bIsWallToWall)
 			{

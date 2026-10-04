@@ -76,9 +76,8 @@ classDiagram
 
     class UDungeonSurfaceSubsystem {
         <<WorldSubsystem Facade>>
-        -TUniquePtr~FStaticSurfaceGridManager~ StaticGridManager
-        -TUniquePtr~FDynamicSurfaceGridManager~ DynamicGridManager
-        -TArray~TWeakObjectPtr~AStatusZoneBase~~ RegisteredStatusZones
+        -FStaticSurfaceGridManager StaticGridManager
+        -FDynamicSurfaceGridManager DynamicGridManager
         -TArray~TWeakObjectPtr~UStatusEffectComponent~~ RegisteredStatusComponents
         #float CellSize
         #float SubsystemTickInterval
@@ -87,9 +86,8 @@ classDiagram
         +ApplyStatusToSurface(Location, Normal, Radius, Status, Duration, Instigator, Tier) int32
         +ApplyStatusToCell(Coord, Status, Duration, Instigator, Material, SurfaceActor, Tier) bool
         +ApplyElementalBurst(Origin, Radius, Status, Duration, Instigator, Tier) int32
+        +ApplyContinuousZoneToCells(Origin, Radius, Status, Duration, Instigator, Tier) int32
         +ClearCellsInBounds(BoundingBox) int32
-        +RegisterStatusZone(Zone)
-        +UnregisterStatusZone(Zone)
         +RegisterStatusComponent(Comp)
         +UnregisterStatusComponent(Comp)
         #ProcessGridTick()
@@ -171,9 +169,9 @@ classDiagram
 - **`UDungeonSurfaceSubsystem` (`Source/MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h`):**
   Podsystem świata (`UWorldSubsystem`) i fasada orkiestrująca działanie siatki powierzchniowej w lochu. Deleguje zadania do dedykowanych zarządców i bibliotek:
   - Przechowuje i koordynuje `FStaticSurfaceGridManager` oraz `FDynamicSurfaceGridManager`.
-  - Prowadzi rejestr stref przestrzennych `RegisteredStatusZones` i komponentów aktorów `RegisteredStatusComponents`.
+  - Prowadzi rejestr komponentów aktorów `RegisteredStatusComponents` do interakcji z podłożem, podczas gdy strefy wolumetryczne projektują swój ciągły stan autonomicznie przez `ApplyContinuousZoneToCells`.
   - Pętla serwera `ProcessGridTick` (0.25 s) wywołuje cykle zarządców, propagację (`FSurfaceGridPropagationUtils`), interakcję aktorów (`SurfaceActorInteractionUtils`) oraz agregację obrażeń (`FSurfaceGridDamageUtils`).
-  - Udostępnia publiczne, atomowe API: `ApplyStatusFromHit`, `ApplyStatusToSurface`, `ApplyStatusToCell`, `ApplyElementalBurst`, `ClearCellsInBounds`.
+  - Udostępnia publiczne, atomowe API: `ApplyStatusFromHit`, `ApplyStatusToSurface`, `ApplyStatusToCell`, `ApplyElementalBurst`, `ApplyContinuousZoneToCells`, `ClearCellsInBounds`.
 
 - **`FStaticSurfaceGridManager` (`Source/MyProject/Environment/Zones/Managers/StaticSurfaceGridManager.h`):**
   Zarządca statycznej siatki świata: rzadka mapa `ActiveCells`, cykl życia statusów (wygaszanie, DoT), spalanie paliw stałych (`ProcessSolidFuelCombustion`) oraz aplikacja komórkowa na architekturze.
@@ -428,7 +426,7 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | **Globalna Propagacja Narożna 90° (`GetCornerCandidateCoords`)** | **[ZREALIZOWANE]** | Rozwiązanie problemu asymetrii sufitu/podłogi dzięki 4-wariantowemu dopasowaniu wokseli brzegowych i kanonizacji pozycji `FromWorldLocation`. |
 | **Single Source of Truth (`CalculateElementalTransition`)** | **[ZREALIZOWANE]** | Centralizacja logiki chemicznej, wypierania płynów i czyszczenia statusów w jednej funkcji. |
 | **Rozróżnienie Receive vs Sustain (`CanMaterialSustainStatus`)** | **[ZREALIZOWANE]** | Płomień po spaleniu oleju trwa przez pełny czas spalania paliwa na posadzce; prąd zanika bez wody. |
-| **Ciągła Integracja Stref z Siatką (`RegisteredStatusZones`)** | **[ZREALIZOWANE]** | Automatyczna rejestracja stref wolumetrycznych w subsystemie; natychmiastowy zapłon plam pod chmurami oraz obsługa ruchomych stref i aur. |
+| **Ciągła Integracja Stref z Siatką (`ApplyContinuousZoneToCells`)** | **[ZREALIZOWANE]** | Autonomiczna projekcja stref wolumetrycznych na istniejące komórki w subsystemie z buforowaniem (`MinRemainingToSkip = 1.0f`); natychmiastowy zapłon plam pod chmurami oraz obsługa ruchomych stref i aur bez narzutu pełnego skanowania. |
 | **Dwukierunkowa Synchronizacja Nośników (`bSyncWithCarrierDuration`)** | **[ZREALIZOWANE]** | Spójna synchronizacja czasów paliwa i nośnika w siatce oraz aktorach (`SyncDependentStatusesWithCarrier`). |
 | **Refaktoryzacja i Eliminacja Duplikacji Logiki** | **[ZREALIZOWANE]** | Uproszczenie `ElementalReactionRules.cpp` i `StatusEffectComponent.cpp` do spójnych funkcji pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`). |
 | **Spalanie Paliw Stałych i Niszczenie Architektur (`SolidFuelCombustion`)** | **[ZREALIZOWANE]** | Stałe paliwo drewna (`bSelfSustainingFuel`), ortogonalny spread Coplanar/Corner, odparowywanie wody (`Steam_Extinguish`), niezależne Tiery statusów i agregacja DPS struktur. |

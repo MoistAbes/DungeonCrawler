@@ -127,6 +127,23 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 	TArray<FSurfaceCellCoord> NeighborCoords;
 	const float MaxContactDistSq = FMath::Square(SafeCellSize * 1.5f);
 
+	// Pomocnik do scalania rozprzestrzenienia w mapie PendingStaticSpreads
+	auto MergePendingStaticSpread = [&](const FSurfaceCellCoord& Coord, const FPendingSpreadCell& Spread)
+	{
+		if (FPendingSpreadCell* Existing = PendingStaticSpreads.Find(Coord))
+		{
+			if (Spread.NewStatus == Existing->NewStatus)
+			{
+				Existing->Duration = (Spread.Duration == 0.0f || Existing->Duration == 0.0f)
+					? 0.0f : FMath::Max(Existing->Duration, Spread.Duration);
+			}
+		}
+		else
+		{
+			PendingStaticSpreads.Add(Coord, Spread);
+		}
+	};
+
 	// Data-driven predykat: sprawdzamy czy jakikolwiek status w komórce ma skonfigurowaną regułę rozprzestrzeniania
 	auto HasSpreadingStatus = [](const FSurfaceCellData& Cell) -> bool
 	{
@@ -135,6 +152,32 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 			if (UElementalReactionRules::CanStatusSpread(Entry.Status))
 			{
 				return true;
+			}
+		}
+		return false;
+	};
+
+	// Predykat sprawdzający, czy statusy źródła mogą wejść w reakcję z którymkolwiek statusem sąsiada
+	auto CanSpreadToAnyStatus = [](const FSurfaceCellData& SrcData, const FSurfaceCellData& DstData) -> bool
+	{
+		for (const FSurfaceCellStatusEntry& SrcEntry : SrcData.ActiveStatuses)
+		{
+			if (!UElementalReactionRules::CanStatusSpread(SrcEntry.Status))
+			{
+				continue;
+			}
+
+			for (const FSurfaceCellStatusEntry& DstEntry : DstData.ActiveStatuses)
+			{
+				FElementalReactionResult SpreadReaction;
+				if (UElementalReactionRules::CanSpreadToNeighbor(SrcEntry.Status, DstEntry.Status, SpreadReaction))
+				{
+					const EStatusEffectType TargetStatus = (SpreadReaction.ResultingStatus != EStatusEffectType::None) ? SpreadReaction.ResultingStatus : SrcEntry.Status;
+					if (!DstData.HasStatus(TargetStatus))
+					{
+						return true;
+					}
+				}
 			}
 		}
 		return false;
@@ -187,36 +230,9 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 				continue;
 			}
 
-			// Sprawdzamy czy sąsiad w ActiveCells może wejść w reakcję z którymkolwiek rozprzestrzeniającym się statusem źródła
-			for (const FSurfaceCellStatusEntry& SrcEntry : SourceData.ActiveStatuses)
+			if (CanSpreadToAnyStatus(SourceData, *NeighborData))
 			{
-				if (!UElementalReactionRules::CanStatusSpread(SrcEntry.Status))
-				{
-					continue;
-				}
-
-				for (const FSurfaceCellStatusEntry& DstEntry : NeighborData->ActiveStatuses)
-				{
-					FElementalReactionResult SpreadReaction;
-					if (UElementalReactionRules::CanSpreadToNeighbor(SrcEntry.Status, DstEntry.Status, SpreadReaction))
-					{
-						const EStatusEffectType TargetStatus = (SpreadReaction.ResultingStatus != EStatusEffectType::None) ? SpreadReaction.ResultingStatus : SrcEntry.Status;
-						if (!NeighborData->HasStatus(TargetStatus))
-						{
-							bCanPotentiallySpread = true;
-							break;
-						}
-					}
-				}
-
-				if (bCanPotentiallySpread)
-				{
-					break;
-				}
-			}
-
-			if (bCanPotentiallySpread)
-			{
+				bCanPotentiallySpread = true;
 				break;
 			}
 		}
@@ -241,18 +257,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 				FPendingSpreadCell Spread;
 				if (TrySpreadBetweenCells(SourceData, Candidate.Coord, *NeighborData, Spread))
 				{
-					if (FPendingSpreadCell* Existing = PendingStaticSpreads.Find(Candidate.Coord))
-					{
-						if (Spread.NewStatus == Existing->NewStatus)
-						{
-							Existing->Duration = (Spread.Duration == 0.0f || Existing->Duration == 0.0f)
-								? 0.0f : FMath::Max(Existing->Duration, Spread.Duration);
-						}
-					}
-					else
-					{
-						PendingStaticSpreads.Add(Candidate.Coord, Spread);
-					}
+					MergePendingStaticSpread(Candidate.Coord, Spread);
 				}
 				continue;
 			}
@@ -270,17 +275,14 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 				// Broad-phase: szybkie odrzucenie odległych aktorów
 				if (!TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * 1.5f).IsInsideOrOn(NeighborWorldPos)) continue;
 
-				const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
-				const FVector LocalPos = RigidTransform.InverseTransformPosition(NeighborWorldPos);
-				const FVector LocalNorm = RigidTransform.InverseTransformVector(NeighborWorldNorm);
-				const FSurfaceCellCoord DynLocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalPos, LocalNorm, SafeCellSize);
+				const FSurfaceCellCoord DynLocalCoord = FDynamicSurfaceGridManager::WorldToLocalCoord(TransformComp, NeighborWorldPos, NeighborWorldNorm, SafeCellSize);
 
 				if (const FSurfaceCellData* DynNeighborData = DynGrid.LocalCells.Find(DynLocalCoord))
 				{
 					if (DynNeighborData->IsEmpty()) continue;
 
-					const FVector DynLocalPos = DynLocalCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(DynLocalCoord.Face) * (SafeCellSize * 0.45f);
-					if (FVector::DistSquared(SourcePos, RigidTransform.TransformPosition(DynLocalPos)) > MaxContactDistSq) continue;
+					const FVector DynWorldContact = FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(TransformComp, DynLocalCoord, SafeCellSize);
+					if (FVector::DistSquared(SourcePos, DynWorldContact) > MaxContactDistSq) continue;
 
 					FPendingSpreadCell Spread;
 					if (TrySpreadBetweenCells(SourceData, DynLocalCoord, *DynNeighborData, Spread))
@@ -345,8 +347,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 			}
 
 			// B. Rozprzestrzenianie na sąsiadujące podłoże statyczne świata
-			const FVector LocalContact = LocalSourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(LocalSourceCoord.Face) * (SafeCellSize * 0.45f);
-			const FVector WorldContact = RigidTransform.TransformPosition(LocalContact);
+			const FVector WorldContact = FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(TransformComp, LocalSourceCoord, SafeCellSize);
 			const FVector WorldNorm = RigidTransform.TransformVector(SurfaceGridUtils::FaceDirectionToNormal(LocalSourceCoord.Face)).GetSafeNormal();
 
 			const FSurfaceCellCoord StaticWorldCoord = FSurfaceCellCoord::FromWorldLocation(WorldContact, WorldNorm, SafeCellSize);
@@ -366,18 +367,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 					FPendingSpreadCell Spread;
 					if (TrySpreadBetweenCells(LocalSourceData, StaticNeighborCoord, *StaticNeighborData, Spread))
 					{
-						if (FPendingSpreadCell* Existing = PendingStaticSpreads.Find(StaticNeighborCoord))
-						{
-							if (Spread.NewStatus == Existing->NewStatus)
-							{
-								Existing->Duration = (Spread.Duration == 0.0f || Existing->Duration == 0.0f)
-									? 0.0f : FMath::Max(Existing->Duration, Spread.Duration);
-							}
-						}
-						else
-						{
-							PendingStaticSpreads.Add(StaticNeighborCoord, Spread);
-						}
+						MergePendingStaticSpread(StaticNeighborCoord, Spread);
 					}
 				}
 			}
@@ -666,6 +656,74 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 		return false;
 	};
 
+	auto TryEnqueueDynamicConduction = [&](AActor* DynActor, USceneComponent* TransformComp, const FSurfaceCellCoord& LocalCoord, const FConductionItem& SourceItem, float RemDuration) -> bool
+	{
+		if (!DynActor || !TransformComp)
+		{
+			return false;
+		}
+
+		// GLOBALNA ZASADA DYNAMIKI: Obiekt ruchomy przyjmuje przewodzenie ze świata WYŁĄCZNIE na komórki
+		// już aktywne w swojej siatce lokalnej (LocalCells). Nigdy nie tworzy nowych komórek w próżni!
+		const FDynamicActorSurfaceGrid* DynGrid = DynamicGrids.Find(DynActor);
+		if (!DynGrid)
+		{
+			return false;
+		}
+
+		const FSurfaceCellData* LocalData = DynGrid->LocalCells.Find(LocalCoord);
+		if (!LocalData || LocalData->IsEmpty())
+		{
+			return false;
+		}
+
+		const EPhysicalMaterialType DynMat = LocalData->SurfaceMaterial;
+		const TArray<EStatusEffectType> DynStatuses = LocalData->GetStatusTypes();
+
+		if (!UElementalReactionRules::CanMaterialReceiveStatus(DynMat, SourceItem.Status, DynStatuses))
+		{
+			return false;
+		}
+
+		const TPair<TWeakObjectPtr<AActor>, FSurfaceCellCoord> DynKey(DynActor, LocalCoord);
+		if (ShouldSkipVisitedDynamic(DynKey, SourceItem.ServerEndTime))
+		{
+			return false;
+		}
+		if (ShouldSkipExistingDynamic(DynActor, LocalCoord, SourceItem.Status, SourceItem.ServerEndTime))
+		{
+			return false;
+		}
+
+		DynamicVisitedEndTime.Add(DynKey, SourceItem.ServerEndTime);
+		PendingDynConductions.Add({ DynActor, TransformComp, LocalCoord, SourceItem.Status, RemDuration, SourceItem.Instigator, DynMat, SourceItem.Tier });
+		Queue.Add({ true, LocalCoord, DynActor, TransformComp, SourceItem.Status, SourceItem.ServerEndTime, SourceItem.Tier, SourceItem.Instigator });
+		return true;
+	};
+
+	auto TryEnqueueStaticConduction = [&](const FSurfaceCellCoord& Coord, EPhysicalMaterialType Mat, AActor* SurfaceActor, const TArray<EStatusEffectType>& ActiveStatuses, const FConductionItem& SourceItem, float RemDuration) -> bool
+	{
+		if (!UElementalReactionRules::CanMaterialReceiveStatus(Mat, SourceItem.Status, ActiveStatuses))
+		{
+			return false;
+		}
+
+		if (ShouldSkipVisitedStatic(Coord, SourceItem.ServerEndTime))
+		{
+			return false;
+		}
+
+		if (ShouldSkipExistingStatic(Coord, SourceItem.Status, SourceItem.ServerEndTime))
+		{
+			return false;
+		}
+
+		StaticVisitedEndTime.Add(Coord, SourceItem.ServerEndTime);
+		PendingStaticConductions.Add(Coord, { Coord, SourceItem.Status, RemDuration, SourceItem.Instigator, Mat, SurfaceActor, SourceItem.Tier });
+		Queue.Add({ false, Coord, nullptr, nullptr, SourceItem.Status, SourceItem.ServerEndTime, SourceItem.Tier, SourceItem.Instigator });
+		return true;
+	};
+
 	const float MaxContactDistSq = FMath::Square(SafeCellSize * 1.5f);
 	TArray<FSurfaceCellCoord> NeighborCoords;
 	int32 HeadIndex = 0;
@@ -697,74 +755,15 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 				if (bIsNeighborDynamic)
 				{
 					USceneComponent* TransformComp = FDynamicSurfaceGridManager::GetDynamicActorTransformComponent(NeighborSurfaceActor);
-					if (!TransformComp)
+					if (TransformComp)
 					{
-						return;
+						const FSurfaceCellCoord DynLocalCoord = FDynamicSurfaceGridManager::WorldToLocalCoord(TransformComp, NeighborCoord, SafeCellSize);
+						TryEnqueueDynamicConduction(NeighborSurfaceActor, TransformComp, DynLocalCoord, CurrentItem, RemainingDuration);
 					}
-
-					const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
-					const FVector WorldCellPos = NeighborCoord.ToWorldLocation(SafeCellSize);
-					const FVector LocalPos = RigidTransform.InverseTransformPosition(WorldCellPos);
-					const FVector WorldNormal = SurfaceGridUtils::FaceDirectionToNormal(NeighborCoord.Face);
-					const FVector LocalNorm = RigidTransform.InverseTransformVector(WorldNormal).GetSafeNormal();
-					const FSurfaceCellCoord DynLocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalPos, LocalNorm, SafeCellSize);
-
-					// GLOBALNA ZASADA DYNAMIKI: Obiekt ruchomy przyjmuje przewodzenie ze świata WYŁĄCZNIE na komórki
-					// już aktywne w swojej siatce lokalnej (LocalCells). Nigdy nie tworzy nowych komórek w próżni!
-					const FDynamicActorSurfaceGrid* DynGrid = DynamicGrids.Find(NeighborSurfaceActor);
-					if (!DynGrid)
-					{
-						return;
-					}
-
-					const FSurfaceCellData* LocalData = DynGrid->LocalCells.Find(DynLocalCoord);
-					if (!LocalData || LocalData->IsEmpty())
-					{
-						return;
-					}
-
-					const EPhysicalMaterialType DynMat = LocalData->SurfaceMaterial;
-					const TArray<EStatusEffectType> DynStatuses = LocalData->GetStatusTypes();
-
-					if (!UElementalReactionRules::CanMaterialReceiveStatus(DynMat, CurrentItem.Status, DynStatuses))
-					{
-						return;
-					}
-
-					const TPair<TWeakObjectPtr<AActor>, FSurfaceCellCoord> DynKey(NeighborSurfaceActor, DynLocalCoord);
-					if (ShouldSkipVisitedDynamic(DynKey, CurrentItem.ServerEndTime))
-					{
-						return;
-					}
-					if (ShouldSkipExistingDynamic(NeighborSurfaceActor, DynLocalCoord, CurrentItem.Status, CurrentItem.ServerEndTime))
-					{
-						return;
-					}
-
-					DynamicVisitedEndTime.Add(DynKey, CurrentItem.ServerEndTime);
-					PendingDynConductions.Add({ NeighborSurfaceActor, TransformComp, DynLocalCoord, CurrentItem.Status, RemainingDuration, CurrentItem.Instigator, DynMat, CurrentItem.Tier });
-					Queue.Add({ true, DynLocalCoord, NeighborSurfaceActor, TransformComp, CurrentItem.Status, CurrentItem.ServerEndTime, CurrentItem.Tier, CurrentItem.Instigator });
 				}
 				else
 				{
-					if (!UElementalReactionRules::CanMaterialReceiveStatus(NeighborMat, CurrentItem.Status, NeighborActiveStatuses))
-					{
-						return;
-					}
-
-					if (ShouldSkipVisitedStatic(NeighborCoord, CurrentItem.ServerEndTime))
-					{
-						return;
-					}
-
-					if (ShouldSkipExistingStatic(NeighborCoord, CurrentItem.Status, CurrentItem.ServerEndTime))
-					{
-						return;
-					}
-
-					StaticVisitedEndTime.Add(NeighborCoord, CurrentItem.ServerEndTime);
-					PendingStaticConductions.Add(NeighborCoord, { NeighborCoord, CurrentItem.Status, RemainingDuration, CurrentItem.Instigator, NeighborMat, NeighborSurfaceActor, CurrentItem.Tier });
-					Queue.Add({ false, NeighborCoord, nullptr, nullptr, CurrentItem.Status, CurrentItem.ServerEndTime, CurrentItem.Tier, CurrentItem.Instigator });
+					TryEnqueueStaticConduction(NeighborCoord, NeighborMat, NeighborSurfaceActor, NeighborActiveStatuses, CurrentItem, RemainingDuration);
 				}
 			};
 
@@ -779,7 +778,6 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 
 			// B. Sąsiedzi dynamiczni zarejestrowani w DynamicGrids (np. brama dotykająca posadzki/wody)
 			const FVector NeighborWorldPos = SourceCoord.ToWorldLocation(SafeCellSize);
-			const FVector NeighborWorldNorm = SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face);
 
 			for (const auto& GridPair : DynamicGrids)
 			{
@@ -789,46 +787,14 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 
 				if (!TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * 1.5f).IsInsideOrOn(NeighborWorldPos)) continue;
 
-				const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
-				const FVector LocalPos = RigidTransform.InverseTransformPosition(NeighborWorldPos);
-				const FVector LocalNorm = RigidTransform.InverseTransformVector(NeighborWorldNorm).GetSafeNormal();
-				const FSurfaceCellCoord DynLocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalPos, LocalNorm, SafeCellSize);
-
-				// GLOBALNA ZASADA DYNAMIKI: Obiekt ruchomy przyjmuje przewodzenie ze świata WYŁĄCZNIE na komórki
-				// już aktywne w swojej siatce lokalnej (LocalCells). Nigdy nie tworzy nowych komórek w próżni!
-				const FSurfaceCellData* ExistingDynData = GridPair.Value.LocalCells.Find(DynLocalCoord);
-				if (!ExistingDynData || ExistingDynData->IsEmpty())
+				const FSurfaceCellCoord DynLocalCoord = FDynamicSurfaceGridManager::WorldToLocalCoord(TransformComp, SourceCoord, SafeCellSize);
+				const FVector DynWorldContactPos = FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(TransformComp, DynLocalCoord, SafeCellSize);
+				if (FVector::DistSquared(SourcePos, DynWorldContactPos) > MaxContactDistSq)
 				{
 					continue;
 				}
 
-				const EPhysicalMaterialType DynMat = ExistingDynData->SurfaceMaterial;
-				const TArray<EStatusEffectType> DynActiveStatuses = ExistingDynData->GetStatusTypes();
-
-				if (!UElementalReactionRules::CanMaterialReceiveStatus(DynMat, CurrentItem.Status, DynActiveStatuses))
-				{
-					continue;
-				}
-
-				const FVector DynLocalPos = DynLocalCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(DynLocalCoord.Face) * (SafeCellSize * 0.45f);
-				if (FVector::DistSquared(SourcePos, RigidTransform.TransformPosition(DynLocalPos)) > MaxContactDistSq)
-				{
-					continue;
-				}
-
-				const TPair<TWeakObjectPtr<AActor>, FSurfaceCellCoord> DynKey(DynActor, DynLocalCoord);
-				if (ShouldSkipVisitedDynamic(DynKey, CurrentItem.ServerEndTime))
-				{
-					continue;
-				}
-				if (ShouldSkipExistingDynamic(DynActor, DynLocalCoord, CurrentItem.Status, CurrentItem.ServerEndTime))
-				{
-					continue;
-				}
-
-				DynamicVisitedEndTime.Add(DynKey, CurrentItem.ServerEndTime);
-				PendingDynConductions.Add({ DynActor, TransformComp, DynLocalCoord, CurrentItem.Status, RemainingDuration, CurrentItem.Instigator, DynMat, CurrentItem.Tier });
-				Queue.Add({ true, DynLocalCoord, DynActor, TransformComp, CurrentItem.Status, CurrentItem.ServerEndTime, CurrentItem.Tier, CurrentItem.Instigator });
+				TryEnqueueDynamicConduction(DynActor, TransformComp, DynLocalCoord, CurrentItem, RemainingDuration);
 			}
 		}
 		else
@@ -838,14 +804,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 			USceneComponent* TransformComp = CurrentItem.TransformComp.Get();
 			if (!DynActor || !TransformComp) continue;
 
-			const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
-			const FVector LocalPos = CurrentItem.Coord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(CurrentItem.Coord.Face) * (SafeCellSize * 0.45f);
-			const FVector WorldContactPos = RigidTransform.TransformPosition(LocalPos);
-			const FVector WorldContactNorm = RigidTransform.TransformVector(SurfaceGridUtils::FaceDirectionToNormal(CurrentItem.Coord.Face)).GetSafeNormal();
-
 			// A. Rozchodzenie się po komórkach lokalnych tego samego mesha (np. cała brama)
-			// GLOBALNA ZASADA DYNAMIKI: Przewodzenie po meshu może przeskakiwać WYŁĄCZNIE na komórki
-			// już istniejące w siatce lokalnej (np. wcześniej zwilżone cieczą). Nigdy nie tworzy nowych komórek w próżni!
 			const FDynamicActorSurfaceGrid* DynGridPtr = DynamicGrids.Find(DynActor);
 			if (DynGridPtr)
 			{
@@ -858,39 +817,17 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 						continue;
 					}
 
-					const FSurfaceCellData* ExistingLocalData = DynGridPtr->LocalCells.Find(LocalNeighborCoord);
-					if (!ExistingLocalData || ExistingLocalData->IsEmpty())
-					{
-						continue;
-					}
-
-					const EPhysicalMaterialType DynMat = ExistingLocalData->SurfaceMaterial;
-					const TArray<EStatusEffectType> DynLocalStatuses = ExistingLocalData->GetStatusTypes();
-
-					if (!UElementalReactionRules::CanMaterialReceiveStatus(DynMat, CurrentItem.Status, DynLocalStatuses))
-					{
-						continue;
-					}
-
-					const TPair<TWeakObjectPtr<AActor>, FSurfaceCellCoord> DynKey(DynActor, LocalNeighborCoord);
-					if (ShouldSkipVisitedDynamic(DynKey, CurrentItem.ServerEndTime))
-					{
-						continue;
-					}
-					if (ShouldSkipExistingDynamic(DynActor, LocalNeighborCoord, CurrentItem.Status, CurrentItem.ServerEndTime))
-					{
-						continue;
-					}
-
-					DynamicVisitedEndTime.Add(DynKey, CurrentItem.ServerEndTime);
-					PendingDynConductions.Add({ DynActor, TransformComp, LocalNeighborCoord, CurrentItem.Status, RemainingDuration, CurrentItem.Instigator, DynMat, CurrentItem.Tier });
-					Queue.Add({ true, LocalNeighborCoord, DynActor, TransformComp, CurrentItem.Status, CurrentItem.ServerEndTime, CurrentItem.Tier, CurrentItem.Instigator });
+					TryEnqueueDynamicConduction(DynActor, TransformComp, LocalNeighborCoord, CurrentItem, RemainingDuration);
 				}
 			}
 
 			// B. Dynamiczny obiekt dotykający architektury w świecie w punkcie kontaktu.
 			// GLOBALNA ZASADA DYNAMIKI: Obiekt ruchomy wchodzi w interakcję WYŁĄCZNIE z istniejącymi już aktywnymi komórkami w świecie (ActiveCells).
 			// Nigdy nie tworzy nowych komórek statycznych z powietrza / raycastów podczas ruchu!
+			const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
+			const FVector WorldContactPos = FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(TransformComp, CurrentItem.Coord, SafeCellSize);
+			const FVector WorldContactNorm = RigidTransform.TransformVector(SurfaceGridUtils::FaceDirectionToNormal(CurrentItem.Coord.Face)).GetSafeNormal();
+
 			const FSurfaceCellCoord StaticWorldCoord = FSurfaceCellCoord::FromWorldLocation(WorldContactPos, WorldContactNorm, SafeCellSize);
 			const FVector StaticNeighborPos = StaticWorldCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(StaticWorldCoord.Face) * (SafeCellSize * 0.45f);
 
@@ -903,19 +840,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 						AActor* NeighborSurfaceActor = ExistingStaticData->SurfaceActor.Get();
 						if (NeighborSurfaceActor != DynActor && !SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(NeighborSurfaceActor))
 						{
-							const EPhysicalMaterialType NeighborMat = ExistingStaticData->SurfaceMaterial;
-							const TArray<EStatusEffectType> NeighborActiveStatuses = ExistingStaticData->GetStatusTypes();
-
-							if (UElementalReactionRules::CanMaterialReceiveStatus(NeighborMat, CurrentItem.Status, NeighborActiveStatuses))
-							{
-								if (!ShouldSkipVisitedStatic(StaticWorldCoord, CurrentItem.ServerEndTime) &&
-									!ShouldSkipExistingStatic(StaticWorldCoord, CurrentItem.Status, CurrentItem.ServerEndTime))
-								{
-									StaticVisitedEndTime.Add(StaticWorldCoord, CurrentItem.ServerEndTime);
-									PendingStaticConductions.Add(StaticWorldCoord, { StaticWorldCoord, CurrentItem.Status, RemainingDuration, CurrentItem.Instigator, NeighborMat, NeighborSurfaceActor, CurrentItem.Tier });
-									Queue.Add({ false, StaticWorldCoord, nullptr, nullptr, CurrentItem.Status, CurrentItem.ServerEndTime, CurrentItem.Tier, CurrentItem.Instigator });
-								}
-							}
+							TryEnqueueStaticConduction(StaticWorldCoord, ExistingStaticData->SurfaceMaterial, NeighborSurfaceActor, ExistingStaticData->GetStatusTypes(), CurrentItem, RemainingDuration);
 						}
 					}
 				}

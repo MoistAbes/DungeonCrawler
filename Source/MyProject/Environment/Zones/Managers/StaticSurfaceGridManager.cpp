@@ -63,7 +63,19 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 	AActor* ResolvedSurfaceActor = SurfaceActor;
 	FVector ResolvedLocation = SurfaceLocation;
 
-	if (!Existing)
+	if (Existing)
+	{
+		SurfaceMat = Existing->SurfaceMaterial;
+		if (!ResolvedSurfaceActor)
+		{
+			ResolvedSurfaceActor = Existing->SurfaceActor.Get();
+		}
+		if (ResolvedLocation.IsNearlyZero())
+		{
+			ResolvedLocation = Existing->SurfaceLocation;
+		}
+	}
+	else
 	{
 		// Weryfikacja minimalnego pokrycia: jeśli przekazany aktor ma <50% pokrycia komórki (zasada większości),
 		// reprobujemy w centrum, aby sprawdzić właściwego aktora pod spodem (np. kamień zamiast metalu).
@@ -78,11 +90,8 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 			AActor* ProbedActor = nullptr;
 			FVector ProbedLocation = FVector::ZeroVector;
 			EPhysicalMaterialType ProbedMat = EPhysicalMaterialType::Stone;
-			if (!GetSurfaceMaterialAtCoord(World, SafeCellSize, Coord, ProbedMat, ProbedActor, ProbedLocation))
-			{
-				return false;
-			}
-			if (ProbedActor && !SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(ProbedActor, Coord, SafeCellSize))
+			if (!GetSurfaceMaterialAtCoord(World, SafeCellSize, Coord, ProbedMat, ProbedActor, ProbedLocation) ||
+				(ProbedActor && !SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(ProbedActor, Coord, SafeCellSize)))
 			{
 				return false;
 			}
@@ -94,27 +103,12 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 		{
 			ResolvedLocation = SurfaceGridUtils::GetFaceCenter(Coord, SafeCellSize);
 		}
-	}
-	else
-	{
-		SurfaceMat = Existing->SurfaceMaterial;
-		if (!ResolvedSurfaceActor)
+
+		// Dynamic Surface Safety Guard: komórki na ruchomych obiektach (np. bramach) NIE MOGĄ trafić do siatki statycznej!
+		if (SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(ResolvedSurfaceActor))
 		{
-			ResolvedSurfaceActor = Existing->SurfaceActor.Get();
+			return false;
 		}
-		if (ResolvedLocation.IsNearlyZero())
-		{
-			ResolvedLocation = Existing->SurfaceLocation;
-		}
-	}
-	// Dynamic Surface Safety Guard: komórki na ruchomych obiektach (np. bramach) NIE MOGĄ trafić do siatki statycznej!
-	if (SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(ResolvedSurfaceActor))
-	{
-		if (Existing)
-		{
-			ActiveCells.Remove(Coord);
-		}
-		return false;
 	}
 
 	return USurfaceCellTransitionUtils::ApplyStatusToCellInMap(

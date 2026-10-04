@@ -34,6 +34,37 @@ FTransform FDynamicSurfaceGridManager::GetDynamicRigidTransform(const USceneComp
 	return FTransform(Comp->GetComponentRotation(), Comp->GetComponentLocation(), FVector::OneVector);
 }
 
+FSurfaceCellCoord FDynamicSurfaceGridManager::WorldToLocalCoord(
+	const USceneComponent* Comp,
+	const FVector& WorldLocation,
+	const FVector& WorldNormal,
+	float SafeCellSize)
+{
+	const FTransform RigidTransform = GetDynamicRigidTransform(Comp);
+	const FVector LocalPos = RigidTransform.InverseTransformPosition(WorldLocation);
+	const FVector LocalNorm = RigidTransform.InverseTransformVector(WorldNormal).GetSafeNormal();
+	return FSurfaceCellCoord::FromWorldLocation(LocalPos, LocalNorm, SafeCellSize);
+}
+
+FVector FDynamicSurfaceGridManager::LocalToWorldLocation(
+	const USceneComponent* Comp,
+	const FSurfaceCellCoord& LocalCoord,
+	float SafeCellSize)
+{
+	const FTransform RigidTransform = GetDynamicRigidTransform(Comp);
+	return RigidTransform.TransformPosition(LocalCoord.ToWorldLocation(SafeCellSize));
+}
+
+FVector FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(
+	const USceneComponent* Comp,
+	const FSurfaceCellCoord& LocalCoord,
+	float SafeCellSize)
+{
+	const FTransform RigidTransform = GetDynamicRigidTransform(Comp);
+	const FVector LocalContact = LocalCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face) * (SafeCellSize * 0.45f);
+	return RigidTransform.TransformPosition(LocalContact);
+}
+
 int32 FDynamicSurfaceGridManager::ApplyStatusToDynamicSurface(
 	AActor* DynamicActor,
 	USceneComponent* TransformComp,
