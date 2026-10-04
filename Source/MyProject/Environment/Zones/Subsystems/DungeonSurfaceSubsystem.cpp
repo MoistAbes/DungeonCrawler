@@ -519,9 +519,9 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 	const float CurrentTime = World->GetTimeSeconds();
 	const float RadiusSq = FMath::Square(Radius);
 
-	// Bezpieczny próg bufora wyprzedzenia: jeśli komórka już posiada ten status i ma bezpieczny zapas czasu (> 1.5s),
+	// Bezpieczny próg bufora wyprzedzenia: jeśli komórka już posiada ten status i ma bezpieczny zapas czasu (> 1.0s),
 	// to w tym ticku strefa ją ignoruje (zero trace'ów LoS, zero zapytań fizyki, zero broadcastów eventów, zero BFS).
-	const float MinRemainingToSkip = FMath::Max(1.5f, Duration * 0.4f);
+	const float MinRemainingToSkip = 1.0f;
 
 	FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(ZoneContinuousCellLoS), false, Instigator);
 	if (Instigator)
@@ -535,6 +535,7 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
 		TWeakObjectPtr<AActor> SurfaceActor = nullptr;
 		FVector SurfaceLocation = FVector::ZeroVector;
+		bool bWasAlreadyPresent = false;
 	};
 	TArray<FPendingZoneStaticCell> PendingCells;
 
@@ -555,7 +556,7 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 			continue;
 		}
 
-		// KROK A: Jeśli komórka ma już ten status i nie wygasa w najbliższym czasie, pomijamy!
+		// KROK A: Jeśli komórka ma już ten status i nie wygasa w najbliższym czasie (> 1.0s), pomijamy!
 		const FSurfaceCellStatusEntry* ExistingEntry = Data.FindStatus(Status);
 		if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip))
 		{
@@ -571,8 +572,10 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 			continue;
 		}
 
-		PendingCells.Add({ Coord, Data.SurfaceMaterial, Data.SurfaceActor.Get(), Data.SurfaceLocation });
+		PendingCells.Add({ Coord, Data.SurfaceMaterial, Data.SurfaceActor.Get(), Data.SurfaceLocation, (ExistingEntry != nullptr) });
 	}
+
+	int32 NewlyAddedCount = 0;
 
 	// KROK 2: Aplikacja statusu po lokalnym TArray (bezpieczne przed reallokacją TMapy)
 	for (const FPendingZoneStaticCell& Pending : PendingCells)
@@ -580,12 +583,17 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 		if (ApplyStatusToCell(Pending.Coord, Status, Duration, Instigator, Pending.Material, Pending.SurfaceActor.Get(), Tier, Pending.SurfaceLocation))
 		{
 			AffectedCount++;
+			if (!Pending.bWasAlreadyPresent)
+			{
+				NewlyAddedCount++;
+			}
 		}
 	}
 
 	// 2. Bezpośrednia ewaluacja istniejących komórek dynamicznych w sferze strefy
 	if (DynamicGridManager.GetGrids().Num() > 0)
 	{
+		int32 DynNewlyAdded = 0;
 		AffectedCount += DynamicGridManager.ApplyElementalBurst(
 			World,
 			Origin,
@@ -599,12 +607,19 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 			[this](const FSurfaceCellCoord& CellCoord, EStatusEffectType NewStatus, AActor* InInstigator)
 			{
 				OnSurfaceCellChanged.Broadcast(CellCoord, NewStatus, InInstigator);
-			});
+			},
+			&DynNewlyAdded);
+
+		NewlyAddedCount += DynNewlyAdded;
 	}
 
-	if (AffectedCount > 0)
+	// Propagacja sieci przewodzenia jest wymagana wyłącznie dla statusów natychmiastowo przewodzących (np. prąd)
+	// i TYLKO wtedy, gdy do sieci dołączyła NOWA komórka (NewlyAddedCount > 0). Jeśli strefa jedynie podtrzymuje
+	// czas w istniejących komórkach bez zmiany topologii sieci, BFS jest w 100% pomijany!
+	const bool bIsCarrierOnly = UElementalReactionRules::IsLiquidStatus(Status) && !UElementalReactionRules::IsInstantConduction(Status);
+	if (NewlyAddedCount > 0 && !bIsCarrierOnly)
 	{
-		PropagateConductionIfApplicable(Status, AffectedCount);
+		PropagateConductionIfApplicable(Status, NewlyAddedCount);
 	}
 
 	return AffectedCount;
@@ -883,5 +898,20 @@ void UDungeonSurfaceSubsystem::DrawDebugVisuals() const
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	StaticGridManager.DrawDebug(GetWorld(), SafeCellSize);
 	DynamicGridManager.DrawDebug(GetWorld(), SafeCellSize);
+
+	if (GEngine)
+	{
+		int32 TotalDynamicCells = 0;
+		for (const auto& Pair : DynamicGridManager.GetGrids())
+		{
+			TotalDynamicCells += Pair.Value.LocalCells.Num();
+		}
+		const int32 TotalStatic = StaticGridManager.GetActiveCells().Num();
+		const int32 TotalDynObjects = DynamicGridManager.GetGrids().Num();
+
+		GEngine->AddOnScreenDebugMessage(84920, 0.35f, FColor::Yellow,
+			FString::Printf(TEXT("[SURFACE GRID] Static Cells: %d | Dynamic Objects: %d (Dynamic Cells: %d)"),
+				TotalStatic, TotalDynObjects, TotalDynamicCells));
+	}
 #endif
 }

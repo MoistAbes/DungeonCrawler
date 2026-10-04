@@ -64,7 +64,9 @@ void SurfaceActorInteractionUtils::ApplyActorEffectsToFloor(
 					--StatusIdx;
 				}
 
-				const float FallbackDuration = UElementalReactionRules::GetEffectConfig(TargetStatus).GetBaseDuration();
+				const float ActorRemaining = StatusComp->GetRemainingDuration(ActorStatus);
+				const float ConfigBaseDuration = UElementalReactionRules::GetEffectConfig(TargetStatus).GetBaseDuration();
+				const float FallbackDuration = (ActorRemaining > 0.0f) ? ActorRemaining : ConfigBaseDuration;
 				const float ReactionDuration = (Reaction.ResultingDuration > 0.0f ? Reaction.ResultingDuration : FallbackDuration);
 				ApplyStatusToCell(CellCoord, TargetStatus, ReactionDuration, Actor);
 
@@ -90,16 +92,21 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 	struct FFloorStatusCandidate
 	{
 		uint8 Tier = 0;
+		float MaxRemainingDuration = 0.0f;
+		bool bPermanent = false;
 		TWeakObjectPtr<AActor> Instigator = nullptr;
 	};
 
 	TMap<EStatusEffectType, FFloorStatusCandidate> StatusCandidates;
 	EStatusEffectType DominantLiquid = EStatusEffectType::None;
 	uint8 DominantLiquidTier = 0;
+	float DominantLiquidRemaining = 0.0f;
+	bool bDominantLiquidPermanent = false;
 	TWeakObjectPtr<AActor> DominantLiquidInstigator = nullptr;
 	float MinLiquidDistSq = TNumericLimits<float>::Max();
 	const FVector ActorLocation = Actor->GetActorLocation();
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
+	const float CurrentTime = Actor->GetWorld() ? Actor->GetWorld()->GetTimeSeconds() : 0.0f;
 
 	for (const FSurfaceCellCoord& CellCoord : TouchedCells)
 	{
@@ -113,6 +120,13 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 
 		for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)
 		{
+			const bool bEntryPerm = Entry.IsPermanent();
+			const float EntryRemaining = bEntryPerm ? 0.0f : Entry.GetRemainingDuration(CurrentTime);
+			if (!bEntryPerm && EntryRemaining <= 0.05f)
+			{
+				continue;
+			}
+
 			// Geometryczne rozstrzygnięcie: Na styku wielu komórek postać przyjmuje płyn z najbliższej komórki
 			if (UElementalReactionRules::IsLiquidStatus(Entry.Status))
 			{
@@ -122,6 +136,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 					DominantLiquid = Entry.Status;
 					DominantLiquidTier = Entry.Tier;
 					DominantLiquidInstigator = Entry.Instigator;
+					DominantLiquidRemaining = EntryRemaining;
+					bDominantLiquidPermanent = bEntryPerm;
 				}
 			}
 			else
@@ -131,6 +147,14 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 				{
 					Candidate.Tier = Entry.Tier;
 					Candidate.Instigator = Entry.Instigator;
+				}
+				if (bEntryPerm)
+				{
+					Candidate.bPermanent = true;
+				}
+				else
+				{
+					Candidate.MaxRemainingDuration = FMath::Max(Candidate.MaxRemainingDuration, EntryRemaining);
 				}
 			}
 		}
@@ -142,6 +166,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 		FFloorStatusCandidate& LiquidCandidate = StatusCandidates.FindOrAdd(DominantLiquid);
 		LiquidCandidate.Tier = DominantLiquidTier;
 		LiquidCandidate.Instigator = DominantLiquidInstigator;
+		LiquidCandidate.bPermanent = bDominantLiquidPermanent;
+		LiquidCandidate.MaxRemainingDuration = DominantLiquidRemaining;
 	}
 
 	if (StatusCandidates.IsEmpty())
@@ -161,7 +187,17 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 	{
 		if (const FFloorStatusCandidate* Candidate = StatusCandidates.Find(StatusToApply))
 		{
-			StatusComp->ApplyStatus(StatusToApply, Candidate->Tier, -1.0f, Candidate->Instigator.Get());
+			const float ActorCurrentRemaining = StatusComp->GetRemainingDuration(StatusToApply);
+
+			// Zasada zachowania energii: Jeśli postać już posiada ten status i ma więcej czasu niż źródło pod stopami,
+			// nie odświeżamy sztucznie czasu do pełnego maksimum (zapobiega to wiecznym pętlom odświeżania).
+			if (ActorCurrentRemaining > 0.0f && !Candidate->bPermanent && ActorCurrentRemaining >= Candidate->MaxRemainingDuration - 0.05f)
+			{
+				continue;
+			}
+
+			const float DurationToApply = Candidate->bPermanent ? -1.0f : Candidate->MaxRemainingDuration;
+			StatusComp->ApplyStatus(StatusToApply, Candidate->Tier, DurationToApply, Candidate->Instigator.Get());
 
 			if (!IsValid(Actor) || Actor->IsActorBeingDestroyed())
 			{

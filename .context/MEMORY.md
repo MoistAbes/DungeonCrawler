@@ -84,11 +84,11 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
-\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid orchestrator for elemental propagation on walls/floors, coordinating static and dynamic grids via dedicated managers (`FStaticSurfaceGridManager`, `FDynamicSurfaceGridManager`), propagation pipelines (`FSurfaceGridPropagationUtils`), damage aggregation (`FSurfaceGridDamageUtils`), and spatial utilities.
+\* `UDungeonSurfaceSubsystem` — 3D sparse surface cell grid orchestrator for elemental propagation on walls/floors, coordinating static and dynamic grids via dedicated managers (`FStaticSurfaceGridManager`, `FDynamicSurfaceGridManager`), propagation pipelines (`FSurfaceGridPropagationUtils`), damage aggregation (`FSurfaceGridDamageUtils`), and spatial utilities. Employs continuous zone refresh buffering (`MinRemainingToSkip = 1.0f`) and conditional conduction BFS dirtying (`NewlyAddedCount > 0`) to prevent redundant tick workload.
 
-\* `FStaticSurfaceGridManager` & `FDynamicSurfaceGridManager` — decoupled management of static world surface cells and localized dynamic grids on movable actors (e.g. gates, doors, mechanisms) using rigid transforms.
+\* `FStaticSurfaceGridManager` & `FDynamicSurfaceGridManager` — decoupled management of static world surface cells and localized dynamic grids on movable actors (e.g. gates, doors, mechanisms) using rigid transforms. Dynamic cell counts are strictly bounded to physical object voxels.
 
-\* `FSurfaceGridPropagationUtils` — elemental cellular-automata spread, electrical conduction networks, and contact synchronization between static surfaces and dynamic actors.
+\* `FSurfaceGridPropagationUtils` — elemental cellular-automata spread, electrical conduction networks, and contact synchronization between static surfaces and dynamic actors. Enforces the Dynamic Conduction Invariant: conduction across movable actors propagates strictly along already active/existing cells, never creating cells out of thin air.
 
 \* `FSurfaceGridDamageUtils` — environmental structural damage aggregation and DoT delivery to `UDamageableComponent`.
 
@@ -100,7 +100,7 @@ The following systems already exist and should be reused or extended when applic
 
 \* `USurfaceCellTransitionUtils` — cell-level transition resolver (`CalculateCellTransition`), applying reaction rules to `FSurfaceCellData` and managing burning visual states.
 
-\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, and propagation.
+\* `UElementalReactionRules` — centralized Single Source of Truth (`CalculateElementalTransition`) for elemental reactions, material traits (`CanMaterialReceiveStatus` vs `CanMaterialSustainStatus`), liquid mutual exclusivity, independent status tiers (`GetDamagePerSecond(Tier)`), dynamic carrier/fuel duration syncing, directional floor transfer constraints (e.g. `Electrified.bCanTransferFromActorToFloor = false`), and propagation.
 
 * **Level Design & Unreal MCP Map Editing** — The map (`Map_Dungeon_01.umap`) is 100% editable programmatically via Unreal MCP. Do not scan C++ engine headers for level tools. Always use the project CLI bridge: `& "E:\UE_5.8\Engine\Binaries\ThirdParty\Python3\Win64\python.exe" Tools/MCP/unreal_mcp.py status` (and `run-script`, `save-level`). Full instructions and templates are in [`Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md`](file:///E:/UE_PROJECTS/MyProject/Docs/UNREAL_MCP_MAP_EDITING_GUIDE.md).
 

@@ -69,7 +69,8 @@ public:
 		uint8 Tier,
 		float SafeCellSize,
 		float CurrentTime,
-		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+		int32* OutNewlyAddedCount = nullptr);
 
 	/**
 	 * Nakłada status na komórkę w lokalnej siatce dynamicznego aktora.

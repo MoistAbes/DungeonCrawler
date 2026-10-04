@@ -261,6 +261,31 @@ Zarządzanie aplikacją statusów w siatce lochu jest ściśle rozdzielone na de
      - **Weryfikacja Przeszkód 3D:** Sprawdza całą trasę promienia. Pomija płaskie muśnięcia tej samej płyty podłogowej (`PlaneDist < 8 cm`, `Dot > 0.7`), ale bezwzględnie blokuje wybuch przy napotkaniu ścian, filarów i rekwizytów.
      - Przekazuje referencję `TSet<FSurfaceCellCoord>& ProcessedCoords`, zabezpieczając przed wielokrotnym nakładaniem statusu na tę samą komórkę w jednym wybuchu.
 
+### 3.5. Niezmienniki Siatek Dynamicznych i Propagacji Przewodzenia
+
+W celu zagwarantowania stabilności wydajnościowej oraz wyeliminowania duplikacji komórek na ruchomych obiektach (np. `BP_DungeonGate_Portcullis`) wprowadzono ścisłe reguły:
+
+1. **Niezmiennik Braku Alokacji w Siatce Dynamicznej (Dynamic Conduction Invariant):**
+   - Propagacja przewodzenia elektrycznego (`PropagateConductionNetworks`) na obiektach ruchomych **nie może tworzyć nowych komórek w pustej przestrzeni**.
+   - Prąd (`Electrified`) może rozprzestrzenić się na woksel w siatce dynamicznej (`FDynamicActorSurfaceGrid`) **wyłącznie wtedy**, gdy dana komórka została już wcześniej zainicjalizowana i jest aktywna na geometrii obiektu (np. pokryta wodą `Wet`).
+   - Dwukierunkowa bariera styku:
+     - Statyczna $\rightarrow$ Dynamiczna: promień przewodzenia aktywuje wyłącznie istniejące komórki lokalne (`LocalCells.Find(LocalCoord)`).
+     - Dynamiczna $\rightarrow$ Statyczna: kontakt dynamiczny nie tworzy komórek statycznych znikąd w ścianach/posadzkach, lecz łączy się tylko z istniejącymi komórkami świata (`ActiveCells.Find(WorldCoord)`).
+   - Rezultat: liczba komórek na ruchomym obiekcie jest sztywno ograniczona do jego fizycznej geometrii (np. dokładnie 42 komórki dla kraty bramy).
+
+2. **Bufor Pomijania Ciągłego Odświeżania (Continuous Zone Skip Buffer):**
+   - W `ApplyContinuousZoneToCells`: komórki (zarówno statyczne, jak i dynamiczne), których pozostały czas trwania przekracza próg `MinRemainingToSkip = 1.0f`, są całkowicie pomijane.
+   - Zapobiega to ciągłemu resetowaniu czasów i generowaniu fałszywych zdarzeń modyfikacji co 0.25 s dla stabilnych stref.
+
+3. **Warunkowe Uruchamianie BFS Przewodzenia (Selective Conduction BFS):**
+   - W `ApplyElementalBurst` wprowadzono licznik `NewlyAddedCount`.
+   - Procedura `PropagateConductionIfApplicable` w pętli strefy ciągłej jest wywoływana **wyłącznie wtedy, gdy `NewlyAddedCount > 0`** (do sieci przewodzenia faktycznie dołączyła nowa komórka).
+   - Dopóki strefa podtrzymuje jedynie istniejące kałuże, kosztowny algorytm BFS śpi, redukując obciążenie Game Thread.
+
+4. **Jednokierunkowy Transfer Prądu Aktor $\rightarrow$ Podłoże:**
+   - W regułach żywiołowych (`ElementalReactionRules.cpp`) ustawiono `Electrified.bCanTransferFromActorToFloor = false`.
+   - Prąd na aktorze (np. debuff obrażeń) nie przekazuje się z powrotem na posadzkę, co eliminuje nieskończoną pętlę wzajemnego ładowania się podłogi i postaci.
+
 ---
 
 ## 4. Zunifikowana Karta Efektu (`FZoneEffectConfig`)
@@ -387,6 +412,11 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
    - Flaga `bCheckOverlappingZones = false` w podrzędnych wywołaniach `ApplyStatusToCell` gwarantuje maksymalną głębokość stosu równą 1 przy natychmiastowych reakcjach cieczy ze strefami.
    - W pętli `ProcessGridTick` modyfikowane koordynaty są buforowane w lokalnej tablicy `CellsToAffect` przed aplikacją, co zapobiega modyfikacji kontenera w trakcie iteracji.
 
+5. **Optymalizacja Ciągłego Odświeżania i BFS Przewodzenia:**
+   - Zastosowanie `MinRemainingToSkip = 1.0f` eliminuje zbędną pracę przy kafelkach posiadających już aktywny status ze znacznym zapasem czasu trwania.
+   - Algorytm BFS `PropagateConductionIfApplicable` jest odpalany ściśle warunkowo (`NewlyAddedCount > 0`), co odciąża Game Thread podczas stabilnego stanu strefy.
+   - Niezmiennik `Dynamic Conduction Invariant` zapobiega wyciekowi i duplikacji komórek dynamicznych poza obrys siatki mesha.
+
 ---
 
 ## 7. Roadmapa Rozwoju
@@ -402,6 +432,11 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | **Dwukierunkowa Synchronizacja Nośników (`bSyncWithCarrierDuration`)** | **[ZREALIZOWANE]** | Spójna synchronizacja czasów paliwa i nośnika w siatce oraz aktorach (`SyncDependentStatusesWithCarrier`). |
 | **Refaktoryzacja i Eliminacja Duplikacji Logiki** | **[ZREALIZOWANE]** | Uproszczenie `ElementalReactionRules.cpp` i `StatusEffectComponent.cpp` do spójnych funkcji pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`). |
 | **Spalanie Paliw Stałych i Niszczenie Architektur (`SolidFuelCombustion`)** | **[ZREALIZOWANE]** | Stałe paliwo drewna (`bSelfSustainingFuel`), ortogonalny spread Coplanar/Corner, odparowywanie wody (`Steam_Extinguish`), niezależne Tiery statusów i agregacja DPS struktur. |
+| **Stabilizacja Siatek Dynamicznych i Buforowanie Stref Ciągłych** | **[ZREALIZOWANE]** | Dynamic Conduction Invariant (brak tworzenia komórek poza fizyczną siatką aktora), `MinRemainingToSkip = 1.0f`, selektywny BFS przewodzenia (`NewlyAddedCount > 0`) oraz `Electrified.bCanTransferFromActorToFloor = false`. |
+| **Broad-Phase Culling dla Interakcji Aktorów (`ProcessActorInteractions`)** | Planowane | Odrzucanie siatek dynamicznych, których Bounding Box aktora nie przecina testowanego aktora/gracza przed iteracją po lokalnych komórkach. |
+| **Component Caching w Obrażeniach Struktur (`ProcessSurfaceStructuralDamage`)** | Planowane | Buforowanie wskaźnika `UDamageableComponent` per zarejestrowany aktor architektury / mechanizmu zamiast każdorazowego przeszukiwania komponentów. |
+| **Dynamic Grid Rigid Transform Caching** | Planowane | Pamięć podręczna transformacji sztywnej `GetDynamicRigidTransform()` unieważniana wyłącznie przy rzeczywistej zmianie transformacji komponentu. |
+| **Timer Phase Staggering i Sub-Stepping** | Planowane | Mikro-przesunięcie fazy ewaluacji stref wolumetrycznych i komórek w czasie, eliminujące skoki obciążenia w pojedynczych klatkach serwera co 0.25 s. |
+| **Wydajnościowy Batching Wizualizacji Debugowej** | Planowane | Zastąpienie periodycznych wywołań `DrawDebugBox` buforowanym rysowaniem w jednym batchu lub dedykowanym komponentem ISM / Niagara przy testach profilowania. |
 | **Event-Driven Overlap dla Stref Wolumetrycznych** | Planowane | Zastąpienie periodycznego `GetOverlappingActors` lokalnym zbiorem aktorów w oparciu o delegaty Begin/EndOverlap. |
-| **Timer Phase Staggering** | Planowane | Losowe mikro-przesunięcie fazy pierwszego ticka strefy eliminujące skoki obciążenia w pojedynczych klatkach serwera. |
 | **LoS Caching dla Promieni Wybuchu** | Planowane | Pamięć podręczna widoczności celów odświeżana tylko przy przemieszczeniu celu o więcej niż 30 cm. |

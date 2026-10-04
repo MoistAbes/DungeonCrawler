@@ -113,7 +113,8 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 	uint8 Tier,
 	float SafeCellSize,
 	float CurrentTime,
-	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+	int32* OutNewlyAddedCount)
 {
 	if (!World || Status == EStatusEffectType::None || Duration < 0.0f)
 	{
@@ -126,10 +127,12 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 		TWeakObjectPtr<USceneComponent> TransformComp;
 		FSurfaceCellCoord LocalCoord;
 		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
+		bool bWasAlreadyPresent = false;
 	};
 	TArray<FPendingDynBurstCell> PendingDynBurstCells;
 
 	const float RadiusSq = FMath::Square(Radius);
+	const float MinRemainingToSkip = 1.0f;
 
 	for (const auto& GridPair : DynamicSurfaceGrids)
 	{
@@ -153,9 +156,9 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 				continue;
 			}
 
-			// KROK A: Jeśli komórka dynamiczna ma już ten status i nie wygasa w najbliższym czasie, pomijamy!
+			// KROK A: Jeśli komórka dynamiczna ma już ten status i nie wygasa w najbliższym czasie (> 1.0s), pomijamy!
 			const FSurfaceCellStatusEntry* ExistingEntry = CellPair.Value.FindStatus(Status);
-			if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > FMath::Max(1.5f, Duration * 0.4f)))
+			if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip))
 			{
 				continue;
 			}
@@ -166,12 +169,13 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 			const bool bBlocked = World->LineTraceSingleByChannel(LoSHit, Origin, WorldCenter, ECC_Visibility, LoSParams);
 			if (!bBlocked || LoSHit.GetActor() == DynActor)
 			{
-				PendingDynBurstCells.Add({ DynActor, TransformComp, LocalCoord, CellPair.Value.SurfaceMaterial });
+				PendingDynBurstCells.Add({ DynActor, TransformComp, LocalCoord, CellPair.Value.SurfaceMaterial, (ExistingEntry != nullptr) });
 			}
 		}
 	}
 
 	int32 AffectedCount = 0;
+	int32 NewlyAdded = 0;
 	for (const FPendingDynBurstCell& PendingCell : PendingDynBurstCells)
 	{
 		if (PendingCell.DynActor.IsValid() && PendingCell.TransformComp.IsValid())
@@ -179,8 +183,17 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 			if (ApplyStatusToDynamicCell(PendingCell.DynActor.Get(), PendingCell.TransformComp.Get(), PendingCell.LocalCoord, Status, Duration, Instigator, PendingCell.Material, Tier, SafeCellSize, CurrentTime, OnCellChanged))
 			{
 				AffectedCount++;
+				if (!PendingCell.bWasAlreadyPresent)
+				{
+					NewlyAdded++;
+				}
 			}
 		}
+	}
+
+	if (OutNewlyAddedCount)
+	{
+		*OutNewlyAddedCount = NewlyAdded;
 	}
 
 	return AffectedCount;
@@ -452,7 +465,10 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 
 			const FColor Color = USurfaceCellTransitionUtils::GetCellDebugColor(Data);
 
-			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent, CompRot, Color, false, DebugLifeTime, 0, 0.0f);
+			// Komórki dynamiczne rysujemy z podwójnym sześcianem (concentric box) oraz pogrubioną linią,
+			// aby natychmiast odróżnić je wizualnie od komórek statycznych architektury lochu.
+			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent, CompRot, Color, false, DebugLifeTime, 0, 1.2f);
+			DrawDebugBox(World, WorldVisualCenter, LocalHalfExtent * 0.6f, CompRot, Color, false, DebugLifeTime, 0, 0.0f);
 		}
 	}
 #endif
