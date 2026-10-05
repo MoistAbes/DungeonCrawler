@@ -175,6 +175,13 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 			continue;
 		}
 
+		// Broad-phase: wczesne odrzucenie siatek dynamicznych leżących całkowicie poza sferą wybuchu/strefy
+		const float DistSqToComp = TransformComp->Bounds.GetBox().ComputeSquaredDistanceToPoint(Origin);
+		if (DistSqToComp > RadiusSq)
+		{
+			continue;
+		}
+
 		const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
 		for (const auto& CellPair : DynGrid.LocalCells)
 		{
@@ -197,8 +204,8 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 				}
 			}
 
-			// KROK B: Odrzucenie komórek dynamicznych, które fizycznie nie mogą przyjąć tego statusu
-			if (!UElementalReactionRules::CanMaterialReceiveStatus(CellPair.Value.SurfaceMaterial, Status, CellPair.Value.GetStatusTypes()))
+			// KROK B: Odrzucenie komórek dynamicznych, które fizycznie nie mogą przyjąć tego statusu ani nie wejdą w reakcję żywiołową
+			if (!UElementalReactionRules::CanApplyStatusToTarget(CellPair.Value.SurfaceMaterial, Status, CellPair.Value.GetStatusTypes()))
 			{
 				continue;
 			}

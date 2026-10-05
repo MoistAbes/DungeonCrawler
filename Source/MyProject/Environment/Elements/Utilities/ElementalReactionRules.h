@@ -42,6 +42,19 @@ public:
 		const TArray<EStatusEffectType>& ActiveStatuses);
 
 	/**
+	 * Sprawdza, czy przychodzący status może wpłynąć na cel (komórkę lub aktora).
+	 * Zwraca true jeśli:
+	 * 1) Cel może fizycznie przyjąć i utrzymać ten status (CanMaterialReceiveStatus), LUB
+	 * 2) Przychodzący status wywołuje reakcję chemiczną z którymkolwiek obecnym statusem celu
+	 *    (np. iskra elektryczna zapala olej -> Burning, ogień paruje wodę -> Steam).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Custom|Elemental")
+	static bool CanApplyStatusToTarget(
+		EPhysicalMaterialType Material,
+		EStatusEffectType IncomingStatus,
+		const TArray<EStatusEffectType>& ActiveStatuses);
+
+	/**
 	 * Dokonuje ewaluacji reakcji chemicznej na podstawie listy obecnych statusów celu
 	 * oraz przychodzącego nowego żywiołu.
 	 */

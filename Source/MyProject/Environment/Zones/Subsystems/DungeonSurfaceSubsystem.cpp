@@ -578,9 +578,9 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 			}
 		}
 
-		// KROK B: Odrzucenie komórek, które fizycznie nie mogą przyjąć tego statusu (np. prąd na suchym kamieniu)
-		// Zapobiega marnowaniu raycastów LoS na komórki niekompatybilne materiałowo
-		if (!UElementalReactionRules::CanMaterialReceiveStatus(Data.SurfaceMaterial, Status, Data.GetStatusTypes()))
+		// KROK B: Odrzucenie komórek, które fizycznie nie mogą przyjąć tego statusu ani nie wejdą w reakcję żywiołową
+		// Zapobiega marnowaniu raycastów LoS na komórki niekompatybilne materiałowo (np. prąd na suchym kamieniu bez nośnika i bez reakcji)
+		if (!UElementalReactionRules::CanApplyStatusToTarget(Data.SurfaceMaterial, Status, Data.GetStatusTypes()))
 		{
 			continue;
 		}

@@ -288,6 +288,37 @@ bool UElementalReactionRules::CanMaterialReceiveStatus(
 	return true;
 }
 
+bool UElementalReactionRules::CanApplyStatusToTarget(
+	EPhysicalMaterialType Material,
+	EStatusEffectType IncomingStatus,
+	const TArray<EStatusEffectType>& ActiveStatuses)
+{
+	if (IncomingStatus == EStatusEffectType::None)
+	{
+		return false;
+	}
+
+	// 1. Bezpośrednia kompatybilność materiałowa: cel może przyjąć i utrzymać ten status (np. woda na kamień, prąd na wodę/metal)
+	if (CanMaterialReceiveStatus(Material, IncomingStatus, ActiveStatuses))
+	{
+		return true;
+	}
+
+	// 2. Reakcja chemiczna / żywiołowa: materiał bazowy nie podtrzymuje przychodzącego żywiołu,
+	// ale wchodzi on w natychmiastową reakcję z obecną powłoką (np. iskra elektryczna na olej -> zapłon Burning,
+	// ogień na wodę -> parowanie Steam).
+	if (!ActiveStatuses.IsEmpty())
+	{
+		const FElementalReactionResult Reaction = EvaluateReaction(IncomingStatus, ActiveStatuses);
+		if (Reaction.bReactionOccurred)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 FElementalReactionResult UElementalReactionRules::EvaluateReaction(
 	EStatusEffectType IncomingStatus,
 	const TArray<EStatusEffectType>& ActiveStatuses)
@@ -676,7 +707,15 @@ FElementalTransitionPlan UElementalReactionRules::CalculateElementalTransition(
 				const float ReqDur = (Reaction.ResultingDuration > 0.0f) ? Reaction.ResultingDuration : GetEffectConfig(Reaction.ResultingStatus).GetBaseDuration(IncomingTier);
 				const float FinalDuration = ComputeDuration(Reaction.ResultingStatus, ReqDur, Reaction.bSyncWithCarrierDuration);
 				const bool bPerm = IsPermanentStatus(TargetMaterial, Reaction.ResultingStatus);
-				WorkingEntries.Add({ Reaction.ResultingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
+				if (FWorkingStatusEntry* ExistingResult = FindWorkingEntry(Reaction.ResultingStatus))
+				{
+					ExistingResult->Duration = FMath::Max(ExistingResult->Duration, FinalDuration);
+					ExistingResult->Tier = FMath::Max(ExistingResult->Tier, IncomingTier);
+				}
+				else
+				{
+					WorkingEntries.Add({ Reaction.ResultingStatus, IncomingTier, FinalDuration, bPerm, Reaction.bSyncWithCarrierDuration, false });
+				}
 			}
 		}
 	}
