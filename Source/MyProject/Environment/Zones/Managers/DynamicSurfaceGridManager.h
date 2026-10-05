@@ -18,6 +18,9 @@ struct FDynamicActorSurfaceGrid
 	TWeakObjectPtr<AActor> OwnerActor = nullptr;
 	TWeakObjectPtr<USceneComponent> TransformComponent = nullptr;
 
+	/** Ostatnia zapamiętana transformacja sztywna w świecie (używana do detekcji ruchu aktora i dirtying sieci) */
+	FTransform LastTransform = FTransform::Identity;
+
 	/** Rzadka mapa komórek w lokalnej przestrzeni współrzędnych komponentu */
 	TMap<FSurfaceCellCoord, FSurfaceCellData> LocalCells;
 };
@@ -140,7 +143,9 @@ public:
 
 	/** Dostęp do siatek */
 	const TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetGrids() const { return DynamicSurfaceGrids; }
-	TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetGridsMutable() { return DynamicSurfaceGrids; }
+
+	/** Sprawdza, czy którykolwiek z zarejestrowanych aktorów dynamicznych uległ przemieszczeniu od ostatniego sprawdzenia */
+	bool CheckIfAnyGridMoved();
 
 	/** Rysowanie debugowe */
 	void DrawDebug(const UWorld* World, float SafeCellSize) const;

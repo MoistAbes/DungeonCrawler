@@ -136,12 +136,13 @@ int32 FStaticSurfaceGridManager::ClearCellsInBounds(
 	}
 
 	int32 RemovedCount = 0;
+	const FBox ExpandedBox = BoundingBox.ExpandBy(SafeCellSize * 0.5f);
 	for (auto It = ActiveCells.CreateIterator(); It; ++It)
 	{
 		const FSurfaceCellCoord& Coord = It.Key();
 		const FVector CellWorldCenter = Coord.ToWorldLocation(SafeCellSize);
 
-		if (BoundingBox.IsInsideOrOn(CellWorldCenter))
+		if (ExpandedBox.IsInsideOrOn(CellWorldCenter))
 		{
 			OnCellChanged(Coord, EStatusEffectType::None, nullptr);
 			It.RemoveCurrent();

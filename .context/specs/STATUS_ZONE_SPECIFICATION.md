@@ -280,9 +280,11 @@ W celu zagwarantowania stabilności wydajnościowej oraz wyeliminowania duplikac
    - Procedura `PropagateConductionIfApplicable` w pętli strefy ciągłej jest wywoływana **wyłącznie wtedy, gdy `NewlyAddedCount > 0`** (do sieci przewodzenia faktycznie dołączyła nowa komórka).
    - Dopóki strefa podtrzymuje jedynie istniejące kałuże, kosztowny algorytm BFS śpi, redukując obciążenie Game Thread.
 
-4. **Jednokierunkowy Transfer Prądu Aktor $\rightarrow$ Podłoże:**
-   - W regułach żywiołowych (`ElementalReactionRules.cpp`) ustawiono `Electrified.bCanTransferFromActorToFloor = false`.
-   - Prąd na aktorze (np. debuff obrażeń) nie przekazuje się z powrotem na posadzkę, co eliminuje nieskończoną pętlę wzajemnego ładowania się podłogi i postaci.
+4. **Bezpieczny Transfer Prądu Aktor $\rightarrow$ Podłoże (`Electrified.bCanTransferFromActorToFloor = true`):**
+   - Prąd na aktorze przekazuje się na posadzkę, jeśli komórka podłoża zawiera reaktywny nośnik (np. `Wet` - Conductive Shock, lub `Oiled` - zapłon iskry).
+   - Ochrona przed nieskończoną pętlą wzajemnego ładowania:
+     - W kierunku Aktor $\rightarrow$ Podłoże: `SurfaceActorInteractionUtils` weryfikuje `if (CellData->HasStatus(TargetStatus)) continue;` (brak sztucznego resetowania czasu istniejącego statusu w komórce).
+     - W kierunku Podłoże $\rightarrow$ Aktor: `ApplyFloorEffectsToActor` weryfikuje `if (ActorCurrentRemaining >= Candidate->MaxRemainingDuration - 0.05f) continue;` (brak sztucznego podbijania czasu trwania na aktorze).
 
 ---
 
@@ -430,7 +432,7 @@ Układ zaprojektowano pod kątem stabilnych 60 FPS w sesjach kooperacyjnych (1�
 | **Dwukierunkowa Synchronizacja Nośników (`bSyncWithCarrierDuration`)** | **[ZREALIZOWANE]** | Spójna synchronizacja czasów paliwa i nośnika w siatce oraz aktorach (`SyncDependentStatusesWithCarrier`). |
 | **Refaktoryzacja i Eliminacja Duplikacji Logiki** | **[ZREALIZOWANE]** | Uproszczenie `ElementalReactionRules.cpp` i `StatusEffectComponent.cpp` do spójnych funkcji pomocniczych (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`). |
 | **Spalanie Paliw Stałych i Niszczenie Architektur (`SolidFuelCombustion`)** | **[ZREALIZOWANE]** | Stałe paliwo drewna (`bSelfSustainingFuel`), ortogonalny spread Coplanar/Corner, odparowywanie wody (`Steam_Extinguish`), niezależne Tiery statusów i agregacja DPS struktur. |
-| **Stabilizacja Siatek Dynamicznych i Buforowanie Stref Ciągłych** | **[ZREALIZOWANE]** | Dynamic Conduction Invariant (brak tworzenia komórek poza fizyczną siatką aktora), `MinRemainingToSkip = 1.0f`, selektywny BFS przewodzenia (`NewlyAddedCount > 0`) oraz `Electrified.bCanTransferFromActorToFloor = false`. |
+| **Stabilizacja Siatek Dynamicznych i Buforowanie Stref Ciągłych** | **[ZREALIZOWANE]** | Dynamic Conduction Invariant (brak tworzenia komórek poza fizyczną siatką aktora), `MinRemainingToSkip = 1.0f`, selektywny BFS przewodzenia (`NewlyAddedCount > 0`) oraz bezpieczny transfer prądu `Electrified.bCanTransferFromActorToFloor = true`. |
 | **Broad-Phase Culling dla Interakcji Aktorów (`ProcessActorInteractions`)** | Planowane | Odrzucanie siatek dynamicznych, których Bounding Box aktora nie przecina testowanego aktora/gracza przed iteracją po lokalnych komórkach. |
 | **Component Caching w Obrażeniach Struktur (`ProcessSurfaceStructuralDamage`)** | Planowane | Buforowanie wskaźnika `UDamageableComponent` per zarejestrowany aktor architektury / mechanizmu zamiast każdorazowego przeszukiwania komponentów. |
 | **Dynamic Grid Rigid Transform Caching** | Planowane | Pamięć podręczna transformacji sztywnej `GetDynamicRigidTransform()` unieważniana wyłącznie przy rzeczywistej zmianie transformacji komponentu. |

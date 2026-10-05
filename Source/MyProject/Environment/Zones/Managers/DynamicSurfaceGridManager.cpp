@@ -187,9 +187,18 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 				continue;
 			}
 
-			// KROK A: Jeśli komórka dynamiczna ma już ten status i nie wygasa w najbliższym czasie (> 1.0s), pomijamy!
+			// KROK A: Jeśli komórka dynamiczna ma już ten status w co najmniej tym samym Tierze i ma wystarczający zapas czasu (> 1.0s), pomijamy!
 			const FSurfaceCellStatusEntry* ExistingEntry = CellPair.Value.FindStatus(Status);
-			if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip))
+			if (ExistingEntry && ExistingEntry->Tier >= Tier)
+			{
+				if (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip)
+				{
+					continue;
+				}
+			}
+
+			// KROK B: Odrzucenie komórek dynamicznych, które fizycznie nie mogą przyjąć tego statusu
+			if (!UElementalReactionRules::CanMaterialReceiveStatus(CellPair.Value.SurfaceMaterial, Status, CellPair.Value.GetStatusTypes()))
 			{
 				continue;
 			}
@@ -251,6 +260,10 @@ bool FDynamicSurfaceGridManager::ApplyStatusToDynamicCell(
 	FDynamicActorSurfaceGrid& Grid = DynamicSurfaceGrids.FindOrAdd(DynamicActor);
 	Grid.OwnerActor = DynamicActor;
 	Grid.TransformComponent = TransformComp;
+	if (Grid.LastTransform.Equals(FTransform::Identity))
+	{
+		Grid.LastTransform = GetDynamicRigidTransform(TransformComp);
+	}
 
 	const bool bModified = USurfaceCellTransitionUtils::ApplyStatusToCellInMap(
 		Grid.LocalCells,
@@ -428,6 +441,27 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(
 			Grid.LocalCells,
 			SafeCellSize);
 	}
+}
+
+bool FDynamicSurfaceGridManager::CheckIfAnyGridMoved()
+{
+	bool bAnyMoved = false;
+	for (auto& Pair : DynamicSurfaceGrids)
+	{
+		const USceneComponent* Comp = Pair.Value.TransformComponent.Get();
+		if (!Comp)
+		{
+			continue;
+		}
+
+		const FTransform CurrentRigid = GetDynamicRigidTransform(Comp);
+		if (!CurrentRigid.Equals(Pair.Value.LastTransform, 0.5f))
+		{
+			Pair.Value.LastTransform = CurrentRigid;
+			bAnyMoved = true;
+		}
+	}
+	return bAnyMoved;
 }
 
 void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSize) const

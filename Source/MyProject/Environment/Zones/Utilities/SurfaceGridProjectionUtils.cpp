@@ -5,6 +5,99 @@
 #include "GameFramework/Actor.h"
 #include "CollisionQueryParams.h"
 
+namespace
+{
+	template <typename FLoSTestPredicate>
+	void ProjectStatusOnSurfaceInternal(
+		const UWorld* World,
+		const FVector& HitLocation,
+		const FVector& HitNormal,
+		float Radius,
+		float CellSize,
+		TSet<FSurfaceCellCoord>& InOutProcessedCoords,
+		const AActor* Instigator,
+		FLoSTestPredicate&& LoSTest,
+		SurfaceGridProjectionUtils::FSurfaceCellCandidateCallback OnCellCandidate)
+	{
+		if (!World || Radius <= 0.0f)
+		{
+			return;
+		}
+
+		const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(HitNormal);
+		const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
+
+		// Wyznaczamy wektory styczne do płaszczyzny ściany/podłogi
+		FVector TangentU;
+		FVector TangentV;
+		SurfaceGridGeometryUtils::GetFaceTangents(FaceDir, TangentU, TangentV);
+
+		const float SafeCellSize = FMath::Max(10.0f, CellSize);
+		const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
+		const float RadiusSq = FMath::Square(Radius);
+
+		FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceStatusValidation), false, Instigator);
+		if (Instigator)
+		{
+			TraceParams.AddIgnoredActor(Instigator);
+		}
+
+		for (int32 du = -StepRadius; du <= StepRadius; ++du)
+		{
+			for (int32 dv = -StepRadius; dv <= StepRadius; ++dv)
+			{
+				const FVector Offset = (static_cast<float>(du) * TangentU + static_cast<float>(dv) * TangentV) * SafeCellSize;
+				if (Offset.SizeSquared() > RadiusSq)
+				{
+					continue;
+				}
+
+				const FVector SamplePoint = HitLocation + Offset;
+
+				// Szybki pre-check współrzędnej w pamięci: pomijamy zduplikowane próbki bez odpalania raycastów
+				const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
+				if (InOutProcessedCoords.Contains(FastCoord))
+				{
+					continue;
+				}
+
+				// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
+				FHitResult SurfaceHit;
+				if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, Normal, SurfaceHit, TraceParams))
+				{
+					continue;
+				}
+
+				// 2. Line of Sight (2D po powierzchni lub 3D z punktu wybuchu)
+				if (!LoSTest(SamplePoint, Offset, SurfaceHit, Normal, TraceParams))
+				{
+					continue;
+				}
+
+				const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
+
+				// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
+				// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
+				if (!SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(SurfaceHit.GetActor(), Coord, SafeCellSize))
+				{
+					continue;
+				}
+
+				if (InOutProcessedCoords.Contains(Coord))
+				{
+					continue;
+				}
+				InOutProcessedCoords.Add(Coord);
+				InOutProcessedCoords.Add(FastCoord);
+
+				const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
+
+				OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor(), SurfaceHit.ImpactPoint);
+			}
+		}
+	}
+}
+
 void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 	const UWorld* World,
 	const FVector& HitLocation,
@@ -14,86 +107,24 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 	const AActor* Instigator,
 	FSurfaceCellCandidateCallback OnCellCandidate)
 {
-	if (!World || Radius <= 0.0f)
-	{
-		return;
-	}
-
-	const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(HitNormal);
-	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
-
-	// Wyznaczamy wektory styczne do płaszczyzny ściany/podłogi
-	FVector TangentU;
-	FVector TangentV;
-	SurfaceGridGeometryUtils::GetFaceTangents(FaceDir, TangentU, TangentV);
-
-	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-	const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
-	const float RadiusSq = FMath::Square(Radius);
-
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceStatusValidation), false, Instigator);
-	if (Instigator)
-	{
-		TraceParams.AddIgnoredActor(Instigator);
-	}
-
 	TSet<FSurfaceCellCoord> ProcessedCoords;
-	for (int32 du = -StepRadius; du <= StepRadius; ++du)
-	{
-		for (int32 dv = -StepRadius; dv <= StepRadius; ++dv)
+	ProjectStatusOnSurfaceInternal(
+		World,
+		HitLocation,
+		HitNormal,
+		Radius,
+		CellSize,
+		ProcessedCoords,
+		Instigator,
+		[World, &HitLocation](const FVector& SamplePoint, const FVector& Offset, const FHitResult& SurfaceHit, const FVector& Normal, const FCollisionQueryParams& TraceParams)
 		{
-			const FVector Offset = (static_cast<float>(du) * TangentU + static_cast<float>(dv) * TangentV) * SafeCellSize;
-			if (Offset.SizeSquared() > RadiusSq)
+			if (Offset.IsNearlyZero())
 			{
-				continue;
+				return true;
 			}
-
-			const FVector SamplePoint = HitLocation + Offset;
-
-			// Szybki pre-check współrzędnej w pamięci: pomijamy zduplikowane próbki bez odpalania raycastów
-			const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
-			if (ProcessedCoords.Contains(FastCoord))
-			{
-				continue;
-			}
-
-			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
-			FHitResult SurfaceHit;
-			if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, Normal, SurfaceHit, TraceParams))
-			{
-				continue;
-			}
-
-			// 2. Line of Sight po powierzchni od punktu uderzenia (PointImpact / 2D)
-			if (!Offset.IsNearlyZero())
-			{
-				if (!SurfaceGridGeometryUtils::HasSurfaceLineOfSight(World, HitLocation, SamplePoint, Normal, TraceParams))
-				{
-					continue;
-				}
-			}
-
-			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
-
-			// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
-			// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
-			if (!SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(SurfaceHit.GetActor(), Coord, SafeCellSize))
-			{
-				continue;
-			}
-
-			if (ProcessedCoords.Contains(Coord))
-			{
-				continue;
-			}
-			ProcessedCoords.Add(Coord);
-			ProcessedCoords.Add(FastCoord);
-
-			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
-
-			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor(), SurfaceHit.ImpactPoint);
-		}
-	}
+			return SurfaceGridGeometryUtils::HasSurfaceLineOfSight(World, HitLocation, SamplePoint, Normal, TraceParams);
+		},
+		OnCellCandidate);
 }
 
 void SurfaceGridProjectionUtils::ProjectStatusInArea(
@@ -107,84 +138,19 @@ void SurfaceGridProjectionUtils::ProjectStatusInArea(
 	const AActor* Instigator,
 	FSurfaceCellCandidateCallback OnCellCandidate)
 {
-	if (!World || Radius <= 0.0f)
-	{
-		return;
-	}
-
-	const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(HitNormal);
-	const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
-
-	// Wyznaczamy wektory styczne do płaszczyzny ściany/podłogi
-	FVector TangentU;
-	FVector TangentV;
-	SurfaceGridGeometryUtils::GetFaceTangents(FaceDir, TangentU, TangentV);
-
-	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-	const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
-	const float RadiusSq = FMath::Square(Radius);
-
-	FCollisionQueryParams TraceParams(SCENE_QUERY_STAT(SurfaceStatusValidation), false, Instigator);
-	if (Instigator)
-	{
-		TraceParams.AddIgnoredActor(Instigator);
-	}
-
-	for (int32 du = -StepRadius; du <= StepRadius; ++du)
-	{
-		for (int32 dv = -StepRadius; dv <= StepRadius; ++dv)
+	ProjectStatusOnSurfaceInternal(
+		World,
+		HitLocation,
+		HitNormal,
+		Radius,
+		CellSize,
+		InOutProcessedCoords,
+		Instigator,
+		[World, &BurstOrigin](const FVector& SamplePoint, const FVector& Offset, const FHitResult& SurfaceHit, const FVector& Normal, const FCollisionQueryParams& TraceParams)
 		{
-			const FVector Offset = (static_cast<float>(du) * TangentU + static_cast<float>(dv) * TangentV) * SafeCellSize;
-			if (Offset.SizeSquared() > RadiusSq)
-			{
-				continue;
-			}
-
-			const FVector SamplePoint = HitLocation + Offset;
-
-			// Szybki pre-check współrzędnej w pamięci: jeśli komórka została już zbadana w Step 1 (z ActiveCells)
-			// lub przez nachodzący na siebie promień wybuchu, pomijamy ją BEZ ODPALANIA JAKICHKOLWIEK RAYCASTÓW!
-			const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
-			if (InOutProcessedCoords.Contains(FastCoord))
-			{
-				continue;
-			}
-
-			// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
-			FHitResult SurfaceHit;
-			if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, Normal, SurfaceHit, TraceParams))
-			{
-				continue;
-			}
-
-			// 2. Line of Sight z BurstOrigin do punktu na powierzchni (RadialBurst / 3D)
-			if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(World, BurstOrigin, SurfaceHit.ImpactPoint, Normal, SurfaceHit.GetActor(), TraceParams))
-			{
-				continue;
-			}
-
-			const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
-
-			// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
-			// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
-			if (!SurfaceGridGeometryUtils::HasSufficientSurfaceCoverage(SurfaceHit.GetActor(), Coord, SafeCellSize))
-			{
-				continue;
-			}
-
-			// Pomijamy koordynaty już przetworzone w ramach tego samego zdarzenia
-			if (InOutProcessedCoords.Contains(Coord))
-			{
-				continue;
-			}
-			InOutProcessedCoords.Add(Coord);
-			InOutProcessedCoords.Add(FastCoord);
-
-			const EPhysicalMaterialType HitMat = SurfaceGridGeometryUtils::GetMaterialFromActor(SurfaceHit.GetActor());
-
-			OnCellCandidate(Coord, HitMat, SurfaceHit.GetActor(), SurfaceHit.ImpactPoint);
-		}
-	}
+			return SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(World, BurstOrigin, SurfaceHit.ImpactPoint, Normal, SurfaceHit.GetActor(), TraceParams);
+		},
+		OnCellCandidate);
 }
 
 void SurfaceGridProjectionUtils::FilterCellsInBurstRadius(

@@ -155,7 +155,7 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Electrified.bInstantConductionNetwork = true;
 			Electrified.BypassTraitsIfActive = { EStatusEffectType::Wet };
 			Electrified.ReactionPriority = 40; // Prąd: energia pasożytnicza / przewodzenie
-			Electrified.bCanTransferFromActorToFloor = false; // Prąd na ciele aktora jest debuffem/szokiem, nie źródłem zasilania posadzki (zapobiega nieskończonym pętlom odświeżania z kałużami)
+			Electrified.bCanTransferFromActorToFloor = true; // Prąd na ciele aktora przekazuje się na posadzkę (np. kałużę wody wywołując Conductive_Shock)
 
 			// Tiery prądu: Tier 0 = szok elektryczny (4 dps / 4s), Tier 1 = wyładowanie łukowe (8 dps / 5s)
 			Electrified.Tiers = {

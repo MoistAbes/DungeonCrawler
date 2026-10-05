@@ -105,8 +105,8 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 		return;
 	}
 
-	// 0. Błyskawiczna propagacja sieci przewodzącej (wykonywana tylko gdy stan sieci uległ zmianie lub istnieją ruchome obiekty dynamiczne)
-	if (bConductionNetworkDirty || !DynamicGrids.IsEmpty())
+	// 0. Błyskawiczna propagacja sieci przewodzącej (wykonywana tylko gdy stan sieci uległ zmianie lub obiekty uległy przemieszczeniu)
+	if (bConductionNetworkDirty)
 	{
 		PropagateConductionNetworks(World, StaticGrid, DynamicGrid, SafeCellSize, CurrentTime, OnCellChanged);
 	}

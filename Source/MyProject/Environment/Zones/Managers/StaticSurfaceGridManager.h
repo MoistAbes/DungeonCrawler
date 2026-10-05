@@ -91,7 +91,6 @@ public:
 
 	/** Dostęp do mapy komórek */
 	const TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCells() const { return ActiveCells; }
-	TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCellsMutable() { return ActiveCells; }
 
 	/** Rysowanie debugowe */
 	void DrawDebug(const UWorld* World, float SafeCellSize) const;

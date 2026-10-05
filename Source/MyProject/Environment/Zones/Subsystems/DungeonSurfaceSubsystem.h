@@ -224,12 +224,7 @@ public:
 	const FDynamicSurfaceGridManager& GetDynamicGridManager() const { return DynamicGridManager; }
 	FDynamicSurfaceGridManager& GetDynamicGridManager() { return DynamicGridManager; }
 
-	/** Dostęp do danych dla kompatybilności wstecznej */
-	const TMap<FSurfaceCellCoord, FSurfaceCellData>& GetActiveCells() const { return StaticGridManager.GetActiveCells(); }
-	const TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetDynamicSurfaceGrids() const { return DynamicGridManager.GetGrids(); }
-
-	/** Metody pomocnicze ustalania materiału podłożowego */
-	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const;
+	/** Metoda pomocnicza ustalania materiału podłożowego i aktora */
 	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
 
 protected:
@@ -263,6 +258,6 @@ private:
 	/** Uchwyt timera serwerowego */
 	FTimerHandle GridTickTimerHandle;
 
-	/** Flaga wskazująca, czy sieć uległa zmianie (dodanie/usunięcie komórki) i wymaga przeliczenia przewodnictwa */
-	bool bConductionNetworkDirty = true;
+	/** Flaga wskazująca, czy sieć uległa zmianie (dodanie/usunięcie komórki lub ruch) i wymaga przeliczenia przewodnictwa */
+	bool bConductionNetworkDirty = false;
 };

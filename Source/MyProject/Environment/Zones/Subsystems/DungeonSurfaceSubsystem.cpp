@@ -94,7 +94,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusFromHit(
 	uint8 Tier)
 {
 	UWorld* World = GetWorld();
-	if (!World || World->GetNetMode() == NM_Client || !HitResult.bBlockingHit || Status == EStatusEffectType::None || Radius <= 0.0f)
+	if (!World || World->GetNetMode() == NM_Client || !HitResult.bBlockingHit || Status == EStatusEffectType::None || Radius <= 0.0f || Duration < 0.0f)
 	{
 		return 0;
 	}
@@ -148,7 +148,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToDynamicSurface(
 	AActor* Instigator,
 	uint8 Tier)
 {
-	if (!GetWorld() || !DynamicActor || !TransformComp || Radius <= 0.0f || Status == EStatusEffectType::None || Duration <= 0.0f)
+	if (!GetWorld() || !DynamicActor || !TransformComp || Radius <= 0.0f || Status == EStatusEffectType::None || Duration < 0.0f)
 	{
 		return 0;
 	}
@@ -156,7 +156,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToDynamicSurface(
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
 	const float CurrentTime = GetWorld()->GetTimeSeconds();
 
-	return DynamicGridManager.ApplyStatusToDynamicSurface(
+	const int32 AffectedCount = DynamicGridManager.ApplyStatusToDynamicSurface(
 		DynamicActor,
 		TransformComp,
 		HitLocation,
@@ -172,6 +172,14 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToDynamicSurface(
 		{
 			OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
 		});
+
+	if (AffectedCount > 0)
+	{
+		bConductionNetworkDirty = true;
+		PropagateConductionIfApplicable(Status, AffectedCount);
+	}
+
+	return AffectedCount;
 }
 
 bool UDungeonSurfaceSubsystem::ApplyStatusToDynamicCell(
@@ -240,12 +248,21 @@ bool UDungeonSurfaceSubsystem::ApplyStatusToCell(
 
 	if (!ResolvedSurfaceActor)
 	{
-		AActor* ProbedActor = nullptr;
-		if (!GetSurfaceMaterialAtCoord(Coord, SurfaceMat, ProbedActor))
+		// Optymalizacja: jeśli komórka już istnieje w siatce statycznej, pobieramy aktora i materiał z pamięci podręcznej (zero raycastów)
+		if (const FSurfaceCellData* ExistingData = StaticGridManager.GetActiveCells().Find(Coord))
 		{
-			return false;
+			ResolvedSurfaceActor = ExistingData->SurfaceActor.Get();
+			SurfaceMat = ExistingData->SurfaceMaterial;
 		}
-		ResolvedSurfaceActor = ProbedActor;
+		else
+		{
+			AActor* ProbedActor = nullptr;
+			if (!GetSurfaceMaterialAtCoord(Coord, SurfaceMat, ProbedActor))
+			{
+				return false;
+			}
+			ResolvedSurfaceActor = ProbedActor;
+		}
 	}
 
 	// Jeśli cel to dynamiczny mechanizm (np. brama, winda), kierujemy do siatki lokalnej mesha
@@ -294,7 +311,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusToSurface(
 	uint8 Tier)
 {
 	UWorld* World = GetWorld();
-	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
+	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f || Duration < 0.0f)
 	{
 		return 0;
 	}
@@ -335,7 +352,7 @@ int32 UDungeonSurfaceSubsystem::ApplyStatusInArea(
 	int32* OutNewlyCreatedCount)
 {
 	UWorld* World = GetWorld();
-	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f || Duration <= 0.0f)
+	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f || Duration < 0.0f)
 	{
 		return 0;
 	}
@@ -426,20 +443,21 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 		World,
 		Origin,
 		Radius,
-		CellSize,
+		SafeCellSize,
 		StaticGridManager.GetActiveCells(),
 		Instigator,
 		CellsInRadius);
 
 	for (const FSurfaceCellCoord& Coord : CellsInRadius)
 	{
-		if (!StaticGridManager.GetActiveCells().Contains(Coord))
+		const FSurfaceCellData* ExistingData = StaticGridManager.GetActiveCells().Find(Coord);
+		if (!ExistingData)
 		{
 			continue;
 		}
 
 		ProcessedCoords.Add(Coord);
-		if (ApplyStatusToCell(Coord, Status, Duration, Instigator, EPhysicalMaterialType::Stone, nullptr, Tier))
+		if (ApplyStatusToCell(Coord, Status, Duration, Instigator, ExistingData->SurfaceMaterial, ExistingData->SurfaceActor.Get(), Tier, ExistingData->SurfaceLocation))
 		{
 			AffectedCount++;
 		}
@@ -466,7 +484,7 @@ int32 UDungeonSurfaceSubsystem::ApplyElementalBurst(
 		GetWorld(),
 		Origin,
 		Radius,
-		CellSize,
+		SafeCellSize,
 		Instigator,
 		[&](const FHitResult& SurfaceHit, float SplashRadius)
 		{
@@ -550,14 +568,24 @@ int32 UDungeonSurfaceSubsystem::ApplyContinuousZoneToCells(
 			continue;
 		}
 
-		// KROK A: Jeśli komórka ma już ten status i nie wygasa w najbliższym czasie (> 1.0s), pomijamy!
+		// KROK A: Jeśli komórka ma już ten status w co najmniej tym samym Tierze i ma wystarczający zapas czasu (> 1.0s), pomijamy!
 		const FSurfaceCellStatusEntry* ExistingEntry = Data.FindStatus(Status);
-		if (ExistingEntry && (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip))
+		if (ExistingEntry && ExistingEntry->Tier >= Tier)
+		{
+			if (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > MinRemainingToSkip)
+			{
+				continue;
+			}
+		}
+
+		// KROK B: Odrzucenie komórek, które fizycznie nie mogą przyjąć tego statusu (np. prąd na suchym kamieniu)
+		// Zapobiega marnowaniu raycastów LoS na komórki niekompatybilne materiałowo
+		if (!UElementalReactionRules::CanMaterialReceiveStatus(Data.SurfaceMaterial, Status, Data.GetStatusTypes()))
 		{
 			continue;
 		}
 
-		// KROK B: Test Line-of-Sight wykonujemy wyłącznie dla komórek realnie wymagających nałożenia/odświeżenia
+		// KROK C: Test Line-of-Sight wykonujemy wyłącznie dla komórek realnie wymagających nałożenia/odświeżenia
 		const FVector CellNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 		const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * 0.45f);
 
@@ -632,12 +660,6 @@ void UDungeonSurfaceSubsystem::UnregisterStatusComponent(UStatusEffectComponent*
 	RegisteredStatusComponents.Remove(Comp);
 }
 
-bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial) const
-{
-	AActor* DummyActor = nullptr;
-	return GetSurfaceMaterialAtCoord(Coord, OutMaterial, DummyActor);
-}
-
 bool UDungeonSurfaceSubsystem::GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const
 {
 	return FStaticSurfaceGridManager::GetSurfaceMaterialAtCoord(GetWorld(), FMath::Max(10.0f, CellSize), Coord, OutMaterial, OutSurfaceActor);
@@ -665,7 +687,7 @@ void UDungeonSurfaceSubsystem::ProcessGridTick()
 	StaticGridManager.ExpireCells(CurrentTime, BroadcastCellChanged);
 	DynamicGridManager.ExpireCells(CurrentTime, BroadcastCellChanged);
 
-	if (bCellsChangedInTick)
+	if (bCellsChangedInTick || DynamicGridManager.CheckIfAnyGridMoved())
 	{
 		bConductionNetworkDirty = true;
 	}

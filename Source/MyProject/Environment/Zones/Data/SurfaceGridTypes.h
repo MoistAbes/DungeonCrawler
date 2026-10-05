@@ -160,36 +160,6 @@ struct MYPROJECT_API FSurfaceCellCoord
 	/** Zwraca 4 potencjalne warianty wokseli kandydujących na krawędzi narożnika 90° dla wskazanego kierunku prostopadłego */
 	void GetCornerCandidateCoords(ESurfaceFaceDirection CornerFace, TArray<FSurfaceCellCoord, TInlineAllocator<4>>& OutCoords) const;
 
-	/** Zwraca wszystkich sąsiadów: 4 współpłaszczyznowe oraz sąsiadów na krawędziach 90° (podłoga <-> ściany <-> sufit) */
-	void GetAdjacentNeighbors(TArray<FSurfaceCellCoord>& OutNeighbors) const
-	{
-		OutNeighbors.Reset();
-		OutNeighbors.Reserve(20);
-
-		// 1. Zawsze dodajemy 4 sąsiadów leżących na tej samej płaszczyźnie
-		GetCoplanarNeighbors(OutNeighbors);
-
-		// 2. Dodajemy kandydatów z prostopadłych ścian/podłóg łączących się na krawędziach 90°
-		constexpr ESurfaceFaceDirection AllFaces[] = {
-			ESurfaceFaceDirection::Up,
-			ESurfaceFaceDirection::Down,
-			ESurfaceFaceDirection::North,
-			ESurfaceFaceDirection::South,
-			ESurfaceFaceDirection::East,
-			ESurfaceFaceDirection::West
-		};
-
-		TArray<FSurfaceCellCoord, TInlineAllocator<4>> CornerCoords;
-		for (ESurfaceFaceDirection TargetFace : AllFaces)
-		{
-			if (TargetFace != Face)
-			{
-				GetCornerCandidateCoords(TargetFace, CornerCoords);
-				OutNeighbors.Append(CornerCoords);
-			}
-		}
-	}
-
 	bool operator==(const FSurfaceCellCoord& Other) const
 	{
 		return X == Other.X && Y == Other.Y && Z == Other.Z && Face == Other.Face;
@@ -243,12 +213,6 @@ FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpr
 	switch (Face)
 	{
 	case ESurfaceFaceDirection::Up:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), ESurfaceFaceDirection::South);
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), ESurfaceFaceDirection::North);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), ESurfaceFaceDirection::West);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), ESurfaceFaceDirection::East);
-		break;
-
 	case ESurfaceFaceDirection::Down:
 		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), ESurfaceFaceDirection::South);
 		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), ESurfaceFaceDirection::North);
@@ -257,12 +221,6 @@ FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpr
 		break;
 
 	case ESurfaceFaceDirection::North:
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), ESurfaceFaceDirection::West);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), ESurfaceFaceDirection::East);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), ESurfaceFaceDirection::Down);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), ESurfaceFaceDirection::Up);
-		break;
-
 	case ESurfaceFaceDirection::South:
 		OutPaths.Emplace(FSurfaceCellCoord(X, Y + 1, Z, Face), ESurfaceFaceDirection::West);
 		OutPaths.Emplace(FSurfaceCellCoord(X, Y - 1, Z, Face), ESurfaceFaceDirection::East);
@@ -271,12 +229,6 @@ FORCEINLINE void FSurfaceCellCoord::GetDirectionalSpreadPaths(TArray<FSurfaceSpr
 		break;
 
 	case ESurfaceFaceDirection::East:
-		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), ESurfaceFaceDirection::South);
-		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), ESurfaceFaceDirection::North);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z + 1, Face), ESurfaceFaceDirection::Down);
-		OutPaths.Emplace(FSurfaceCellCoord(X, Y, Z - 1, Face), ESurfaceFaceDirection::Up);
-		break;
-
 	case ESurfaceFaceDirection::West:
 		OutPaths.Emplace(FSurfaceCellCoord(X + 1, Y, Z, Face), ESurfaceFaceDirection::South);
 		OutPaths.Emplace(FSurfaceCellCoord(X - 1, Y, Z, Face), ESurfaceFaceDirection::North);
