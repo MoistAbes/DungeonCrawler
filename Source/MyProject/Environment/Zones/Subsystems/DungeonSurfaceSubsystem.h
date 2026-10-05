@@ -224,6 +224,21 @@ public:
 	const FDynamicSurfaceGridManager& GetDynamicGridManager() const { return DynamicGridManager; }
 	FDynamicSurfaceGridManager& GetDynamicGridManager() { return DynamicGridManager; }
 
+	/** Zwraca bezpieczny fizyczny rozmiar komórki w centymetrach (zabezpieczony przed wartościami < MinSafeCellSize) */
+	FORCEINLINE float GetSafeCellSize() const
+	{
+		return FMath::Max(SurfaceGridConstants::MinSafeCellSize, CellSize);
+	}
+
+	/** Zwraca współdzielony callback rozgłaszający modyfikację komórki OnSurfaceCellChanged */
+	auto GetCellBroadcastCallback()
+	{
+		return [this](const FSurfaceCellCoord& Coord, EStatusEffectType NewStatus, AActor* InInstigator)
+		{
+			OnSurfaceCellChanged.Broadcast(Coord, NewStatus, InInstigator);
+		};
+	}
+
 	/** Metoda pomocnicza ustalania materiału podłożowego i aktora */
 	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
 

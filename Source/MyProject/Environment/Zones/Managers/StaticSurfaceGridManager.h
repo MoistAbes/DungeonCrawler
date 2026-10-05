@@ -34,6 +34,23 @@ public:
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
 		const FVector& SurfaceLocation = FVector::ZeroVector);
 
+	/**
+	 * Ciągła emisja statusu ze stref wolumetrycznych (AVolumetricStatusZone) na istniejące komórki statyczne.
+	 * Ewaluuje wyłącznie komórki w sferze, które wymagają odświeżenia/nałożenia i mają Line of Sight.
+	 * @return Liczba zmodyfikowanych lub odświeżonych komórek statycznych.
+	 */
+	int32 ApplyContinuousZoneToCells(
+		UWorld* World,
+		const FVector& Origin,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator,
+		uint8 Tier,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+		int32* OutNewlyAddedCount = nullptr);
 
 	/**
 	 * Usuwa aktywne komórki znajdujące się wewnątrz zadanego prostopadłościanu AABB.

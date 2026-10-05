@@ -137,14 +137,14 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 		USceneComponent* TransformComp = GridPair.Value.TransformComponent.Get();
 		if (DynActor && TransformComp && !GridPair.Value.LocalCells.IsEmpty())
 		{
-			CachedSpreadGrids.Add({ DynActor, TransformComp, TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * 1.5f) });
+			CachedSpreadGrids.Add({ DynActor, TransformComp, TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * SurfaceGridConstants::DynamicContactToleranceRatio) });
 		}
 	}
 
 	TMap<FSurfaceCellCoord, FPendingSpreadCell> PendingStaticSpreads;
 	TArray<FPendingDynamicSpread> PendingDynamicSpreads;
 	TArray<FSurfaceCellCoord> NeighborCoords;
-	const float MaxContactDistSq = FMath::Square(SafeCellSize * 1.5f);
+	const float MaxContactDistSq = FMath::Square(SafeCellSize * SurfaceGridConstants::DynamicContactToleranceRatio);
 
 	// Pomocnik do scalania rozprzestrzenienia w mapie PendingStaticSpreads
 	auto MergePendingStaticSpread = [&](const FSurfaceCellCoord& Coord, const FPendingSpreadCell& Spread)
@@ -273,7 +273,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 			continue;
 		}
 
-		const FVector SourcePos = SourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face) * (SafeCellSize * 0.45f);
+		const FVector SourcePos = SourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face) * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 		TArray<SurfaceGridGeometryUtils::FSurfaceSpreadCandidate> Candidates;
 		SurfaceGridGeometryUtils::FindSpreadCandidates(World, SourceCoord, SourceData.SurfaceActor.Get(), ActiveCells, SafeCellSize, Candidates);
@@ -391,7 +391,7 @@ void FSurfaceGridPropagationUtils::PropagateElementalSpreads(
 				{
 					if (StaticNeighborData->IsEmpty()) continue;
 
-					const FVector StaticNeighborPos = StaticNeighborCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(StaticNeighborCoord.Face) * (SafeCellSize * 0.45f);
+					const FVector StaticNeighborPos = StaticNeighborCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(StaticNeighborCoord.Face) * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 					if (FVector::DistSquared(WorldContact, StaticNeighborPos) > MaxContactDistSq) continue;
 
 					FPendingSpreadCell Spread;
@@ -495,7 +495,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 		USceneComponent* TransformComp = GridPair.Value.TransformComponent.Get();
 		if (DynActor && TransformComp && !GridPair.Value.LocalCells.IsEmpty())
 		{
-			CachedDynamicGrids.Add({ DynActor, TransformComp, TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * 1.5f) });
+			CachedDynamicGrids.Add({ DynActor, TransformComp, TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize * SurfaceGridConstants::DynamicContactToleranceRatio) });
 		}
 	}
 
@@ -765,7 +765,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 		return true;
 	};
 
-	const float MaxContactDistSq = FMath::Square(SafeCellSize * 1.5f);
+	const float MaxContactDistSq = FMath::Square(SafeCellSize * SurfaceGridConstants::DynamicContactToleranceRatio);
 	TArray<FSurfaceCellCoord> NeighborCoords;
 	int32 HeadIndex = 0;
 
@@ -782,7 +782,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 		{
 			// --- WĘZEŁ STATYCZNY ---
 			const FSurfaceCellCoord& SourceCoord = CurrentItem.Coord;
-			const FVector SourcePos = SourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face) * (SafeCellSize * 0.45f);
+			const FVector SourcePos = SourceCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(SourceCoord.Face) * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 			EPhysicalMaterialType SourceMat = EPhysicalMaterialType::Stone;
 			AActor* SourceActor = nullptr;
@@ -875,7 +875,7 @@ void FSurfaceGridPropagationUtils::PropagateConductionNetworks(
 			const FVector WorldContactNorm = RigidTransform.TransformVector(SurfaceGridUtils::FaceDirectionToNormal(CurrentItem.Coord.Face)).GetSafeNormal();
 
 			const FSurfaceCellCoord StaticWorldCoord = FSurfaceCellCoord::FromWorldLocation(WorldContactPos, WorldContactNorm, SafeCellSize);
-			const FVector StaticNeighborPos = StaticWorldCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(StaticWorldCoord.Face) * (SafeCellSize * 0.45f);
+			const FVector StaticNeighborPos = StaticWorldCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(StaticWorldCoord.Face) * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 			if (FVector::DistSquared(WorldContactPos, StaticNeighborPos) <= MaxContactDistSq)
 			{

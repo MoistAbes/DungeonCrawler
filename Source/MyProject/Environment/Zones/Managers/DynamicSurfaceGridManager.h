@@ -141,6 +141,37 @@ public:
 		float CurrentTime,
 		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged);
 
+	/**
+	 * Ciągła aplikacja statusu ze strefy wolumetrycznej na komórki dynamiczne.
+	 * Zachowuje pełną symetrię interfejsu z FStaticSurfaceGridManager.
+	 */
+	FORCEINLINE int32 ApplyContinuousZoneToCells(
+		UWorld* World,
+		const FVector& Origin,
+		float Radius,
+		EStatusEffectType Status,
+		float Duration,
+		AActor* Instigator,
+		uint8 Tier,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+		int32* OutNewlyAddedCount = nullptr)
+	{
+		return ApplyElementalBurst(World, Origin, Radius, Status, Duration, Instigator, Tier, SafeCellSize, CurrentTime, OnCellChanged, OutNewlyAddedCount);
+	}
+
+	/** Pomocniczy alias zachowujący symetrię nazewnictwa z FStaticSurfaceGridManager::ProcessActorInteraction */
+	FORCEINLINE void ProcessActorInteraction(
+		AActor* Actor,
+		UStatusEffectComponent* StatusComp,
+		float SafeCellSize,
+		float CurrentTime,
+		TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged)
+	{
+		ProcessActorInteractions(Actor, StatusComp, SafeCellSize, CurrentTime, OnCellChanged);
+	}
+
 	/** Dostęp do siatek */
 	const TMap<TWeakObjectPtr<AActor>, FDynamicActorSurfaceGrid>& GetGrids() const { return DynamicSurfaceGrids; }
 

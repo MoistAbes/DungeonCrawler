@@ -175,6 +175,25 @@ struct MYPROJECT_API FSurfaceCellCoord
 	}
 };
 
+namespace SurfaceGridConstants
+{
+	/** Minimalny dozwolony fizyczny rozmiar komórki w centymetrach (zabezpieczenie przed dzieleniem przez zero) */
+	constexpr float MinSafeCellSize = 10.0f;
+
+	/** Margines przesunięcia punktu próbkowania wzdłuż normalnej komórki (zapobiega samoprzecięciom z geometrią) */
+	constexpr float NormalOffsetRatio = 0.45f;
+
+	/** Tolerancja mnożnika komórki dla odległości kontaktu ruchomych mechanizmów z siatką podłoża */
+	constexpr float DynamicContactToleranceRatio = 1.5f;
+
+	/** Bezpieczny bufor wyprzedzenia czasu (w sekundach) w strefach ciągłych - komórki z takim zapasem pomijają LoS i odświeżanie */
+	constexpr float ContinuousZoneSkipThreshold = 1.0f;
+
+	/** Maksymalny dystans rysowania debugowego (25 metrów) */
+	constexpr float MaxDebugDrawDist = 2500.0f;
+	constexpr float MaxDebugDrawDistSq = MaxDebugDrawDist * MaxDebugDrawDist;
+}
+
 namespace SurfaceGridUtils
 {
 	FORCEINLINE FVector GetFaceCenter(const FSurfaceCellCoord& Coord, float CellSize)

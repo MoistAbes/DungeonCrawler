@@ -185,7 +185,7 @@ void SurfaceGridProjectionUtils::FilterCellsInBurstRadius(
 		if (FVector::DistSquared(BurstOrigin, CellWorldPos) <= RadiusSq)
 		{
 			const FVector CellNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
-			const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * 0.45f);
+			const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 			// Ścisły LoS 3D: czy fala wybuchu widzi tę komórkę bez przeszkód
 			if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(World, BurstOrigin, CellSurfacePos, CellNormal, Pair.Value.SurfaceActor.Get(), LoSParams))

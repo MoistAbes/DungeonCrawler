@@ -125,6 +125,111 @@ bool FStaticSurfaceGridManager::ApplyStatusToCell(
 		ResolvedLocation);
 }
 
+int32 FStaticSurfaceGridManager::ApplyContinuousZoneToCells(
+	UWorld* World,
+	const FVector& Origin,
+	float Radius,
+	EStatusEffectType Status,
+	float Duration,
+	AActor* Instigator,
+	uint8 Tier,
+	float SafeCellSize,
+	float CurrentTime,
+	TFunctionRef<void(const FSurfaceCellCoord&, EStatusEffectType, AActor*)> OnCellChanged,
+	int32* OutNewlyAddedCount)
+{
+	if (!World || Status == EStatusEffectType::None || Radius <= 0.0f)
+	{
+		return 0;
+	}
+
+	const float RadiusSq = FMath::Square(Radius);
+
+	FCollisionQueryParams LoSParams(SCENE_QUERY_STAT(ZoneContinuousCellLoS), false, Instigator);
+	if (Instigator)
+	{
+		LoSParams.AddIgnoredActor(Instigator);
+	}
+
+	struct FPendingZoneStaticCell
+	{
+		FSurfaceCellCoord Coord;
+		EPhysicalMaterialType Material = EPhysicalMaterialType::Stone;
+		TWeakObjectPtr<AActor> SurfaceActor = nullptr;
+		FVector SurfaceLocation = FVector::ZeroVector;
+		bool bWasAlreadyPresent = false;
+	};
+	TArray<FPendingZoneStaticCell> PendingCells;
+
+	// KROK 1: Bezpieczne zebranie kandydatów w trybie Read-Only (brak modyfikacji TMap w pętli)
+	for (const auto& Pair : ActiveCells)
+	{
+		const FSurfaceCellCoord& Coord = Pair.Key;
+		const FSurfaceCellData& Data = Pair.Value;
+
+		if (Data.IsEmpty())
+		{
+			continue;
+		}
+
+		const FVector CellWorldPos = Coord.ToWorldLocation(SafeCellSize);
+		if (FVector::DistSquared(Origin, CellWorldPos) > RadiusSq)
+		{
+			continue;
+		}
+
+		// KROK A: Jeśli komórka ma już ten status w co najmniej tym samym Tierze i ma wystarczający zapas czasu, pomijamy!
+		const FSurfaceCellStatusEntry* ExistingEntry = Data.FindStatus(Status);
+		if (ExistingEntry && ExistingEntry->Tier >= Tier)
+		{
+			if (ExistingEntry->IsPermanent() || ExistingEntry->GetRemainingDuration(CurrentTime) > SurfaceGridConstants::ContinuousZoneSkipThreshold)
+			{
+				continue;
+			}
+		}
+
+		// KROK B: Odrzucenie komórek, które fizycznie nie mogą przyjąć tego statusu ani nie wejdą w reakcję żywiołową
+		if (!UElementalReactionRules::CanApplyStatusToTarget(Data.SurfaceMaterial, Status, Data.GetStatusTypes()))
+		{
+			continue;
+		}
+
+		// KROK C: Test Line-of-Sight wykonujemy wyłącznie dla komórek realnie wymagających nałożenia/odświeżenia
+		const FVector CellNormal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
+		const FVector CellSurfacePos = CellWorldPos + CellNormal * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
+
+		if (!SurfaceGridGeometryUtils::HasDirectBurstLineOfSight(World, Origin, CellSurfacePos, CellNormal, Data.SurfaceActor.Get(), LoSParams))
+		{
+			continue;
+		}
+
+		PendingCells.Add({ Coord, Data.SurfaceMaterial, Data.SurfaceActor.Get(), Data.SurfaceLocation, (ExistingEntry != nullptr) });
+	}
+
+	int32 AffectedCount = 0;
+	int32 NewlyAdded = 0;
+
+	// KROK 2: Aplikacja statusu po lokalnym TArray
+	for (const FPendingZoneStaticCell& Pending : PendingCells)
+	{
+		if (ApplyStatusToCell(World, Pending.Coord, Status, Duration, Instigator, Pending.Material, Pending.SurfaceActor.Get(), Tier, SafeCellSize, CurrentTime, OnCellChanged, Pending.SurfaceLocation))
+		{
+			AffectedCount++;
+			if (!Pending.bWasAlreadyPresent)
+			{
+				NewlyAdded++;
+			}
+		}
+	}
+
+	if (OutNewlyAddedCount)
+	{
+		*OutNewlyAddedCount = NewlyAdded;
+	}
+
+	return AffectedCount;
+}
+
 int32 FStaticSurfaceGridManager::ClearCellsInBounds(
 	const FBox& BoundingBox,
 	float SafeCellSize,
@@ -295,7 +400,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
 	FVector ViewLocation = FVector::ZeroVector;
 	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
-	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
+	const float MaxDebugDrawDistSq = SurfaceGridConstants::MaxDebugDrawDistSq;
 
 	const float DebugLifeTime = 0.25f;
 
@@ -319,7 +424,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 		const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Coord.Face);
 
 		// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
-		const FVector HalfExtent = FVector(SafeCellSize * 0.45f);
+		const FVector HalfExtent = FVector(SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 		FVector BasePos;
 		if (!Data.SurfaceLocation.IsNearlyZero())

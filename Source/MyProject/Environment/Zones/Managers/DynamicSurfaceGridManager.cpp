@@ -61,7 +61,7 @@ FVector FDynamicSurfaceGridManager::LocalToWorldSurfaceContact(
 	float SafeCellSize)
 {
 	const FTransform RigidTransform = GetDynamicRigidTransform(Comp);
-	const FVector LocalContact = LocalCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face) * (SafeCellSize * 0.45f);
+	const FVector LocalContact = LocalCoord.ToWorldLocation(SafeCellSize) + SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face) * (SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 	return RigidTransform.TransformPosition(LocalContact);
 }
 
@@ -163,7 +163,7 @@ int32 FDynamicSurfaceGridManager::ApplyElementalBurst(
 	TArray<FPendingDynBurstCell> PendingDynBurstCells;
 
 	const float RadiusSq = FMath::Square(Radius);
-	const float MinRemainingToSkip = 1.0f;
+	const float MinRemainingToSkip = SurfaceGridConstants::ContinuousZoneSkipThreshold;
 
 	for (const auto& GridPair : DynamicSurfaceGrids)
 	{
@@ -483,7 +483,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 	// Prevents ULineBatchComponent from freezing the engine when 10,000+ cells are active across the map.
 	FVector ViewLocation = FVector::ZeroVector;
 	const bool bHasViewLocation = SurfaceGridGeometryUtils::GetDebugViewerLocation(World, ViewLocation);
-	const float MaxDebugDrawDistSq = FMath::Square(2500.0f); // 25m
+	const float MaxDebugDrawDistSq = SurfaceGridConstants::MaxDebugDrawDistSq;
 
 	const float DebugLifeTime = 0.25f;
 
@@ -513,7 +513,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 			const FVector LocalNormal = SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face);
 
 			// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
-			const FVector LocalHalfExtent = FVector(SafeCellSize * 0.45f);
+			const FVector LocalHalfExtent = FVector(SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
 			FVector LocalBasePos;
 			if (!Data.SurfaceLocation.IsNearlyZero())
