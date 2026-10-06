@@ -82,7 +82,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 	UStatusEffectComponent* StatusComp,
 	const TArray<FSurfaceCellCoord>& TouchedCells,
 	const TMap<FSurfaceCellCoord, FSurfaceCellData>& ActiveCells,
-	float CellSize)
+	float CellSize,
+	const FTransform* WorldTransform)
 {
 	if (!Actor || !StatusComp)
 	{
@@ -116,7 +117,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 			continue;
 		}
 
-		const float CellDistSq = FVector::DistSquared(CellCoord.ToWorldLocation(SafeCellSize), ActorLocation);
+		const FVector CellWorldPos = WorldTransform ? WorldTransform->TransformPosition(CellCoord.ToWorldLocation(SafeCellSize)) : CellCoord.ToWorldLocation(SafeCellSize);
+		const float CellDistSq = FVector::DistSquared(CellWorldPos, ActorLocation);
 
 		for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)
 		{

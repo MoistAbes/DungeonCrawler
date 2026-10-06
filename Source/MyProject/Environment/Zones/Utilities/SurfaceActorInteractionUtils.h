@@ -43,5 +43,6 @@ namespace SurfaceActorInteractionUtils
 		UStatusEffectComponent* StatusComp,
 		const TArray<FSurfaceCellCoord>& TouchedCells,
 		const TMap<FSurfaceCellCoord, FSurfaceCellData>& ActiveCells,
-		float CellSize);
+		float CellSize,
+		const FTransform* WorldTransform = nullptr);
 }

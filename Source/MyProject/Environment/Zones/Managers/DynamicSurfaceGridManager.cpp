@@ -7,6 +7,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "GameFramework/Pawn.h"
 #include "Components/SceneComponent.h"
+#include "Components/PrimitiveComponent.h"
 
 #include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h"
@@ -364,10 +365,20 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(
 		return;
 	}
 
-	const FBox ActorBox = Actor->GetComponentsBoundingBox(true);
+	FBox ActorBox;
+	if (const UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+	{
+		ActorBox = RootPrim->Bounds.GetBox();
+	}
+	else
+	{
+		ActorBox = Actor->GetComponentsBoundingBox(true);
+	}
+
 	if (!ActorBox.IsValid)
 	{
-		return;
+		const FVector Loc = Actor->GetActorLocation();
+		ActorBox = FBox(Loc - FVector(34.0f, 34.0f, 88.0f), Loc + FVector(34.0f, 34.0f, 88.0f));
 	}
 
 	for (auto& GridPair : DynamicSurfaceGrids)
@@ -388,16 +399,36 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(
 		}
 
 		const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
+		const FTransform InvRigidTransform = RigidTransform.Inverse();
+		const FBox LocalActorBox = ActorBox.TransformBy(InvRigidTransform);
+		constexpr float ContactMargin = 15.0f;
 
 		TArray<FSurfaceCellCoord> TouchedLocalCoords;
 		for (const auto& CellPair : Grid.LocalCells)
 		{
 			const FSurfaceCellCoord& LocalCoord = CellPair.Key;
-			const FVector LocalCenter = LocalCoord.ToWorldLocation(SafeCellSize);
-			const FVector WorldCenter = RigidTransform.TransformPosition(LocalCenter);
-			const FBox CellWorldBox(WorldCenter - FVector(SafeCellSize * 0.5f), WorldCenter + FVector(SafeCellSize * 0.5f));
+			const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face);
+			const FVector Center = LocalCoord.ToWorldLocation(SafeCellSize);
 
-			if (CellWorldBox.Intersect(ActorBox))
+			// Wyznaczamy cienką powłokę powierzchniową komórki (15 cm w głąb lica), zachowując pełną symetrię ze StaticSurfaceGridManager
+			FVector CellHalfExtent(SafeCellSize * 0.5f);
+			if (LocalCoord.Face == ESurfaceFaceDirection::Up || LocalCoord.Face == ESurfaceFaceDirection::Down)
+			{
+				CellHalfExtent.Z = ContactMargin;
+			}
+			else if (LocalCoord.Face == ESurfaceFaceDirection::North || LocalCoord.Face == ESurfaceFaceDirection::South)
+			{
+				CellHalfExtent.X = ContactMargin;
+			}
+			else
+			{
+				CellHalfExtent.Y = ContactMargin;
+			}
+
+			const FVector SurfaceCenter = Center - Normal * (SafeCellSize * 0.5f - ContactMargin * 0.5f);
+			const FBox LocalSurfaceBox(SurfaceCenter - CellHalfExtent, SurfaceCenter + CellHalfExtent);
+
+			if (LocalActorBox.Intersect(LocalSurfaceBox))
 			{
 				TouchedLocalCoords.Add(LocalCoord);
 			}
@@ -446,7 +477,8 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(
 			StatusComp,
 			TouchedLocalCoords,
 			Grid.LocalCells,
-			SafeCellSize);
+			SafeCellSize,
+			&RigidTransform);
 	}
 }
 
