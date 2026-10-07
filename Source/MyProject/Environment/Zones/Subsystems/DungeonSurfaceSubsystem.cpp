@@ -9,6 +9,8 @@
 #include "MyProject/Environment/Zones/Utilities/SurfaceGridGeometryUtils.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "MyProject/Logging/DungeonLogCategories.h"
 
 UDungeonSurfaceSubsystem::UDungeonSurfaceSubsystem()
@@ -837,3 +839,141 @@ void UDungeonSurfaceSubsystem::DrawDebugVisuals() const
 	}
 #endif
 }
+
+const FSurfaceCellData* UDungeonSurfaceSubsystem::FindCellAtHit(const FHitResult& HitResult) const
+{
+	if (!HitResult.bBlockingHit)
+	{
+		return nullptr;
+	}
+
+	const float SafeCellSize = GetSafeCellSize();
+	AActor* HitActor = HitResult.GetActor();
+
+	// 1. Sprawdzamy czy trafiony aktor posiada dynamiczną siatkę komórek
+	if (HitActor && SurfaceGridGeometryUtils::IsDynamicSurfaceTarget(HitActor))
+	{
+		if (const USceneComponent* TransformComp = GetDynamicActorTransformComponent(HitActor))
+		{
+			const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
+			const FVector LocalPoint = RigidTransform.InverseTransformPosition(HitResult.ImpactPoint);
+			const FVector LocalNormal = RigidTransform.InverseTransformVector(HitResult.ImpactNormal).GetSafeNormal();
+			const FSurfaceCellCoord LocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalPoint, LocalNormal, SafeCellSize);
+
+			if (const FDynamicActorSurfaceGrid* DynGrid = DynamicGridManager.GetGrids().Find(HitActor))
+			{
+				return DynGrid->LocalCells.Find(LocalCoord);
+			}
+		}
+	}
+
+	// 2. W przeciwnym razie sprawdzamy statyczną siatkę lochu
+	const FSurfaceCellCoord WorldCoord = FSurfaceCellCoord::FromWorldLocation(HitResult.ImpactPoint, HitResult.ImpactNormal, SafeCellSize);
+	return StaticGridManager.GetActiveCells().Find(WorldCoord);
+}
+
+FMovementModifier UDungeonSurfaceSubsystem::GetSurfaceMovementModifierForActor(const AActor* Actor) const
+{
+	FMovementModifier ResultModifier;
+
+	if (!Actor || Actor->IsActorBeingDestroyed())
+	{
+		return ResultModifier;
+	}
+
+	const float SafeCellSize = GetSafeCellSize();
+
+	auto ApplyCellDataToModifier = [&ResultModifier](const FSurfaceCellData* CellData)
+	{
+		if (!CellData || CellData->IsEmpty())
+		{
+			return;
+		}
+
+		for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)
+		{
+			const FStatusEffectConfig& Config = UElementalReactionRules::GetEffectConfig(Entry.Status);
+			if (!Config.SurfaceMovementModifier.IsIdentity())
+			{
+				ResultModifier.CombineWith(Config.SurfaceMovementModifier);
+			}
+		}
+	};
+
+	// 1. Sprawdzamy stykające się komórki statycznej siatki (podłoga, ściany, sufit w 3D AABB)
+	TArray<FSurfaceCellCoord> TouchedCoords;
+	SurfaceGridProjectionUtils::GetCellsTouchingActor(Actor, StaticGridManager.GetActiveCells(), SafeCellSize, TouchedCoords);
+
+	for (const FSurfaceCellCoord& Coord : TouchedCoords)
+	{
+		if (const FSurfaceCellData* CellData = StaticGridManager.GetActiveCells().Find(Coord))
+		{
+			ApplyCellDataToModifier(CellData);
+		}
+	}
+
+	// 2. Sprawdzamy stykające się komórki dynamicznych siatek (ruchome windy, wrota)
+	if (!DynamicGridManager.GetGrids().IsEmpty())
+	{
+		FBox ActorBox;
+		if (const UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(Actor->GetRootComponent()))
+		{
+			ActorBox = RootPrim->Bounds.GetBox();
+		}
+		else
+		{
+			ActorBox = Actor->GetComponentsBoundingBox(true);
+		}
+
+		if (ActorBox.IsValid)
+		{
+			for (const auto& GridPair : DynamicGridManager.GetGrids())
+			{
+				const FDynamicActorSurfaceGrid& Grid = GridPair.Value;
+				USceneComponent* TransformComp = Grid.TransformComponent.Get();
+				if (!TransformComp || Grid.LocalCells.IsEmpty())
+				{
+					continue;
+				}
+
+				const FBox CompBox = TransformComp->Bounds.GetBox().ExpandBy(SafeCellSize);
+				if (!CompBox.Intersect(ActorBox))
+				{
+					continue;
+				}
+
+				const FTransform RigidTransform = FDynamicSurfaceGridManager::GetDynamicRigidTransform(TransformComp);
+				const FBox LocalActorBox = ActorBox.TransformBy(RigidTransform.Inverse());
+				constexpr float ContactMargin = SurfaceGridConstants::DefaultContactMargin;
+
+				for (const auto& CellPair : Grid.LocalCells)
+				{
+					const FBox LocalSurfaceBox = SurfaceGridUtils::GetCellContactBox(CellPair.Key, CellPair.Value.SurfaceLocation, SafeCellSize, ContactMargin);
+					if (LocalActorBox.Intersect(LocalSurfaceBox))
+					{
+						ApplyCellDataToModifier(&CellPair.Value);
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Fallback dla postaci opartych o CMC - jeśli stąpa po podłożu/skosie, badamy punkt pod stopami
+	if (const ACharacter* Character = Cast<ACharacter>(Actor))
+	{
+		if (const UCharacterMovementComponent* CMC = Character->GetCharacterMovement())
+		{
+			const FFindFloorResult& Floor = CMC->CurrentFloor;
+			if (Floor.IsWalkableFloor() && Floor.HitResult.bBlockingHit)
+			{
+				if (const FSurfaceCellData* FloorCellData = FindCellAtHit(Floor.HitResult))
+				{
+					ApplyCellDataToModifier(FloorCellData);
+				}
+			}
+		}
+	}
+
+	return ResultModifier;
+}
+

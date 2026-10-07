@@ -5,6 +5,7 @@
 #include "MyProject/Environment/Zones/Data/SurfaceGridTypes.h"
 #include "MyProject/Environment/Zones/Managers/StaticSurfaceGridManager.h"
 #include "MyProject/Environment/Zones/Managers/DynamicSurfaceGridManager.h"
+#include "MyProject/Shared/Components/MovementModifierComponent/MovementModifierTypes.h"
 #include "DungeonSurfaceSubsystem.generated.h"
 
 class ACharacter;
@@ -241,6 +242,22 @@ public:
 
 	/** Metoda pomocnicza ustalania materiału podłożowego i aktora */
 	bool GetSurfaceMaterialAtCoord(const FSurfaceCellCoord& Coord, EPhysicalMaterialType& OutMaterial, AActor*& OutSurfaceActor) const;
+
+	/**
+	 * Pobiera dane aktywnej komórki powierzchniowej znajdującej się pod wskazanym punktem kolizji (FHitResult).
+	 * Obsługuje podłogi, ściany, sufity oraz rampy (zgodnie z wektorem normalnym kolizji).
+	 * Sprawdza najpierw siatkę dynamiczną (jeśli HitActor jest dynamiczny), a w przeciwnym razie siatkę statyczną.
+	 * @return Wskaźnik do FSurfaceCellData lub nullptr, jeśli brak aktywnej komórki.
+	 */
+	const FSurfaceCellData* FindCellAtHit(const FHitResult& HitResult) const;
+
+	/**
+	 * Zwraca wypadkowy modyfikator ruchu powierzchniowego (Surface Movement Modifier) dla wskazanego aktora.
+	 * Bada wszystkie aktywne komórki (podłoga, ściany, sufit) stykające się z bryłą 3D (AABB) aktora.
+	 * Dla postaci opartych o CharacterMovementComponent uwzględnia również podłoże pod stopami (CurrentFloor).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Custom|SurfaceGrid")
+	FMovementModifier GetSurfaceMovementModifierForActor(const AActor* Actor) const;
 
 protected:
 	/** Okresowa pętla serwera: wygaszanie, propagacja, obrażenia i aplikacja statusów na postacie */

@@ -17,6 +17,7 @@
 #include "MyProject/Shared/Components/InteractionComponent/InteractionComponent.h"
 #include "MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Shared/Components/MovementModifierComponent/MovementModifierComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent.h"
 #include "MyProject/Shared/Interfaces/GrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/InteractableInterface.h"
@@ -153,6 +154,10 @@ APlayerCharacter::APlayerCharacter()
     StatusEffectComponent =
         CreateDefaultSubobject<UStatusEffectComponent>(
             TEXT("StatusEffectComponent"));
+
+    MovementModifierComponent =
+        CreateDefaultSubobject<UMovementModifierComponent>(
+            TEXT("MovementModifierComponent"));
 
 
     // -------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "MyProject/Environment/Elements/Enums/ElementEnums.h"
 #include "MyProject/Shared/Enums/PhysicalMaterialEnums.h"
+#include "MyProject/Shared/Components/MovementModifierComponent/MovementModifierTypes.h"
 #include "StatusEffectTypes.generated.h"
 
 /**
@@ -161,6 +162,14 @@ struct FStatusEffectConfig
 	/** Czy status obecny na ciele aktora wchodzi w reakcję i brudzi komórki podłoża (np. Burning/Wet = true, Oiled = false) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
 	bool bCanTransferFromActorToFloor = true;
+
+	/** Modyfikator aplikowany na postacie, gdy fizycznie stoją na komórce powierzchni z tym statusem */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	FMovementModifier SurfaceMovementModifier;
+
+	/** Modyfikator aplikowany na postać przez cały czas trwania tego statusu na jej ciele */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")
+	FMovementModifier BodyMovementModifier;
 
 	/** Poziomy/tiery statusu (Tier 0 = bazowy, Tier 1 = silny, Tier 2 = potężny) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Custom|Elemental")

@@ -17,6 +17,7 @@ class UPhysicsCarryComponent;
 class UDamageableComponent;
 class UKnockbackComponent;
 class UStatusEffectComponent;
+class UMovementModifierComponent;
 struct FInputActionValue;
 
 UCLASS(Abstract)
@@ -67,6 +68,10 @@ public:
     /** Komponent obsługujący stany żywiołowe gracza (np. podpalenie) */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UStatusEffectComponent> StatusEffectComponent;
+
+    /** Komponent modyfikujący parametry ruchu (tarcia, hamowania, prędkości) w zależności od podłoża i stanów */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
+    TObjectPtr<UMovementModifierComponent> MovementModifierComponent;
 
     /** Ramię kamery stabilizujące perspektywę trzecioosobową */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")

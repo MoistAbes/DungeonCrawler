@@ -69,6 +69,9 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UStaticMeshComponent> MeshComponent;
 
+    /** Aktualizuje opór liniowy propa w zależności od śliskości stykającej się powierzchni (np. olej na podłodze, ścianie, suficie) */
+    void UpdateSurfaceDamping();
+
     /** Komponent wytrzymałości fizycznej i destrukcji obiektu */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UDamageableComponent> DamageableComponent;
@@ -80,6 +83,14 @@ protected:
     /** Tożsamość materiałowa propa determinująca reakcje chemiczne (np. Wood podatne na ogień, Stone odporne) */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Material")
     EPhysicalMaterialType MaterialType = EPhysicalMaterialType::Wood;
+
+    /** Bazowe liniowe tłumienie fizyczne propa na normalnym podłożu */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Physics")
+    float DefaultLinearDamping = 0.8f;
+
+    /** Obniżone liniowe tłumienie fizyczne propa na śliskiej powierzchni (np. rozlany olej) */
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Physics")
+    float LowFrictionLinearDamping = 0.05f;
 
     /** Czy gracz lub postać może chwycić i podnieść ten obiekt do rąk */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Custom|Interaction")

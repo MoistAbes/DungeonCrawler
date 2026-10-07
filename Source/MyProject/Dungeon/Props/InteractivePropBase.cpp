@@ -8,6 +8,8 @@
 #include "MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h"
 #include "MyProject/Shared/Components/DamageableComponent/DamageableComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
+#include "MyProject/Environment/Zones/Subsystems/DungeonSurfaceSubsystem.h"
+#include "MyProject/Environment/Elements/Utilities/ElementalReactionRules.h"
 
 AInteractivePropBase::AInteractivePropBase()
 {
@@ -37,7 +39,7 @@ AInteractivePropBase::AInteractivePropBase()
     MeshComponent->CanCharacterStepUpOn = ECB_No;
 
     // 4. Tłumienie kątowe i liniowe stabilizujące fizykę brył
-    MeshComponent->SetLinearDamping(0.8f);
+    MeshComponent->SetLinearDamping(DefaultLinearDamping);
     MeshComponent->SetAngularDamping(5.0f);
 
     DamageableComponent = CreateDefaultSubobject<UDamageableComponent>(TEXT("DamageableComponent"));
@@ -201,6 +203,20 @@ void AInteractivePropBase::HandleComponentSleep(UPrimitiveComponent* SleepingCom
     }
 }
 
+void AInteractivePropBase::UpdateSurfaceDamping()
+{
+    if (UDungeonSurfaceSubsystem* SurfaceSubsystem = GetWorld()->GetSubsystem<UDungeonSurfaceSubsystem>())
+    {
+        const FMovementModifier SurfaceMod = SurfaceSubsystem->GetSurfaceMovementModifierForActor(this);
+        const float TargetDamping = (SurfaceMod.GroundFrictionMultiplier < 0.5f) ? LowFrictionLinearDamping : DefaultLinearDamping;
+
+        if (!FMath::IsNearlyEqual(MeshComponent->GetLinearDamping(), TargetDamping))
+        {
+            MeshComponent->SetLinearDamping(TargetDamping);
+        }
+    }
+}
+
 void AInteractivePropBase::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
@@ -219,7 +235,14 @@ void AInteractivePropBase::Tick(float DeltaTime)
     constexpr float MinSweepSpeedSq = KineticConfig::MinFlightSpeedForSweep * KineticConfig::MinFlightSpeedForSweep;
     constexpr float RestSpeedSq = KineticConfig::RestSpeedThreshold * KineticConfig::RestSpeedThreshold;
 
-    // Jeśli prop porusza się z prędkością zdolną do zadania obrażeń kinetycznych
+    // 1. Obsługa modyfikacji tarcia/tłumienia w zależności od powierzchni (podłoga, ściany, sufit)
+    const bool bHasNonDefaultDamping = !FMath::IsNearlyEqual(MeshComponent->GetLinearDamping(), DefaultLinearDamping);
+    if ((SpeedSq >= RestSpeedSq || bHasNonDefaultDamping) && GetWorld())
+    {
+        UpdateSurfaceDamping();
+    }
+
+    // 2. Jeśli prop porusza się z prędkością zdolną do zadania obrażeń kinetycznych
     if (SpeedSq >= MinSweepSpeedSq)
     {
         UKineticForceLibrary::PerformPreImpactSweep(this, MeshComponent, DeltaTime, KineticConfig::MinFlightSpeedForSweep);

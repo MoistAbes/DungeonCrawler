@@ -73,6 +73,11 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 				{ /* DamagePerSecond */ 0.0f, /* BaseDuration */ 6.0f, /* TickInterval */ 1.0f }
 			};
 
+			// Modyfikatory ruchu: Woda na posadzce stawia minimalny opór cieczy
+			Wet.SurfaceMovementModifier.SpeedMultiplier = 0.95f;
+			Wet.SurfaceMovementModifier.GroundFrictionMultiplier = 1.0f;
+			Wet.SurfaceMovementModifier.BrakingDecelerationMultiplier = 1.0f;
+
 			// Reakcja: Woda trafia w Płonący cel (Fire Extinguished)
 			Wet.Reactions.Add(EStatusEffectType::Burning, FStatusReactionRule{
 				/* bConsumeIncomingStatus  */ true,
@@ -116,6 +121,11 @@ const TMap<EStatusEffectType, FStatusEffectConfig>& UElementalReactionRules::Get
 			Oiled.Tiers = {
 				{ /* DamagePerSecond */ 0.0f, /* BaseDuration */ 6.0f, /* TickInterval */ 1.0f }
 			};
+
+			// Modyfikatory ruchu: Olej na posadzce drastycznie zmniejsza tarcie i wydłuża drogę hamowania (ślizg)
+			Oiled.SurfaceMovementModifier.SpeedMultiplier = 1.0f;
+			Oiled.SurfaceMovementModifier.GroundFrictionMultiplier = 0.05f;
+			Oiled.SurfaceMovementModifier.BrakingDecelerationMultiplier = 0.05f;
 
 			// Reakcja: Olej trafia w Płonący cel (Natychmiastowy zapłon nowo wylanego oleju)
 			// Olej jest paliwem - NIE synchronizuje swojego czasu trwania z płomieniem i sam nie rozprzestrzenia się na sąsiadów
