@@ -183,6 +183,9 @@ namespace SurfaceGridConstants
 	/** Margines przesunięcia punktu próbkowania wzdłuż normalnej komórki (zapobiega samoprzecięciom z geometrią) */
 	constexpr float NormalOffsetRatio = 0.45f;
 
+	/** Domyślny margines powłoki kontaktu komórki ze stykającymi się aktorami (w centymetrach) */
+	constexpr float DefaultContactMargin = 15.0f;
+
 	/** Tolerancja mnożnika komórki dla odległości kontaktu ruchomych mechanizmów z siatką podłoża */
 	constexpr float DynamicContactToleranceRatio = 1.5f;
 
@@ -201,6 +204,59 @@ namespace SurfaceGridUtils
 		const FVector VoxelCenter = Coord.ToWorldLocation(CellSize);
 		const FVector Normal = FaceDirectionToNormal(Coord.Face);
 		return VoxelCenter - Normal * (CellSize * 0.5f);
+	}
+
+	/**
+	 * Wyznacza fizyczny punkt bazowy powierzchni (na płaszczyźnie styku z architekturą).
+	 * Jeśli komórka posiada zarejestrowane SurfaceLocation (np. z fizycznego hitu / detonacji),
+	 * rzutuje pozycję na rzeczywistą płaszczyznę kolizji mesha (zapobiega chowaniu się komórek w geometrii).
+	 * W przeciwnym razie zwraca środek zewnętrznej ścianki woksela (fallback).
+	 */
+	FORCEINLINE FVector GetSurfaceBaseLocation(
+		const FSurfaceCellCoord& Coord,
+		const FVector& SurfaceLocation,
+		float CellSize)
+	{
+		const FVector Center = Coord.ToWorldLocation(CellSize);
+		const FVector Normal = FaceDirectionToNormal(Coord.Face);
+		if (!SurfaceLocation.IsNearlyZero())
+		{
+			const float SurfacePlaneDist = FVector::DotProduct(SurfaceLocation, Normal);
+			const float GridPlaneDist = FVector::DotProduct(Center, Normal);
+			return Center + Normal * (SurfacePlaneDist - GridPlaneDist);
+		}
+		return GetFaceCenter(Coord, CellSize);
+	}
+
+	/**
+	 * Wyznacza prostopadłościan kolizyjny powłoki powierzchniowej komórki (SurfaceBox).
+	 * Box jest oparty o fizyczną płaszczyznę geometrii i rozszerzony w przestrzeń przed powierzchnią (ContactMargin).
+	 */
+	FORCEINLINE FBox GetCellContactBox(
+		const FSurfaceCellCoord& Coord,
+		const FVector& SurfaceLocation,
+		float CellSize,
+		float ContactMargin = SurfaceGridConstants::DefaultContactMargin)
+	{
+		const FVector Normal = FaceDirectionToNormal(Coord.Face);
+		const FVector BasePos = GetSurfaceBaseLocation(Coord, SurfaceLocation, CellSize);
+
+		FVector CellHalfExtent(CellSize * 0.5f);
+		if (Coord.Face == ESurfaceFaceDirection::Up || Coord.Face == ESurfaceFaceDirection::Down)
+		{
+			CellHalfExtent.Z = ContactMargin;
+		}
+		else if (Coord.Face == ESurfaceFaceDirection::North || Coord.Face == ESurfaceFaceDirection::South)
+		{
+			CellHalfExtent.X = ContactMargin;
+		}
+		else
+		{
+			CellHalfExtent.Y = ContactMargin;
+		}
+
+		const FVector SurfaceCenter = BasePos + Normal * (ContactMargin * 0.5f);
+		return FBox(SurfaceCenter - CellHalfExtent, SurfaceCenter + CellHalfExtent);
 	}
 }
 

@@ -401,32 +401,14 @@ void FDynamicSurfaceGridManager::ProcessActorInteractions(
 		const FTransform RigidTransform = GetDynamicRigidTransform(TransformComp);
 		const FTransform InvRigidTransform = RigidTransform.Inverse();
 		const FBox LocalActorBox = ActorBox.TransformBy(InvRigidTransform);
-		constexpr float ContactMargin = 15.0f;
+		constexpr float ContactMargin = SurfaceGridConstants::DefaultContactMargin;
 
 		TArray<FSurfaceCellCoord> TouchedLocalCoords;
 		for (const auto& CellPair : Grid.LocalCells)
 		{
 			const FSurfaceCellCoord& LocalCoord = CellPair.Key;
-			const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(LocalCoord.Face);
-			const FVector Center = LocalCoord.ToWorldLocation(SafeCellSize);
-
-			// Wyznaczamy cienką powłokę powierzchniową komórki (15 cm w głąb lica), zachowując pełną symetrię ze StaticSurfaceGridManager
-			FVector CellHalfExtent(SafeCellSize * 0.5f);
-			if (LocalCoord.Face == ESurfaceFaceDirection::Up || LocalCoord.Face == ESurfaceFaceDirection::Down)
-			{
-				CellHalfExtent.Z = ContactMargin;
-			}
-			else if (LocalCoord.Face == ESurfaceFaceDirection::North || LocalCoord.Face == ESurfaceFaceDirection::South)
-			{
-				CellHalfExtent.X = ContactMargin;
-			}
-			else
-			{
-				CellHalfExtent.Y = ContactMargin;
-			}
-
-			const FVector SurfaceCenter = Center - Normal * (SafeCellSize * 0.5f - ContactMargin * 0.5f);
-			const FBox LocalSurfaceBox(SurfaceCenter - CellHalfExtent, SurfaceCenter + CellHalfExtent);
+			const FSurfaceCellData& CellData = CellPair.Value;
+			const FBox LocalSurfaceBox = SurfaceGridUtils::GetCellContactBox(LocalCoord, CellData.SurfaceLocation, SafeCellSize, ContactMargin);
 
 			if (LocalActorBox.Intersect(LocalSurfaceBox))
 			{
@@ -547,18 +529,7 @@ void FDynamicSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSi
 			// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
 			const FVector LocalHalfExtent = FVector(SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
-			FVector LocalBasePos;
-			if (!Data.SurfaceLocation.IsNearlyZero())
-			{
-				const float SurfacePlaneDist = FVector::DotProduct(Data.SurfaceLocation, LocalNormal);
-				const float GridPlaneDist = FVector::DotProduct(LocalCenter, LocalNormal);
-				LocalBasePos = LocalCenter + LocalNormal * (SurfacePlaneDist - GridPlaneDist);
-			}
-			else
-			{
-				LocalBasePos = SurfaceGridUtils::GetFaceCenter(LocalCoord, SafeCellSize);
-			}
-
+			const FVector LocalBasePos = SurfaceGridUtils::GetSurfaceBaseLocation(LocalCoord, Data.SurfaceLocation, SafeCellSize);
 			const FVector LocalVisualCenter = LocalBasePos + LocalNormal * (SafeCellSize * 0.5f);
 
 			const FVector WorldVisualCenter = RigidTransform.TransformPosition(LocalVisualCenter);

@@ -278,8 +278,9 @@ void SurfaceGridProjectionUtils::GetCellsTouchingActor(
 	}
 
 	const float SafeCellSize = FMath::Max(10.0f, CellSize);
-	constexpr float ContactMargin = 15.0f;
-	const FBox TouchBox = ActorBox.ExpandBy(ContactMargin);
+	constexpr float ContactMargin = SurfaceGridConstants::DefaultContactMargin;
+	const float BroadphaseExpand = FMath::Max(SafeCellSize * 0.5f, ContactMargin);
+	const FBox TouchBox = ActorBox.ExpandBy(BroadphaseExpand);
 
 	// Zakres wokseli obejmowanych przez bryłę aktora w przestrzeni siatki
 	const int32 MinX = FMath::FloorToInt(TouchBox.Min.X / SafeCellSize);
@@ -307,28 +308,9 @@ void SurfaceGridProjectionUtils::GetCellsTouchingActor(
 				for (ESurfaceFaceDirection Face : AllFaces)
 				{
 					const FSurfaceCellCoord Candidate(X, Y, Z, Face);
-					if (ActiveCells.Contains(Candidate))
+					if (const FSurfaceCellData* CellData = ActiveCells.Find(Candidate))
 					{
-						const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(Face);
-						const FVector Center = Candidate.ToWorldLocation(SafeCellSize);
-
-						// Wyznaczamy cienką powłokę powierzchniową komórki
-						FVector CellHalfExtent(SafeCellSize * 0.5f);
-						if (Face == ESurfaceFaceDirection::Up || Face == ESurfaceFaceDirection::Down)
-						{
-							CellHalfExtent.Z = ContactMargin;
-						}
-						else if (Face == ESurfaceFaceDirection::North || Face == ESurfaceFaceDirection::South)
-						{
-							CellHalfExtent.X = ContactMargin;
-						}
-						else
-						{
-							CellHalfExtent.Y = ContactMargin;
-						}
-
-						const FVector SurfaceCenter = Center - Normal * (SafeCellSize * 0.5f - ContactMargin * 0.5f);
-						const FBox SurfaceBox(SurfaceCenter - CellHalfExtent, SurfaceCenter + CellHalfExtent);
+						const FBox SurfaceBox = SurfaceGridUtils::GetCellContactBox(Candidate, CellData->SurfaceLocation, SafeCellSize, ContactMargin);
 
 						if (ActorBox.Intersect(SurfaceBox))
 						{

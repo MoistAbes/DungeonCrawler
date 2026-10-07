@@ -117,7 +117,8 @@ void SurfaceActorInteractionUtils::ApplyFloorEffectsToActor(
 			continue;
 		}
 
-		const FVector CellWorldPos = WorldTransform ? WorldTransform->TransformPosition(CellCoord.ToWorldLocation(SafeCellSize)) : CellCoord.ToWorldLocation(SafeCellSize);
+		const FVector CellBasePos = SurfaceGridUtils::GetSurfaceBaseLocation(CellCoord, CellData->SurfaceLocation, SafeCellSize);
+		const FVector CellWorldPos = WorldTransform ? WorldTransform->TransformPosition(CellBasePos) : CellBasePos;
 		const float CellDistSq = FVector::DistSquared(CellWorldPos, ActorLocation);
 
 		for (const FSurfaceCellStatusEntry& Entry : CellData->ActiveStatuses)

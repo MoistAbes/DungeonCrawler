@@ -426,19 +426,7 @@ void FStaticSurfaceGridManager::DrawDebug(const UWorld* World, float SafeCellSiz
 		// Pełny sześcian 3D reprezentujący całą objętość woksela (50x50x50 cm z lekkim marginesem na odstęp między komórkami)
 		const FVector HalfExtent = FVector(SafeCellSize * SurfaceGridConstants::NormalOffsetRatio);
 
-		FVector BasePos;
-		if (!Data.SurfaceLocation.IsNearlyZero())
-		{
-			// Płaszczyzna z fizycznej kolizji na architekturze lochu (zapobiega chowaniu się komórek w suficie/ścianie)
-			const float SurfacePlaneDist = FVector::DotProduct(Data.SurfaceLocation, Normal);
-			const float GridPlaneDist = FVector::DotProduct(Center, Normal);
-			BasePos = Center + Normal * (SurfacePlaneDist - GridPlaneDist);
-		}
-		else
-		{
-			// Fallback: środek zewnętrznej ściany woksela
-			BasePos = SurfaceGridUtils::GetFaceCenter(Coord, SafeCellSize);
-		}
+		const FVector BasePos = SurfaceGridUtils::GetSurfaceBaseLocation(Coord, Data.SurfaceLocation, SafeCellSize);
 
 		// Środek sześcianu 3D umieszczony w powietrzu przed powierzchnią architektury
 		const FVector VisualCenter = BasePos + Normal * (SafeCellSize * 0.5f);
