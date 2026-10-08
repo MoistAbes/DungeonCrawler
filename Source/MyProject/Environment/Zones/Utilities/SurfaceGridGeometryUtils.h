@@ -81,6 +81,9 @@ namespace SurfaceGridGeometryUtils
 	/** Wyznacza wektory styczne płaszczyzny dla zadanego kierunku ściany lub podłogi */
 	MYPROJECT_API void GetFaceTangents(ESurfaceFaceDirection Face, FVector& OutTangentU, FVector& OutTangentV);
 
+	/** Wyznacza ortonormalne wektory styczne płaszczyzny dla dowolnego wektora normalnego (obsługuje dowolne nachylenia ramp i ścian) */
+	MYPROJECT_API void GetSurfaceTangents(const FVector& SurfaceNormal, FVector& OutTangentU, FVector& OutTangentV);
+
 	/** Zwraca prekomputowane 18 kierunków skanowania wybuchu żywiołowego w 3D */
 	MYPROJECT_API const TArray<FVector>& GetBurstScanDirections();
 

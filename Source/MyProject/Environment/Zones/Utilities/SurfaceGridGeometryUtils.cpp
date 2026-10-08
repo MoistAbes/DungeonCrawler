@@ -220,7 +220,7 @@ namespace SurfaceGridGeometryUtils
 		const FCollisionQueryParams& Params)
 	{
 		EPhysicalMaterialType IgnoredMat;
-		return ProbeSurfaceAt(World, SamplePoint, SurfaceNormal, 30.0f, OutHit, IgnoredMat, Params);
+		return ProbeSurfaceAt(World, SamplePoint, SurfaceNormal, 40.0f, OutHit, IgnoredMat, Params);
 	}
 
 	bool HasSurfaceLineOfSight(
@@ -359,6 +359,26 @@ namespace SurfaceGridGeometryUtils
 			OutTangentV = FVector(0.0f, 0.0f, 1.0f);
 			break;
 		}
+	}
+
+	void GetSurfaceTangents(const FVector& SurfaceNormal, FVector& OutTangentU, FVector& OutTangentV)
+	{
+		const FVector NormalizedNormal = SurfaceNormal.GetSafeNormal();
+
+		// Jeśli powierzchnia jest niemal idealnie pozioma (płaska posadzka lub sufit)
+		if (FMath::Abs(NormalizedNormal.Z) > 0.99f)
+		{
+			OutTangentU = FVector(1.0f, 0.0f, 0.0f);
+			OutTangentV = (NormalizedNormal.Z >= 0.0f) ? FVector(0.0f, 1.0f, 0.0f) : FVector(0.0f, -1.0f, 0.0f);
+			return;
+		}
+
+		// Dla powierzchni skośnych (rampy, skosy) oraz pionowych ścian:
+		// Wektor U jest poziomy (w poprzek rampy / wzdłuż lica ściany)
+		OutTangentU = FVector::CrossProduct(NormalizedNormal, FVector::UpVector).GetSafeNormal();
+
+		// Wektor V idzie prostopadle do U i normalnej - czyli dokładnie wzdłuż wzniosu/stoku rampy lub pionowo po ścianie
+		OutTangentV = FVector::CrossProduct(NormalizedNormal, OutTangentU).GetSafeNormal();
 	}
 
 	const TArray<FVector>& GetBurstScanDirections()

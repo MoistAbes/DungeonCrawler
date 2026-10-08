@@ -89,12 +89,9 @@ int32 FDynamicSurfaceGridManager::ApplyStatusToDynamicSurface(
 	const FVector LocalHitLocation = RigidTransform.InverseTransformPosition(HitLocation);
 	const FVector LocalHitNormal = RigidTransform.InverseTransformVector(HitNormal).GetSafeNormal();
 
-	const ESurfaceFaceDirection LocalFaceDir = SurfaceGridUtils::NormalToFaceDirection(LocalHitNormal);
-	const FVector LocalNormal = SurfaceGridUtils::FaceDirectionToNormal(LocalFaceDir);
-
 	FVector LocalTangentU;
 	FVector LocalTangentV;
-	SurfaceGridGeometryUtils::GetFaceTangents(LocalFaceDir, LocalTangentU, LocalTangentV);
+	SurfaceGridGeometryUtils::GetSurfaceTangents(LocalHitNormal, LocalTangentU, LocalTangentV);
 
 	const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
 	const float RadiusSq = FMath::Square(Radius);
@@ -123,7 +120,7 @@ int32 FDynamicSurfaceGridManager::ApplyStatusToDynamicSurface(
 				continue;
 			}
 
-			const FSurfaceCellCoord LocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalSamplePoint, LocalNormal, SafeCellSize);
+			const FSurfaceCellCoord LocalCoord = FSurfaceCellCoord::FromWorldLocation(LocalSamplePoint, LocalHitNormal, SafeCellSize);
 
 			if (ApplyStatusToDynamicCell(DynamicActor, TransformComp, LocalCoord, Status, Duration, Instigator, HitMat, Tier, SafeCellSize, CurrentTime, OnCellChanged))
 			{

@@ -24,13 +24,10 @@ namespace
 			return;
 		}
 
-		const ESurfaceFaceDirection FaceDir = SurfaceGridUtils::NormalToFaceDirection(HitNormal);
-		const FVector Normal = SurfaceGridUtils::FaceDirectionToNormal(FaceDir);
-
-		// Wyznaczamy wektory styczne do płaszczyzny ściany/podłogi
+		// Wyznaczamy ortonormalne wektory styczne w płaszczyźnie powierzchni (obsługuje dowolne nachylenia ramp i ścian)
 		FVector TangentU;
 		FVector TangentV;
-		SurfaceGridGeometryUtils::GetFaceTangents(FaceDir, TangentU, TangentV);
+		SurfaceGridGeometryUtils::GetSurfaceTangents(HitNormal, TangentU, TangentV);
 
 		const float SafeCellSize = FMath::Max(10.0f, CellSize);
 		const int32 StepRadius = (Radius <= SafeCellSize * 0.5f) ? 0 : FMath::CeilToInt(Radius / SafeCellSize);
@@ -55,7 +52,7 @@ namespace
 				const FVector SamplePoint = HitLocation + Offset;
 
 				// Szybki pre-check współrzędnej w pamięci: pomijamy zduplikowane próbki bez odpalania raycastów
-				const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, Normal, SafeCellSize);
+				const FSurfaceCellCoord FastCoord = FSurfaceCellCoord::FromWorldLocation(SamplePoint, HitNormal, SafeCellSize);
 				if (InOutProcessedCoords.Contains(FastCoord))
 				{
 					continue;
@@ -63,18 +60,18 @@ namespace
 
 				// 1. Drop-Off Test: Sprawdzamy, czy pod próbką fizycznie istnieje architektura
 				FHitResult SurfaceHit;
-				if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, Normal, SurfaceHit, TraceParams))
+				if (!SurfaceGridGeometryUtils::CheckSurfacePresenceAt(World, SamplePoint, HitNormal, SurfaceHit, TraceParams))
 				{
 					continue;
 				}
 
 				// 2. Line of Sight (2D po powierzchni lub 3D z punktu wybuchu)
-				if (!LoSTest(SamplePoint, Offset, SurfaceHit, Normal, TraceParams))
+				if (!LoSTest(SamplePoint, Offset, SurfaceHit, HitNormal, TraceParams))
 				{
 					continue;
 				}
 
-				const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, Normal, SafeCellSize);
+				const FSurfaceCellCoord Coord = FSurfaceCellCoord::FromWorldLocation(SurfaceHit.ImpactPoint, SurfaceHit.ImpactNormal, SafeCellSize);
 
 				// Weryfikacja minimalnego pokrycia (Min Coverage Threshold):
 				// Odrzucamy komórki wiszące w większości poza obiektem (zasada większości min. 50%).
@@ -122,7 +119,7 @@ void SurfaceGridProjectionUtils::ProjectStatusToSurface(
 			{
 				return true;
 			}
-			return SurfaceGridGeometryUtils::HasSurfaceLineOfSight(World, HitLocation, SamplePoint, Normal, TraceParams);
+			return SurfaceGridGeometryUtils::HasSurfaceLineOfSight(World, HitLocation, SurfaceHit.ImpactPoint, Normal, TraceParams);
 		},
 		OnCellCandidate);
 }
