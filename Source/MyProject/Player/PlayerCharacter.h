@@ -18,6 +18,8 @@ class UDamageableComponent;
 class UKnockbackComponent;
 class UStatusEffectComponent;
 class UMovementModifierComponent;
+class UDeathComponent;
+enum class EDeathCause : uint8;
 struct FInputActionValue;
 
 UCLASS(Abstract)
@@ -72,6 +74,10 @@ public:
     /** Komponent modyfikujący parametry ruchu (tarcia, hamowania, prędkości) w zależności od podłoża i stanów */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
     TObjectPtr<UMovementModifierComponent> MovementModifierComponent;
+
+    /** Komponent zarządzający przejściem w stan śmierci, ragdollem i wygaszeniem kontroli */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
+    TObjectPtr<UDeathComponent> DeathComponent;
 
     /** Ramię kamery stabilizujące perspektywę trzecioosobową */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Custom|Components")
@@ -162,4 +168,7 @@ protected:
     void Zoom(const FInputActionValue& Value);
     void HandleInteract();
     void HandleThrow();
+
+    UFUNCTION()
+    void HandleOnDeath(AActor* DeadActor, EDeathCause Cause);
 };

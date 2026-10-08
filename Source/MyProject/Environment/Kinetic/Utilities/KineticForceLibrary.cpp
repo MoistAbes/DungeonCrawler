@@ -1,6 +1,8 @@
 #include "KineticForceLibrary.h"
 
+#include "Components/CapsuleComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
@@ -173,36 +175,48 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
         return;
     }
 
-    // 1. Zabezpieczenie przed wyścigami Chaosu (obustronny callback OnComponentHit)
-    UDamageableComponent* TargetDamageable = TargetActor->FindComponentByClass<UDamageableComponent>();
-    UDamageableComponent* InstigatorDamageable = InstigatorActor->FindComponentByClass<UDamageableComponent>();
-
-    if ((TargetDamageable && TargetDamageable->IsDestroyed()) || (InstigatorDamageable && InstigatorDamageable->IsDestroyed()))
+    // Zabezpieczenie przed aktorami usuwanymi ze świata
+    if (InstigatorActor->IsActorBeingDestroyed() || TargetActor->IsActorBeingDestroyed())
     {
         return;
     }
 
-    // 2. Określamy niszczyciela (Breaker - porusza się szybciej) i cel (Victim)
+    // Zabezpieczenie przed wyłączoną kolizją (np. obiekt rozbity w tej samej klatce)
+    if ((InstigatorComp && !InstigatorComp->IsQueryCollisionEnabled()) || 
+        (TargetComp && !TargetComp->IsQueryCollisionEnabled()))
+    {
+        return;
+    }
+
+    // 1. Określamy niszczyciela (Breaker - porusza się szybciej) i cel (Victim)
     AActor* BreakerActor = InstigatorActor;
     UPrimitiveComponent* BreakerComp = InstigatorComp;
-    UDamageableComponent* BreakerDamageable = InstigatorDamageable;
+    UDamageableComponent* BreakerDamageable = InstigatorActor->FindComponentByClass<UDamageableComponent>();
 
     AActor* VictimActor = TargetActor;
     UPrimitiveComponent* VictimComp = TargetComp;
-    UDamageableComponent* VictimDamageable = TargetDamageable;
+    UDamageableComponent* VictimDamageable = TargetActor->FindComponentByClass<UDamageableComponent>();
 
     const FVector VelA = KineticHelpers::GetEntityVelocity(InstigatorActor, InstigatorComp);
     const FVector VelB = KineticHelpers::GetEntityVelocity(TargetActor, TargetComp);
+
+    FVector BreakerVelocity = VelA;
+    FVector VictimVelocity = VelB;
 
     if (VelB.SizeSquared() > VelA.SizeSquared())
     {
         Swap(BreakerActor, VictimActor);
         Swap(BreakerComp, VictimComp);
         Swap(BreakerDamageable, VictimDamageable);
+        Swap(BreakerVelocity, VictimVelocity);
     }
 
-    const FVector BreakerVelocity = KineticHelpers::GetEntityVelocity(BreakerActor, BreakerComp);
-    const FVector VictimVelocity = KineticHelpers::GetEntityVelocity(VictimActor, VictimComp);
+    // 2. Zabezpieczenie przed wyścigami Chaosu:
+    // Jeśli cel (ofiara/przeszkoda) uległ już zniszczeniu w poprzednim callbacku, nie niszczymy go ponownie
+    if (VictimDamageable && VictimDamageable->IsDestroyed())
+    {
+        return;
+    }
 
     // Masy obu ciał
     const float BreakerMass = GetEntityMass(BreakerActor, BreakerComp);
@@ -258,11 +272,28 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
     }
 
     // 7. PUNCH-THROUGH:
-    // Jeśli cel uległ zniszczeniu, a uderzający obiekt przetrwał:
+    // Cel uległ zniszczeniu:
     const bool bVictimDestroyed = VictimDamageable && VictimDamageable->IsDestroyed();
-    const bool bBreakerAlive = !BreakerDamageable || !BreakerDamageable->IsDestroyed();
 
-    if (bVictimDestroyed && bBreakerAlive)
+    // Niszczyciel zachowuje ciągłość fizyczną:
+    // Postacie (ACharacter) zawsze zachowują bryłę kolizyjną (żywa postać lub ragdoll po śmierci).
+    // Inne obiekty (wazony, kruche skrzynie) muszą przetrwać zderzenie, by lecieć dalej.
+    const bool bBreakerPhysicalIntegrity = BreakerActor->IsA<ACharacter>() || (!BreakerDamageable || !BreakerDamageable->IsDestroyed());
+
+    bool bCanPunchThrough = true;
+    if (const AInteractivePropBase* VictimProp = Cast<AInteractivePropBase>(VictimActor))
+    {
+        bCanPunchThrough = VictimProp->CanBePunchedThrough();
+    }
+    if (const AInteractivePropBase* BreakerProp = Cast<AInteractivePropBase>(BreakerActor))
+    {
+        if (!BreakerProp->CanBePunchedThrough())
+        {
+            bCanPunchThrough = false;
+        }
+    }
+
+    if (bVictimDestroyed && bBreakerPhysicalIntegrity && bCanPunchThrough)
     {
         // Wyłączamy kolizję zniszczonego celu natychmiast
         if (VictimComp)
@@ -339,15 +370,44 @@ void UKineticForceLibrary::HandleKineticImpactAndPunchThrough(
             PunchVelocity = PenetrationDir * (BreakerSpeed * Retention);
         }
 
-        if (ACharacter* Character = Cast<ACharacter>(BreakerActor))
+        // Aplikacja zachowanego pędu po przebiciu przeszkody:
+        if (BreakerComp && BreakerComp->IsSimulatingPhysics())
         {
-            Character->LaunchCharacter(PunchVelocity, true, true);
-        }
-        else if (BreakerComp && BreakerComp->IsSimulatingPhysics())
-        {
+            // Ragdoll postaci (kapsuła / szkielet) lub fizyczny obiekt/głaz
             BreakerComp->SetPhysicsLinearVelocity(PunchVelocity);
             BreakerComp->SetPhysicsAngularVelocityInDegrees(BreakerComp->GetPhysicsAngularVelocityInDegrees() * KineticConfig::PunchAngularDamping);
             BreakerComp->WakeRigidBody();
+        }
+        else if (ACharacter* Character = Cast<ACharacter>(BreakerActor))
+        {
+            bool bAppliedPhysical = false;
+            if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+            {
+                if (Capsule->IsSimulatingPhysics())
+                {
+                    Capsule->SetPhysicsLinearVelocity(PunchVelocity);
+                    Capsule->WakeRigidBody();
+                    bAppliedPhysical = true;
+                }
+            }
+            if (!bAppliedPhysical)
+            {
+                if (USkeletalMeshComponent* Mesh = Character->GetMesh())
+                {
+                    if (Mesh->IsSimulatingPhysics())
+                    {
+                        Mesh->SetPhysicsLinearVelocity(PunchVelocity);
+                        Mesh->WakeRigidBody();
+                        bAppliedPhysical = true;
+                    }
+                }
+            }
+
+            // Żywa postać sterowana ruchem kinetycznym (CMC)
+            if (!bAppliedPhysical)
+            {
+                Character->LaunchCharacter(PunchVelocity, true, true);
+            }
         }
 
         UE_LOG(LogDungeonPhysics, Warning, TEXT("[KineticLibrary]%s [PunchThrough] %s shattered %s! | PreImpactVel: %s (Speed: %.1f) | Retention: %.1f%% | PunchVel: %s (Speed: %.1f)"),
@@ -576,15 +636,13 @@ void UKineticForceLibrary::ApplyExplosion(
             // Pomijamy odrzut fizyczny dla statycznych struktur architektury
             if (!Overlap.GetComponent() || Overlap.GetComponent()->GetCollisionObjectType() != ECC_WorldStatic)
             {
-                FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
-                if (KnockbackDir.IsNearlyZero())
+                FVector KnockbackDir = (HitActor->GetActorLocation() - Origin);
+                FVector HorizontalDir = FVector(KnockbackDir.X, KnockbackDir.Y, 0.0f);
+                if (HorizontalDir.IsNearlyZero(15.0f))
                 {
-                    KnockbackDir = FVector::UpVector;
+                    HorizontalDir = -HitActor->GetActorForwardVector();
                 }
-
-                // Dodajemy lekkie podbicie w górę (Upward Bias), by eksplozje ładnie podrywały cele z ziemi
-                KnockbackDir.Z = FMath::Clamp(KnockbackDir.Z + 0.35f, 0.1f, 1.0f);
-                KnockbackDir.Normalize();
+                KnockbackDir = (HorizontalDir.GetSafeNormal() + FVector(0.0f, 0.0f, 0.35f)).GetSafeNormal();
 
                 const float ScaledForce = BaseKnockbackForce * FalloffFactor;
                 KineticHelpers::ApplyKineticImpulse(HitActor, KnockbackDir, ScaledForce, InstigatorActor);

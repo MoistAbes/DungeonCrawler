@@ -1,8 +1,10 @@
-﻿#include "KnockbackComponent.h"
+#include "KnockbackComponent.h"
 
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 UKnockbackComponent::UKnockbackComponent()
 {
@@ -92,7 +94,37 @@ void UKnockbackComponent::ExecuteLaunch(
 
     if (ACharacter* Character = Cast<ACharacter>(Owner))
     {
-        Character->LaunchCharacter(ClampedVelocity, bOverrideXY, bOverrideZ);
+        bool bPhysicalLaunchApplied = false;
+
+        // Jeśli kapsuła symuluje fizykę (np. przewracający się cylinder w stanie ragdolla)
+        if (UCapsuleComponent* Capsule = Character->GetCapsuleComponent())
+        {
+            if (Capsule->IsSimulatingPhysics())
+            {
+                Capsule->AddImpulse(ClampedVelocity, NAME_None, true);
+                bPhysicalLaunchApplied = true;
+            }
+        }
+
+        // Jeśli szkielet symuluje fizykę (np. szkieletowy ragdoll)
+        if (!bPhysicalLaunchApplied)
+        {
+            if (USkeletalMeshComponent* Mesh = Character->GetMesh())
+            {
+                if (Mesh->IsSimulatingPhysics())
+                {
+                    Mesh->AddImpulse(ClampedVelocity, NAME_None, true);
+                    bPhysicalLaunchApplied = true;
+                }
+            }
+        }
+
+        // Jeśli postać jest żywa i sterowana kinetycznie (CMC)
+        if (!bPhysicalLaunchApplied)
+        {
+            Character->LaunchCharacter(ClampedVelocity, bOverrideXY, bOverrideZ);
+        }
+
         OnKnockbackReceived.Broadcast(ClampedVelocity, InstigatorActor);
     }
     else if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(Owner->GetRootComponent()))

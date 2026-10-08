@@ -18,6 +18,7 @@
 #include "MyProject/Shared/Components/PhysicsCarryComponent/PhysicsCarryComponent.h"
 #include "MyProject/Shared/Components/StatusEffectComponent/StatusEffectComponent.h"
 #include "MyProject/Shared/Components/MovementModifierComponent/MovementModifierComponent.h"
+#include "MyProject/Shared/Components/DeathComponent/DeathComponent.h"
 #include "MyProject/Player/Components/PlayerCameraComponent.h"
 #include "MyProject/Shared/Interfaces/GrabbableInterface.h"
 #include "MyProject/Shared/Interfaces/InteractableInterface.h"
@@ -159,6 +160,10 @@ APlayerCharacter::APlayerCharacter()
         CreateDefaultSubobject<UMovementModifierComponent>(
             TEXT("MovementModifierComponent"));
 
+    DeathComponent =
+        CreateDefaultSubobject<UDeathComponent>(
+            TEXT("DeathComponent"));
+
 
     // -------------------------------------------------------------------------
     // Tick
@@ -200,6 +205,11 @@ void APlayerCharacter::BeginPlay()
                     0);
             }
         }
+    }
+
+    if (DeathComponent)
+    {
+        DeathComponent->OnDeath.AddDynamic(this, &APlayerCharacter::HandleOnDeath);
     }
 }
 
@@ -341,13 +351,13 @@ void APlayerCharacter::MoveBlockedBy(
 void APlayerCharacter::Move(
     const FInputActionValue& Value)
 {
-    const FVector2D MovementVector =
-        Value.Get<FVector2D>();
-
     if (Controller == nullptr)
     {
         return;
     }
+
+    const FVector2D MovementVector =
+        Value.Get<FVector2D>();
 
     // W locie (skok, upadek, odrzut kinetyczny) postać jest w pełni bezwładna
     if (const UCharacterMovementComponent* MoveComp = GetCharacterMovement())
@@ -458,5 +468,34 @@ void APlayerCharacter::HandleThrow()
     if (PhysicsCarryComponent)
     {
         PhysicsCarryComponent->ThrowCurrentProp();
+    }
+}
+
+
+void APlayerCharacter::HandleOnDeath(AActor* DeadActor, EDeathCause Cause)
+{
+    // Przy śmierci czyścimy wiązania akcji ciała (Move, Jump, Interact, Throw)
+    // i zostawiamy WYŁĄCZNIE obrót kamery (Look) oraz zoom (Zoom).
+    if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+    {
+        EnhancedInputComponent->ClearActionBindings();
+
+        if (LookAction)
+        {
+            EnhancedInputComponent->BindAction(
+                LookAction,
+                ETriggerEvent::Triggered,
+                this,
+                &APlayerCharacter::Look);
+        }
+
+        if (ZoomAction)
+        {
+            EnhancedInputComponent->BindAction(
+                ZoomAction,
+                ETriggerEvent::Triggered,
+                this,
+                &APlayerCharacter::Zoom);
+        }
     }
 }
