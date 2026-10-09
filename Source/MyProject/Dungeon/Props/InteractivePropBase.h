@@ -59,6 +59,9 @@ public:
     virtual float GetMass() const override;
     virtual bool IsGrabbed() const override { return CarryingActor != nullptr; }
 
+    /** Czy obiekt może zostać przebity z zachowaniem pędu przez niszczyciela (Punch-Through) */
+    virtual bool CanBePunchedThrough() const { return true; }
+
     virtual void Tick(float DeltaTime) override;
 
 protected:

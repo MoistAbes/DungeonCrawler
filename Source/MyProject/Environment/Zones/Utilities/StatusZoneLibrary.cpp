@@ -199,11 +199,14 @@ void UStatusZoneLibrary::ApplyRadialBurst(
 		{
 			if (!Overlap.GetComponent() || Overlap.GetComponent()->GetCollisionObjectType() != ECC_WorldStatic)
 			{
-				FVector KnockbackDir = (HitActor->GetActorLocation() - Origin).GetSafeNormal();
-				if (KnockbackDir.IsNearlyZero())
+				FVector KnockbackDir = (HitActor->GetActorLocation() - Origin);
+				FVector HorizontalDir = FVector(KnockbackDir.X, KnockbackDir.Y, 0.0f);
+				if (HorizontalDir.IsNearlyZero(15.0f))
 				{
-					KnockbackDir = FVector::UpVector;
+					HorizontalDir = -HitActor->GetActorForwardVector();
 				}
+				KnockbackDir = (HorizontalDir.GetSafeNormal() + FVector(0.0f, 0.0f, 0.35f)).GetSafeNormal();
+
 				const float ScaledForce = EffectConfig.KnockbackForce * FalloffFactor;
 				UKineticForceLibrary::ApplyDirectionalKnockback(HitActor, KnockbackDir, ScaledForce, 0.35f, InstigatorActor);
 			}

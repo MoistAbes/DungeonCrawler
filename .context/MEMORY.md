@@ -74,13 +74,15 @@ The following systems already exist and should be reused or extended when applic
 
 \* `UDamageableComponent` — shared damage/durability behavior.
 
-\* `UKnockbackComponent` — reusable pawn/character knockback handling with mass/resistance scaling and stun tracking.
+\* `UDeathComponent` — server-authoritative death life-cycle, ragdoll physics activation (prototype capsule / skeletal mesh), carried prop release, and movement disengagement with Zero-Bandwidth networking.
+
+\* `UKnockbackComponent` — reusable pawn/character knockback handling with mass/resistance scaling, stun tracking, and dual-mode execution (CMC `LaunchCharacter` for kinematic alive pawns vs direct `AddImpulse` on simulating physics capsules/skeletons for ragdoll corpses).
 
 \* `UStatusEffectComponent` — status-effect state with Zero-Bandwidth networking, dynamic carrier/fuel duration syncing, and modular helpers (`ComputeAdjustedDuration`, `DisplaceOtherLiquids`, `UpsertStatus`).
 
 \* `AStatusZoneBase` and `AVolumetricStatusZone` — 3D volumetric fields (clouds, energy spheres) acting as immutable continuous source emitters, projecting status onto overlapping actors and underlying surface cells throughout their lifetime.
 
-\* `UKineticForceLibrary` — shared kinetic/physics force operations and centralized kinetic impact/punch-through (`HandleKineticImpactAndPunchThrough` with breaker/victim resolution and flat horizontal penetration).
+\* `UKineticForceLibrary` — shared kinetic/physics force operations and centralized kinetic impact/punch-through (`HandleKineticImpactAndPunchThrough` with breaker/victim resolution, physical integrity retention allowing ragdoll corpses to shatter glass walls, and polymorphic `CanBePunchedThrough()` suppression on explosive `AVolatileProp` actors).
 
 \* `UStatusZoneLibrary` — status-zone/effect delivery operations (radial burst, point impact, volumetric spawn).
 
@@ -107,6 +109,8 @@ The following systems already exist and should be reused or extended when applic
 * **Volatile Props & Item Tier Architecture** — Planned data-driven architecture separating Item Tier (explosion radius, instant damage, knockback, inventory tooltips) from Status Tier (chemical duration, DoT, tick intervals). Full specification in [`.context/specs/VOLATILE_PROP_TIER_SYSTEM.md`](file:///E:/UE_PROJECTS/MyProject/.context/specs/VOLATILE_PROP_TIER_SYSTEM.md).
 
 * **Environmental & Dungeon Interaction Loop** — Planned vertical slice architecture covering open-ended movement modifiers (friction/speed/sensory), mechanism receivers (dungeon gates/doors responding to pressure plates/switches), dual-interaction loot chests (peaceful open vs brute-force smash), and optional ice/chilled balance design. Full specification in [`.context/specs/ENVIRONMENTAL_INTERACTION_LOOP.md`](file:///e:/UE_PROJECTS/MyProject/.context/specs/ENVIRONMENTAL_INTERACTION_LOOP.md).
+
+* **Item, Container & Inventory Architecture** — Core Immersive Sim architecture separating Heavy World Props (held via `PhysicsCarryComponent`) from Inventory Items (Flyweight pattern via `UItemDefinition` Data Assets and `FInventorySlot`). Covers physical pickups (`APickupItemProp`), dual-interaction chests (`ADungeonChestProp`), and server-authoritative inventory replication (`FFastArraySerializer`). Full specification in [`.context/specs/ITEM_AND_INVENTORY_SYSTEM.md`](file:///e:/UE_PROJECTS/MyProject/.context/specs/ITEM_AND_INVENTORY_SYSTEM.md).
 
 Detailed contracts and implementation belong in `ARCHITECTURE.md` and feature specifications.
 

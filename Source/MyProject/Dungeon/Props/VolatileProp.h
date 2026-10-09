@@ -43,6 +43,9 @@ public:
     virtual void OnGrabbed(AActor* Grabber) override;
     virtual void OnDropped(AActor* Dropper, const FVector& LaunchVelocity = FVector::ZeroVector) override;
 
+    /** Rekwizyty wybuchowe nigdy nie pozwalają na Punch-Through – ich zniszczenie to eksplozja, nie przebicie przeszkody */
+    virtual bool CanBePunchedThrough() const override { return false; }
+
 protected:
     virtual void HandleOnDestroyed(AActor* DestroyedActor) override;
 

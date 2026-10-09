@@ -1,9 +1,18 @@
 # Specyfikacja i Plan Rozwoju: Środowiskowa Pętla Rozgrywki (Environmental & Dungeon Interaction Loop)
 
-**Wersja:** 1.0  
-**Status:** Zaakceptowany do realizacji  
-**Data:** 2026-09-29  
+**Wersja:** 1.1  
+**Status:** Częściowo Wdrożony / Zintegrowany (Kroki 1, 2, 4 ukończone; Krok 3 przeniesiony do nowej specyfikacji Itemów i Ekwipunku)  
+**Data ostatniej aktualizacji:** 2026-10-08  
 **Cel:** Połączenie istniejących systemów (mechanizmy, fizyka Chaos, siatka żywiołów, interfejsy) w grywalną pętlę lochu (Vertical Slice).
+
+---
+
+## Postęp Realizacji (Stan na Październik 2026):
+* [x] **Krok 1 (Modyfikatory Ruchu i Tarcie):** Zaimplementowano [`UMovementModifierComponent`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/MovementModifierComponent/MovementModifierComponent.h) z obsługą poślizgów, dynamicznych mnożników prędkości i tarcia.
+* [x] **Krok 2 (Odbiorniki Mechanizmów i Przejścia):** Zaimplementowano [`ADungeonGateProp`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Props/DungeonGateProp.h), [`APressurePlateProp`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Mechanisms/Switches/PressurePlateProp.h), [`ASimpleSwitchProp`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Mechanisms/Switches/SimpleSwitchProp.h) oraz [`APistonTrap`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Mechanisms/Traps/PistonTrap.h).
+* [x] **Krok 4 (System Śmierci i Ragdoll):** Zaimplementowano [`UDeathComponent`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Shared/Components/DeathComponent/DeathComponent.h), odłączanie akcji ciała w Enhanced Input przy zachowaniu obrotu kamery, upuszczanie propów, symulację ragdolla (kapsuła / szkielet) oraz fizyczny odrzut martwych ciał w `UKnockbackComponent` i `UKineticForceLibrary`.
+* [ ] **Krok 3 (Interaktywna Skrzynia i Spawnowanie Lootu):** Przeniesione jako fundament do dedykowanej specyfikacji **Systemu Itemów, Kontenerów i Ekwipunku**.
+* [ ] **Krok 5 (Lód i Chilled):** Zapisane w backlogu mechanik żywiołowych.
 
 ---
 

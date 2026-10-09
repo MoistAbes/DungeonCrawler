@@ -2,6 +2,7 @@
 
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
 
 #include "MyProject/Networking/NetworkFunctionLibrary.h"
@@ -82,6 +83,9 @@ void AVolatileProp::HandleComponentHit(UPrimitiveComponent* HitComponent, AActor
     const float ImpulseSpeed = NormalImpulse.Size() / FMath::Max(1.0f, GetMass());
     const float EffectiveImpactSpeed = FMath::Max(KineticImpactSpeed, ImpulseSpeed);
 
+    // Zapamiętujemy hit dla celów obliczeń epicentrum wybuchu w HandleOnDestroyed
+    LastImpactHit = Hit;
+
     // 2. Obsługa pierwszego lądowania po upuszczeniu klawiszem E (bezpieczny spadek pod nogi)
     if (bDroppedSafely)
     {
@@ -101,14 +105,15 @@ void AVolatileProp::HandleComponentHit(UPrimitiveComponent* HitComponent, AActor
     // 4. Warunki natychmiastowej detonacji:
     // a) Celowy rzut gracza (klawisz R) przy uderzeniu w ścianę/podłogę/przeszkodę/postać
     // b) Zderzenie kinetyczne (rzucony kamień, inna detonująca/uderzająca bomba, upadek z dużej wysokości)
+    // c) Fizyczny kontakt postaci z uzbrojoną bombą (np. wejście w bombę, kopnięcie przy prędkości >= 80 cm/s)
     const bool bDetonateFromThrow = bIsThrownImpact && bDetonateOnThrownImpact && (EffectiveImpactSpeed >= 150.0f);
-    const bool bDetonateFromKineticHit = (EffectiveImpactSpeed >= MinImpactSpeedToDetonate);
+    const bool bDetonateFromCharacter = OtherActor && OtherActor->IsA<ACharacter>() && (EffectiveImpactSpeed >= 80.0f);
+    const bool bDetonateFromKineticHit = (EffectiveImpactSpeed >= MinImpactSpeedToDetonate) || bDetonateFromCharacter;
 
     if (bDetonateFromThrow || bDetonateFromKineticHit)
     {
-        LastImpactHit = Hit;
-        UE_LOG(LogDungeonElements, Log, TEXT("[VolatileProp]%s Detonation triggered by impact with %s! (Speed: %.1f cm/s | Thrown: %d, KineticHit: %d)"),
-            *NetUtils::GetNetRolePrefix(this), *GetNameSafe(OtherActor), EffectiveImpactSpeed, bDetonateFromThrow, bDetonateFromKineticHit);
+        UE_LOG(LogDungeonElements, Log, TEXT("[VolatileProp]%s Detonation triggered by impact with %s! (Speed: %.1f cm/s | Thrown: %d, KineticHit: %d, CharacterContact: %d)"),
+            *NetUtils::GetNetRolePrefix(this), *GetNameSafe(OtherActor), EffectiveImpactSpeed, bDetonateFromThrow, (EffectiveImpactSpeed >= MinImpactSpeedToDetonate), bDetonateFromCharacter);
 
         if (DamageableComponent)
         {
@@ -140,14 +145,18 @@ void AVolatileProp::HandleOnDestroyed(AActor* DestroyedActor)
     FVector DetonationCenter = GetActorLocation();
     if (LastImpactHit.bBlockingHit)
     {
-        FVector PushDir = LastImpactHit.ImpactNormal;
-        // Odsuwamy punkt wybuchu o 15 cm od uderzonej powierzchni w stronę wolnej przestrzeni lochu.
-        // Jeśli ImpactNormal z fizyki Chaos przypadkowo skierowany jest w tę samą stronę co ruch bomby (odwrócona normalna mesha), odwracamy go.
-        if (MeshComponent && FVector::DotProduct(PushDir, MeshComponent->GetComponentVelocity()) > 0.0f)
+        AActor* HitActor = LastImpactHit.GetActor();
+        // Jeśli uderzono w architekturę lub podłogę, odsuwamy punkt wybuchu o 15 cm od ściany.
+        // Jeśli uderzono w postać (lub gracz wszedł w bombę), epicentrum to fizyczne położenie bomby (nie wpychamy środka wybuchu do cylindra gracza).
+        if (!HitActor || !HitActor->IsA<ACharacter>())
         {
-            PushDir = -PushDir;
+            FVector PushDir = LastImpactHit.ImpactNormal;
+            if (MeshComponent && FVector::DotProduct(PushDir, MeshComponent->GetComponentVelocity()) > 0.0f)
+            {
+                PushDir = -PushDir;
+            }
+            DetonationCenter = LastImpactHit.ImpactPoint + PushDir.GetSafeNormal() * 15.0f;
         }
-        DetonationCenter = LastImpactHit.ImpactPoint + PushDir.GetSafeNormal() * 15.0f;
     }
 
     // 1. Rozsyłamy powiadomienie kosmetyczne (FX, dźwięk, debug) do wszystkich graczy

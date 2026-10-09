@@ -386,6 +386,10 @@ Important components include:
 
 \* `UStatusEffectComponent`
 
+\* `UDeathComponent`
+
+\* `UMovementModifierComponent`
+
 
 
 Important interfaces include:
@@ -512,6 +516,10 @@ Important player-related components include:
 
 \* `StatusEffectComponent`
 
+\* `MovementModifierComponent`
+
+\* `DeathComponent`
+
 \* `PlayerCameraComponent`
 
 \* `HoldAnchorComponent`
@@ -541,6 +549,10 @@ PlayerCharacter
 ├── Knockback
 
 ├── Status Effects
+
+├── Movement Modifiers
+
+├── Death / Ragdoll
 
 ├── Camera
 
@@ -729,6 +741,42 @@ Key architectural responsibilities include:
 * **Orphan Cleanup:** `CleanOrphanedStatuses` evicts any parasitic status that can no longer legally exist on the actor's material when its carrier expires or is removed, guarded with `TGuardValue` against recursion.
 
 Environmental systems such as Status Zones and the Dungeon Surface Subsystem interact with this capability without requiring knowledge of every concrete target actor.
+
+---
+
+## 4.5 Knockback Component
+
+`UKnockbackComponent` provides reusable impulse-based and directional knockback execution for pawns and physics bodies.
+
+Key architectural responsibilities include:
+* **Cooldown Debounce:** Enforces a configurable debounce (`KnockbackCooldown`) preventing duplicate launches across neighboring simulation sub-steps or multi-hit bursts.
+* **Mass & Force Clamping:** Evaluates mass resistance scaling and enforces `MaxAllowedVelocity` clamping to avoid erratic physics tunnel escapes.
+* **Dual-Mode Physical Execution:** 
+  - For alive kinematic characters, executes through Character Movement Component (`LaunchCharacter(ClampedVelocity, bOverrideXY, bOverrideZ)`).
+  - For characters in ragdoll / physics simulation (prototype physics capsule or skeletal mesh), applies direct impulse (`AddImpulse(ClampedVelocity, NAME_None, true)`), overcoming Unreal Engine's native CMC limitation where `LaunchCharacter` is silently discarded when locomotion is in `MOVE_None`.
+* **Event Broadcasting:** Dispatches `OnKnockbackReceived` for animation cues, camera shakes, or telemetry.
+
+---
+
+## 4.6 Death Component
+
+`UDeathComponent` provides an authority-driven life-cycle manager for mortal actors transitioning into a defeated ragdoll state.
+
+Key architectural responsibilities include:
+* **Decoupled Damage Listening:** Listens to `UDamageableComponent::OnDestroyed` (`CurrentDurability <= 0.0f`) without polling or inline health checks in movement methods.
+* **Server-Authoritative Execution:** Enforces authoritative state changes (`REQUIRE_AUTHORITY()`) and replicates `bIsDead` and `EDeathCause` via lightweight `OnRep_IsDead` (Zero-Bandwidth in steady state).
+* **Locomotion Disengagement:** Halts and disables the character movement component (`StopMovementImmediately`, `DisableMovement`, and `SetComponentTickEnabled(false)`).
+* **Prop Release:** Immediately drops or releases carried props (`UPhysicsCarryComponent::DropOrSwing`).
+* **Physical Ragdoll Transition:**
+  - *Variant A (Humanoid / Skeletal Mesh):* Disables capsule collision and wakes rigid bodies on `USkeletalMeshComponent` with dedicated `Ragdoll` collision profile.
+  - *Variant B (Prototype Physics Capsule):* Converts the kinematic capsule into a 100% Chaos-simulated dynamic rigid body (`PhysicsActor` collision profile, all 3D rotation axes unlocked, angular tilt impulse applied).
+* **Event-Driven Input Handling:** Dispatches `OnDeath` multicast delegate. `APlayerCharacter` responds by clearing body action bindings in `EnhancedInputComponent` (`ClearActionBindings()`) while rebinding and keeping camera rotation (`Look`) and zoom (`Zoom`) 100% active.
+
+---
+
+## 4.7 Movement Modifier Component
+
+`UMovementModifierComponent` handles dynamic modifiers on pawn locomotion (surface friction modifications, slippery surfaces, speed boosts, and slowdowns) decoupled from raw controller input.
 
 
 
@@ -1562,6 +1610,12 @@ Both structures and props delegate impact resolution, reciprocal damage, and des
 * **Kinetic Configuration (`KineticConfig`)**:
   * Centralized namespace in [`KineticForceLibrary.h`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Environment/Kinetic/Utilities/KineticForceLibrary.h) governing reference mass (`50.0f`), mass scaling limits (`[0.5f, 3.5f]`), resistance cost multiplier (`200.0f`), retention limits (`[0.15f, 0.98f]`), angular damping (`0.3f`), sweep distances (`20.0f` to `80.0f`), and flight/sleep thresholds (`80.0f` / `30.0f` cm/s).
 * **Full Physical Inertia**: Player air control is completely disabled (`AirControl = 0.0f` and early exit in movement input during falls) to ensure full physical inertia during jumps, falls, and kinetic launches.
+* **Polymorphic Punch-Through Capability (`CanBePunchedThrough`)**:
+  * Props deriving from `AInteractivePropBase` allow punch-through by default (`true`), supporting barrel, crate, and furniture shattering.
+  * Explosive props ([`AVolatileProp`](file:///e:/UE_PROJECTS/MyProject/Source/MyProject/Dungeon/Props/VolatileProp.h)) override `CanBePunchedThrough() const override { return false; }`. When an explosive prop is shattered or killed by kinetic impact, the blast wave and knockback have absolute priority; breaker momentum forward is never applied, protecting the radial knockback from being overwritten.
+* **Ragdoll Physical Integrity in Kinetic Impacts & Barrier Shattering**:
+  * Biological death (`UDamageableComponent::IsDestroyed() == true`) does not invalidate kinetic momentum. A dead ragdoll (e.g. 80 kg corpse launched by an explosion) maintains physical integrity (`bBreakerPhysicalIntegrity`), delivers kinetic impact damage to obstacles, shatters brittle structures (e.g. glass walls), and continues flight through the breach via `SetPhysicsLinearVelocity(PunchVelocity)` with Chaos rigid body awakening.
+  * Chaos race condition guards in `UKineticForceLibrary::HandleKineticImpactAndPunchThrough` evaluate whether the **obstacle/victim** (`VictimDamageable->IsDestroyed()`) was already destroyed in an earlier callback, rather than prematurely aborting when the breaker is a dead ragdoll.
 * **Structured Diagnostics**: Rich logging on `LogDungeonPhysics` traces `[PreImpactSweep]` (pre-impact velocity, retention percentage, exit velocity) and `[KineticImpact]` (mass, speeds, impact normal, scaled damage).
 
 ---
